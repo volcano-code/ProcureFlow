@@ -6,6 +6,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -27,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def create_app(settings: Settings | None = None, database: Database | None = None, erp=None) -> FastAPI:
     settings = settings or Settings()
-    db = database or Database(settings.database_url, create_schema=settings.mode == "demo")
+    db = database or Database(settings.database_url,
+        create_schema=settings.mode == "demo" and settings.database_url.startswith("sqlite"))
     if erp is None:
         erp = MockERP(settings.data_dir / "mock-erp.sqlite3") if settings.erp_mode == "mock" else ERPNextClient(
             settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes)
@@ -84,6 +86,15 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return {"status": "ok", "version": __version__, "mode": settings.mode, "erp": erp.mode,
                 "analysis_default": "deterministic-baseline", "llm_live_verified": False,
                 "database": "sqlite" if db.sqlite else "postgresql", "public_production_ready": False}
+
+    @app.get("/ready")
+    def readiness():
+        try:
+            return db.check_ready(require_migrations=not (db.sqlite and settings.mode == "demo"))
+        except (SQLAlchemyError, RuntimeError):
+            # No raw DSN, SQL, credentials or exception details in unauthenticated output.
+            return JSONResponse(status_code=503, content={"status": "not_ready",
+                "error": "DATABASE_NOT_READY"})
 
     @app.get("/api/v1/capabilities")
     def capabilities(principal=Depends(identity)):

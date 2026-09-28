@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
+from .database_config import normalize_database_url
 
 DEMO_IDENTITIES = {
     "demo-buyer": {"user_id": "buyer-01", "tenant_id": "demo", "role": "buyer"},
@@ -17,17 +18,17 @@ DEMO_IDENTITIES = {
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("PF_DATA_DIR", ".data")).resolve())
-    database_url: str = field(default_factory=lambda: os.getenv("PF_DATABASE_URL", ""))
+    database_url: str = field(default_factory=lambda: os.getenv("PF_DATABASE_URL", ""), repr=False)
     mode: str = field(default_factory=lambda: os.getenv("PF_MODE", "demo"))
-    auth_tokens: dict = field(default_factory=dict)
+    auth_tokens: dict = field(default_factory=dict, repr=False)
     web_origins: tuple[str, ...] = field(default_factory=lambda: tuple(
         value.strip() for value in os.getenv("PF_WEB_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if value.strip()))
     approval_ttl_seconds: int = 3600
     max_upload_bytes: int = 2 * 1024 * 1024
     erp_mode: str = field(default_factory=lambda: os.getenv("PF_ERP_MODE", "mock"))
     erp_url: str = field(default_factory=lambda: os.getenv("ERP_BASE_URL", ""))
-    erp_api_key: str = field(default_factory=lambda: os.getenv("ERP_API_KEY", ""))
-    erp_api_secret: str = field(default_factory=lambda: os.getenv("ERP_API_SECRET", ""))
+    erp_api_key: str = field(default_factory=lambda: os.getenv("ERP_API_KEY", ""), repr=False)
+    erp_api_secret: str = field(default_factory=lambda: os.getenv("ERP_API_SECRET", ""), repr=False)
     erp_company: str = field(default_factory=lambda: os.getenv("ERP_COMPANY", ""))
     erp_allow_draft_writes: bool = field(default_factory=lambda: os.getenv("ERP_ALLOW_DRAFT_WRITES", "false").lower() == "true")
 
@@ -59,5 +60,5 @@ class Settings:
                 raise ValueError("PF_WEB_ORIGINS must be explicit HTTP(S) origins without credentials or paths")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         object.__setattr__(self, "auth_tokens", tokens)
-        if not self.database_url:
-            object.__setattr__(self, "database_url", f"sqlite:///{self.data_dir / 'procureflow.sqlite3'}")
+        url = self.database_url or f"sqlite:///{self.data_dir / 'procureflow.sqlite3'}"
+        object.__setattr__(self, "database_url", normalize_database_url(url))

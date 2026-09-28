@@ -3,6 +3,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
+from pathlib import Path
+from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
+from .database_config import normalize_database_url
 from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -117,8 +121,12 @@ class EventRow(Base):
 
 class Database:
     def __init__(self, url: str, create_schema: bool = False):
-        self.sqlite = url.startswith("sqlite")
-        self.engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 20} if self.sqlite else {}, pool_pre_ping=True)
+        url = normalize_database_url(url)
+        self.sqlite = make_url(url).get_backend_name() == "sqlite"
+        options = {"check_same_thread": False, "timeout": 20} if self.sqlite else {"connect_timeout": 10}
+        engine_options = {} if self.sqlite else {"isolation_level": "READ COMMITTED"}
+        self.engine = create_engine(url, connect_args=options, pool_pre_ping=True,
+                                    hide_parameters=True, **engine_options)
         if self.sqlite:
             @event.listens_for(self.engine, "connect")
             def sqlite_settings(connection, _):
@@ -127,7 +135,25 @@ class Database:
                 connection.execute("PRAGMA busy_timeout=20000")
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
         if create_schema:
+            if not self.sqlite:
+                raise ValueError("POSTGRES_REQUIRES_ALEMBIC_MIGRATIONS")
             Base.metadata.create_all(self.engine)
+
+    def check_ready(self, require_migrations: bool = True) -> dict:
+        """Read-only connection + table + migration check; never performs DDL."""
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        with self.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            if not set(Base.metadata.tables) <= set(inspect(connection).get_table_names()):
+                raise RuntimeError("DATABASE_SCHEMA_MISSING")
+            if require_migrations:
+                current = set(MigrationContext.configure(connection).get_current_heads())
+                scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                if current != set(scripts.get_heads()):
+                    raise RuntimeError("DATABASE_MIGRATION_REQUIRED")
+        return {"status": "ok", "database": "sqlite" if self.sqlite else "postgresql",
+                "schema": "current" if require_migrations else "local-demo"}
 
     @contextmanager
     def transaction(self, write=False):
@@ -136,6 +162,10 @@ class Database:
                 if write and self.sqlite:
                     # Serializes local demo writes, including concurrent approvals/dispatch.
                     session.execute(text("BEGIN IMMEDIATE"))
+                if not self.sqlite:
+                    # Bound SQL waiting; do not retry business writes automatically.
+                    session.execute(text("SELECT set_config('lock_timeout', '10s', true)"))
+                    session.execute(text("SELECT set_config('statement_timeout', '30s', true)"))
                 yield session
                 session.commit()
             except Exception:

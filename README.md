@@ -1,3 +1,5 @@
+> **开发分支 P0 更新**：新增可复现 npm 安装与 PostgreSQL/Compose 验收入口，见 [阶段三说明](docs/stage3-postgres.md)。下文 a2 测试数字与未验收说明是历史交付快照；当前提交的实际状态以 GitHub Actions 对应提交日志为准，不能混用不同版本的结果。
+
 # ProcureFlow · 可验证采购工作台
 
 **v0.1.0a2 / 本地开发 Alpha / 2026-09-22**

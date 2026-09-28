@@ -46,12 +46,14 @@ class ProcurementService:
             raise DomainError("NOT_FOUND", "Request not found in this workspace", 404)
         return row
 
-    def _quote(self, session, principal, quote_id):
-        row = session.scalar(select(QuoteRow).where(QuoteRow.id == quote_id, QuoteRow.tenant_id == principal.tenant_id))
+    def _quote(self, session, principal, quote_id, refresh=False):
+        row = session.scalar(select(QuoteRow).where(QuoteRow.id == quote_id, QuoteRow.tenant_id == principal.tenant_id)
+                             .execution_options(populate_existing=refresh))
         if row is None:
             raise DomainError("NOT_FOUND", "Quote not found in this workspace", 404)
         version = session.scalar(select(QuoteVersionRow).where(QuoteVersionRow.quote_id == row.id,
-                                                            QuoteVersionRow.version == row.current_version))
+                                                            QuoteVersionRow.version == row.current_version)
+                                 .execution_options(populate_existing=refresh))
         return row, version
 
     def _mutable(self, request):
@@ -178,7 +180,7 @@ class ProcurementService:
             request = self._request(session, principal, quote.request_id, lock=True)
             # Refresh after taking the aggregate lock, including on PostgreSQL.
             session.refresh(quote)
-            quote, old = self._quote(session, principal, quote_id)
+            quote, old = self._quote(session, principal, quote_id, refresh=True)
             self._mutable(request)
             if command.expected_version != quote.current_version:
                 raise DomainError("VERSION_CONFLICT", "Refresh the quote before editing")
@@ -204,7 +206,7 @@ class ProcurementService:
             quote, _ = self._quote(session, principal, quote_id)
             request = self._request(session, principal, quote.request_id, lock=True)
             session.refresh(quote)
-            quote, version = self._quote(session, principal, quote_id)
+            quote, version = self._quote(session, principal, quote_id, refresh=True)
             self._mutable(request)
             if command.expected_version != quote.current_version:
                 raise DomainError("VERSION_CONFLICT", "Only the displayed quote version may be confirmed")

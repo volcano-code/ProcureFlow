@@ -1,0 +1,3 @@
+# Optional synchronous PostgreSQL driver; SQLite users need not install it.
+# Pin deliberately; this is not a claim that the complete environment is locked.
+psycopg[binary]==3.3.6
