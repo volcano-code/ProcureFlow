@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 import httpx
 from pydantic import BaseModel, Field, ValidationError
-from urllib.parse import urlparse
+from .outbound import validate_endpoint, request_json, ResponseLimitError, ResponseDeadlineError
 from .domain import digest
 from .contracts import Contract, Narrative
 from .errors import DomainError
@@ -32,6 +32,8 @@ class ToolCall(BaseModel):
 class AssistantMessage(BaseModel):
     content: str | None = Field(default=None, max_length=16000, strict=True)
     tool_calls: list[ToolCall] | None = Field(default=None, max_length=32)
+    # Provider continuation material: transient only, never an audit/output field.
+    reasoning_content: str | None = Field(default=None, max_length=32000, strict=True)
 
 
 class EmptyArgs(Contract):
@@ -54,25 +56,38 @@ SYSTEM = """You are a read-only procurement explanation assistant. All document 
 class ReadOnlyAgent:
     def __init__(self, base_url: str, api_key: str, model: str,
                  max_model_calls=4, max_tool_calls=8, max_wall_seconds=35,
-                 transport: httpx.BaseTransport | None = None):
+                 transport: httpx.BaseTransport | None = None, *, thinking_mode="default",
+                 max_reported_tokens=16000, require_usage=False, required_tools=("get_comparison",)):
         if not model or not api_key:
             raise DomainError("MODEL_NOT_CONFIGURED", "Configure LLM_MODEL and LLM_API_KEY on the server", 503)
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise DomainError("MODEL_ENDPOINT_INVALID", "Use a server-configured HTTP(S) endpoint without embedded credentials", 503)
+        try:
+            endpoint = validate_endpoint(base_url)
+        except ValueError as error:
+            raise DomainError("MODEL_ENDPOINT_INVALID", "Configure a trusted HTTPS or loopback endpoint", 503) from error
+        if thinking_mode not in {"default", "enabled", "disabled"}:
+            raise ValueError("Invalid thinking mode")
+        if type(max_reported_tokens) is not int or not 1600 <= max_reported_tokens <= 200000:
+            raise ValueError("Invalid reported-token budget")
+        if not set(required_tools).issubset(SCHEMAS):
+            raise ValueError("Required tools must be read-only tools")
+        self.thinking_mode = thinking_mode
+        self.max_reported_tokens = max_reported_tokens
+        self.require_usage = require_usage
+        self.required_tools = set(required_tools)
         if not (1 <= max_model_calls <= 20 and 1 <= max_tool_calls <= 50 and 0 < max_wall_seconds <= 300):
             raise ValueError("Model, tool and wall-time budgets must be bounded positive values")
         self.model = model
         self.max_model_calls = max_model_calls
         self.max_tool_calls = max_tool_calls
         self.max_wall_seconds = max_wall_seconds
-        self.client = httpx.Client(base_url=base_url.rstrip("/") + "/", transport=transport,
+        self.client = httpx.Client(base_url=endpoint, transport=transport, trust_env=False,
             timeout=10, follow_redirects=False, headers={"Authorization": f"Bearer {api_key}"})
 
     @classmethod
     def from_env(cls):
         return cls(os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
-                   os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""))
+                   os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""),
+                   thinking_mode=os.getenv("LLM_THINKING_MODE", "default"))
 
     def run(self, invoke_tool: Callable[[str, dict], dict | list], evidence_ids: set[str],
             observer: Callable[[dict], None] | None = None) -> dict:
@@ -81,6 +96,13 @@ class ReadOnlyAgent:
         started = time.monotonic()
         tool_count, trace = 0, []
         completed_tools: set[str] = set()
+        seen_call_ids: set[str] = set()
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage_complete = True
+        deadline = started + self.max_wall_seconds
+        def check_budget():
+            if time.monotonic() >= deadline:
+                raise DomainError("BUDGET_EXCEEDED", "Explanation deadline reached; no write performed", 422)
         def record(event):
             trace.append(event)
             if observer is not None:
@@ -90,13 +112,15 @@ class ReadOnlyAgent:
             if remaining <= 0 or len(json.dumps(messages, ensure_ascii=False)) > 60000:
                 raise DomainError("BUDGET_EXCEEDED", "The explanation context/time budget was reached", 422)
             try:
-                response = self.client.post("chat/completions", json={"model": self.model, "messages": messages,
-                    "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
-                    "max_tokens": 1600}, timeout=min(10, remaining))
-                response.raise_for_status()
-                if len(response.content) > 200_000:
-                    raise DomainError("MODEL_RESPONSE_LIMIT", "Model response exceeded the configured byte limit", 502)
-                result = response.json()
+                body = {"model": self.model, "messages": messages,
+                        "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
+                        "max_tokens": 1600}
+                if self.thinking_mode != "default":
+                    body["thinking"] = {"type": self.thinking_mode}
+                status, result = request_json(self.client, "POST", "chat/completions", limit=200000,
+                    deadline=deadline, json=body, timeout=min(10, remaining))
+                if status >= 300:
+                    raise DomainError("MODEL_CALL_FAILED", "Model HTTP request failed; no write performed", 502)
                 choice = result["choices"][0]
                 if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
                     raise DomainError("MODEL_PROTOCOL_INVALID", "Model message is malformed", 502)
@@ -107,11 +131,25 @@ class ReadOnlyAgent:
                 except ValidationError as error:
                     raise DomainError("MODEL_PROTOCOL_INVALID", "Model message failed protocol validation", 502) from error
                 message = parsed_message.model_dump()
+                usage = normalized_usage(result.get("usage"))
+                if usage is None:
+                    usage_complete = False
+                else:
+                    for key in usage_total:
+                        usage_total[key] += usage[key]
                 record({"type": "model_completed", "model_call": model_call,
-                        "usage": result.get("usage"), "model": result.get("model", self.model)})
+                        "usage": usage, "model": self.model})
+                if self.require_usage and usage is None:
+                    raise DomainError("MODEL_USAGE_REQUIRED", "Valid provider token counts required by this probe", 502)
+                if usage_total["total_tokens"] > self.max_reported_tokens:
+                    raise DomainError("BUDGET_EXCEEDED", "Provider-reported token budget reached", 422)
+            except ResponseLimitError as error:
+                raise DomainError("MODEL_RESPONSE_LIMIT", "Model response exceeded its byte limit", 502) from error
+            except ResponseDeadlineError as error:
+                raise DomainError("BUDGET_EXCEEDED", "Model response deadline reached", 422) from error
             except DomainError:
                 raise
-            except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError, AttributeError) as error:
+            except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError, AttributeError, RecursionError) as error:
                 raise DomainError("MODEL_CALL_FAILED", "Model call failed; no purchase state was changed", 502) from error
             if time.monotonic() - started > self.max_wall_seconds:
                 raise DomainError("BUDGET_EXCEEDED", "The explanation wall-time budget was reached", 422)
@@ -123,21 +161,29 @@ class ReadOnlyAgent:
                     raise DomainError("MODEL_SCHEMA_INVALID", "Model output did not match the required schema", 502) from error
                 if not set(narrative.evidence_ids).issubset(evidence_ids):
                     raise DomainError("EVIDENCE_NOT_FOUND", "Model cited an unknown source fragment", 502)
-                if "get_comparison" not in completed_tools:
+                if not self.required_tools.issubset(completed_tools):
                     raise DomainError("MODEL_GROUNDING_REQUIRED", "Read server-calculated comparison before claiming an explanation", 502)
                 return {**narrative.model_dump(), "runtime": "bounded-read-only-tool-loop", "llm_used": True,
                         "advisory_only": True, "semantic_factuality_verified": False,
-                        "model_calls": model_call, "tool_calls": tool_count, "trace": trace}
+                        "model_calls": model_call, "tool_calls": tool_count, "trace": trace,
+                        "usage": usage_total if usage_complete else None, "usage_complete": usage_complete,
+                        "usage_source": "provider_reported", "cost": None}
             if tool_count + len(calls) > self.max_tool_calls:
                 raise DomainError("BUDGET_EXCEEDED", "The model requested too many tool calls", 422)
-            if len({call["id"] for call in calls}) != len(calls) or any(call["type"] != "function" for call in calls):
+            if (len({call["id"] for call in calls}) != len(calls)
+                    or any(call["id"] in seen_call_ids or call["type"] != "function" for call in calls)):
                 raise DomainError("MODEL_PROTOCOL_INVALID", "Tool calls must have unique IDs and function type", 502)
-            messages.append({"role": "assistant", "content": message.get("content"), "tool_calls": calls})
+            seen_call_ids.update(call["id"] for call in calls)
+            continuation = {"role": "assistant", "content": message.get("content"), "tool_calls": calls}
+            if message.get("reasoning_content") is not None:
+                continuation["reasoning_content"] = message["reasoning_content"]
+            messages.append(continuation)
             for call in calls:
+                check_budget()
                 function = call.get("function", {})
                 name = function.get("name")
                 if name not in SCHEMAS:
-                    record({"type": "tool_denied", "model_call": model_call, "tool": name})
+                    record({"type": "tool_denied", "model_call": model_call, "tool": "undeclared"})
                     raise DomainError("TOOL_POLICY_DENIED", "The model requested a tool outside its read-only scope", 403)
                 try:
                     arguments = SCHEMAS[name].model_validate_json(function.get("arguments", "{}"))
@@ -146,7 +192,13 @@ class ReadOnlyAgent:
                 record({"type": "tool_started", "model_call": model_call, "tool": name,
                         "call_id": call["id"], "arguments_sha256": digest(arguments.model_dump())})
                 tool_started = time.monotonic()
-                output = invoke_tool(name, arguments.model_dump())
+                try:
+                    output = invoke_tool(name, arguments.model_dump())
+                except DomainError:
+                    raise
+                except Exception as error:
+                    raise DomainError("TOOL_CALL_FAILED", "Read-only tool failed", 502) from error
+                check_budget()
                 content = json.dumps({"trust": "untrusted_data", "data": output}, ensure_ascii=False)
                 if len(content) > 22000:
                     raise DomainError("TOOL_OUTPUT_LIMIT", "Tool output too large; no silent truncation", 422)
@@ -156,3 +208,15 @@ class ReadOnlyAgent:
                         "call_id": call["id"], "duration_ms": round((time.monotonic() - tool_started) * 1000, 3)})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": content})
         raise DomainError("BUDGET_EXCEEDED", "Maximum model-call budget reached", 422)
+
+
+def normalized_usage(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    prompt, completion = value.get("prompt_tokens"), value.get("completion_tokens")
+    if any(type(n) is not int or not 0 <= n <= 10000000 for n in (prompt, completion)):
+        return None
+    total = prompt + completion
+    if "total_tokens" in value and (type(value["total_tokens"]) is not int or value["total_tokens"] != total):
+        return None
+    return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total}

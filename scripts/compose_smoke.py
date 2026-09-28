@@ -14,19 +14,21 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(base_url: str) -> dict:
+def run(base_url: str, api_prefix: str = "") -> dict:
+    if api_prefix not in {"", "/backend"}:
+        raise ValueError("Only direct API or the fixed Next backend prefix is allowed")
     url = urlparse(base_url)
     if (url.scheme != "http" or url.hostname not in {"127.0.0.1", "localhost", "::1"}
             or url.username or url.password or url.query or url.fragment or url.path not in {"", "/"}):
         raise ValueError("Only an explicit loopback HTTP demo target is permitted")
     with httpx.Client(base_url=base_url, timeout=10, follow_redirects=False) as client:
-        health = client.get("/health")
+        health = client.get(api_prefix + "/health")
         health.raise_for_status()
         assert health.json()["mode"] == "demo" and health.json()["erp"] == "mock"
-        ready = client.get("/ready")
+        ready = client.get(api_prefix + "/ready")
         assert ready.status_code == 200 and ready.json()["database"] == "postgresql"
         def call(method, path, role="buyer", expected=200, **kwargs):
-            response = client.request(method, "/api/v1" + path,
+            response = client.request(method, api_prefix + "/api/v1" + path,
                 headers={"Authorization": "Bearer demo-" + role}, **kwargs)
             assert response.status_code == expected, (path, response.status_code)
             return response.json()
@@ -59,12 +61,13 @@ def run(base_url: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--api-prefix", choices=("", "/backend"), default="")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     code = 0
     try:
-        report = run(args.base_url)
+        report = run(args.base_url, args.api_prefix)
     except (AssertionError, ValueError, httpx.HTTPError, KeyError):
         code = 1
         report = {"status": "failed", "reason": "COMPOSE_SMOKE_FAILED", "live_erp": False, "live_model": False}

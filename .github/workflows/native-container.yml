@@ -1,0 +1,46 @@
+name: native-container-validation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+
+  compose-native-web:
+    # A separate full-stack gate: production Next container + proxy + PostgreSQL.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python scripts/init_postgres_env.py
+      - name: Build native frontend and backend stack
+        run: docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml up --build -d --wait --wait-timeout 180
+      - name: Native proxy to independent Worker
+        run: python scripts/compose_smoke.py --base-url http://127.0.0.1:3000 --api-prefix /backend --output evals/reports/ci/native-container/smoke.json
+      - name: Verify single draft before browser scenarios
+        run: |
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml exec -T api python -c "import sqlite3; n=sqlite3.connect('/data/mock-erp.sqlite3').execute('select count(*) from drafts').fetchone()[0]; assert n==1, n; print('mock_drafts=1')"
+      - name: Browser upload approval isolation and streaming through native container
+        run: python scripts/verify_compose_web.py --allow-test-mutations --output evals/reports/ci/native-container
+      - name: Restart native container and verify persisted operation via proxy
+        run: |
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml restart web
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml up -d --wait --wait-timeout 90
+          python -c "import httpx,json; r=json.load(open('evals/reports/ci/native-container/smoke.json')); c=httpx.Client(base_url='http://127.0.0.1:3000',headers={'Authorization':'Bearer demo-buyer'},timeout=10); x=c.get('/backend/api/v1/operations/'+r['operation_id']); assert x.status_code==200 and x.json()['remote_id']==r['remote_id'] and x.json()['status']=='COMPLETED'"
+      - name: Capture logs
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/native-container
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml logs --no-color > evals/reports/ci/native-container/containers.log 2>&1
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml ps -a > evals/reports/ci/native-container/services.txt
+      - name: Remove disposable CI stack only
+        if: always()
+        run: docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml down -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-container-validation-records
+          path: evals/reports/ci/native-container

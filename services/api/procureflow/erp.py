@@ -8,6 +8,7 @@ from typing import Protocol
 from urllib.parse import quote, urlparse
 import httpx
 from .domain import canonical, digest
+from .outbound import validate_endpoint, request_json, ResponseLimitError, ResponseDeadlineError
 
 
 class ERPUnknown(Exception):
@@ -22,7 +23,7 @@ class ERPPort(Protocol):
     mode: str
     def suppliers(self) -> list[dict]: ...
     def find(self, operation_key: str) -> dict | None: ...
-    def create_draft(self, operation_key: str, payload: dict) -> dict: ...
+    def create_draft(self, operation_key, payload: dict) -> dict: ...
 
 
 class MockERP:
@@ -89,34 +90,36 @@ class ERPNextClient:
 
     def __init__(self, base_url: str, api_key: str, api_secret: str, company: str,
                  allow_writes=False, transport: httpx.BaseTransport | None = None):
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
-            raise ValueError("ERP_BASE_URL must be a trusted http(s) endpoint without credentials/query")
+        endpoint = validate_endpoint(base_url)
         if not api_key or not api_secret or not company:
             raise ValueError("ERP API credentials and company are required")
         self.company, self.allow_writes = company, allow_writes
-        self.client = httpx.Client(base_url=base_url.rstrip("/") + "/", timeout=10,
+        self.client = httpx.Client(base_url=endpoint, timeout=10, trust_env=False,
             follow_redirects=False, transport=transport,
             headers={"Authorization": f"token {api_key}:{api_secret}", "Accept": "application/json"})
 
-    def _call(self, method, path, **kwargs):
+    def _call(self, method, path, *, envelope="data", **kwargs):
+        # The read-only preflight cannot be converted to a write via another method.
+        if method != "GET" and not self.allow_writes:
+            raise ERPRejected("ERP_DRAFT_WRITES_DISABLED")
+        if method not in {"GET", "POST"} or (method == "POST" and path != "api/resource/Supplier Quotation"):
+            raise ERPRejected("ERP_METHOD_NOT_ALLOWED")
         try:
-            response = self.client.request(method, path, **kwargs)
-        except httpx.TransportError as error:
-            raise ERPUnknown("ERP_TRANSPORT_UNCERTAIN") from error
-        if response.status_code >= 500 or response.status_code in {408, 429}:
-            raise ERPUnknown("ERP_RESPONSE_UNCERTAIN")
-        if response.status_code >= 300:
-            raise ERPRejected(f"ERP_HTTP_{response.status_code}")
-        try:
-            if len(response.content) > 2 * 1024 * 1024:
-                raise ERPUnknown("ERP_RESPONSE_LIMIT")
-            # Preserve decimal JSON numbers before binary-float conversion.
-            decoded = json.loads(response.content, parse_float=Decimal)
-            if not isinstance(decoded, dict) or "data" not in decoded:
+            import time
+            status, decoded = request_json(self.client, method, path, limit=2 * 1024 * 1024,
+                deadline=time.monotonic() + 20, parse_float=Decimal, **kwargs)
+            if status >= 500 or status in {408, 429}:
+                raise ERPUnknown("ERP_RESPONSE_UNCERTAIN")
+            if status >= 300:
+                raise ERPRejected(f"ERP_HTTP_{status}")
+            if not isinstance(decoded, dict) or envelope not in decoded:
                 raise ERPUnknown("ERP_MALFORMED_RESPONSE")
-            return decoded["data"]
-        except (ValueError, KeyError, TypeError) as error:
+            return decoded[envelope]
+        except ResponseLimitError as error:
+            raise ERPUnknown("ERP_RESPONSE_LIMIT") from error
+        except (httpx.HTTPError, ResponseDeadlineError) as error:
+            raise ERPUnknown("ERP_TRANSPORT_UNCERTAIN") from error
+        except (ValueError, KeyError, TypeError, RecursionError) as error:
             raise ERPUnknown("ERP_MALFORMED_RESPONSE") from error
 
     def suppliers(self):
@@ -178,8 +181,14 @@ class ERPNextClient:
                 or fields[0].get("fieldname") != self.hash_field or fields[0].get("fieldtype") != "Data"):
             raise ERPRejected("ERP_SNAPSHOT_FIELD_NOT_VERIFIED")
 
-    def preflight(self):
+    def preflight(self, expected_user: str | None = None):
         """Read-only capability probe; metadata is NOT proof of a working remote DB unique index."""
+        if expected_user is not None:
+            if not expected_user.strip() or expected_user.casefold() in {"administrator", "guest"}:
+                raise ERPRejected("ERP_DEDICATED_IDENTITY_REQUIRED")
+            logged_user = self._call("GET", "api/method/frappe.auth.get_logged_user", envelope="message")
+            if logged_user != expected_user:
+                raise ERPRejected("ERP_INTEGRATION_IDENTITY_MISMATCH")
         self._check_unique_field()
         self._check_snapshot_field()
         company = self._call("GET", "api/resource/Company/" + quote(self.company, safe=""))
@@ -189,6 +198,8 @@ class ERPNextClient:
         if not isinstance(suppliers, list) or any(not isinstance(s, dict) or not isinstance(s.get("name"), str) for s in suppliers):
             raise ERPUnknown("ERP_MALFORMED_SUPPLIERS")
         return {"status": "read_only_checks_passed", "company_verified": True,
+                "integration_identity_verified": expected_user is not None,
+                "least_privilege_verified": False,
                 "unique_field_metadata_verified": True, "snapshot_field_verified": True,
                 "supplier_count_first_page": len(suppliers), "supplier_directory_complete": False, "returned_page_may_be_truncated": len(suppliers) >= 100,
                 "draft_writes_enabled": self.allow_writes, "write_probe_performed": False,

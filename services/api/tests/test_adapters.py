@@ -56,8 +56,10 @@ def test_agent_schema_validation():
 
 
 def test_agent_bounded_loop():
+    from itertools import count
+    ids = count()
     agent=ReadOnlyAgent("https://model.test","secret","test-model",max_model_calls=2,transport=httpx.MockTransport(lambda _:completion({
-        "tool_calls":[{"id":"x","type":"function","function":{"name":"get_comparison","arguments":"{}"}}]})))
+        "tool_calls":[{"id":f"call-{next(ids)}","type":"function","function":{"name":"get_comparison","arguments":"{}"}}]})))
     with pytest.raises(DomainError) as exc:
         agent.run(lambda *x:{},set())
     assert exc.value.code=="BUDGET_EXCEEDED"
