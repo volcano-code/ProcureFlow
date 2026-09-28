@@ -1,0 +1,13 @@
+{
+  "check": "typescript-transpile-syntax-only",
+  "files": [
+    "app/layout.tsx",
+    "app/page.tsx",
+    "components/workbench.tsx",
+    "lib/api.ts",
+    "next.config.ts"
+  ],
+  "errors": [],
+  "full_typecheck": false,
+  "next_build": false
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ProcureFlow · 可验证采购工作台</title><link rel="stylesheet" href="/assets/styles.css"></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="logo">P</span><span>ProcureFlow<small>EVIDENCE BEFORE ACTION</small></span></a>
+  <div class="workspace"><span class="dot"></span>本地研发工作区 <span class="tag">ALPHA</span></div>
+  <nav><button class="nav-active" id="nav-workbench">▦ &nbsp;采购工作台</button><button id="nav-policy">▤ &nbsp;规则与执行边界</button><button id="nav-audit">◷ &nbsp;审计时间线</button></nav>
+  <div class="sidebar-label">采购需求 <button id="refresh" title="刷新">↻</button></div><div id="request-list"></div>
+  <div class="side-bottom"><strong>决策可追溯，执行有边界。</strong><p>此版本使用规则基线与模拟 ERP，不会产生真实采购订单。</p><a href="/docs" target="_blank" rel="noreferrer">查看 API 文档 ↗</a></div>
+</aside>
+<main>
+<header class="topbar"><span>工作区 / <strong>采购中心</strong></span><div class="identity"><span id="health" class="pill">连接中</span><label class="sr-only" for="role">演示身份</label><select id="role"><option value="demo-buyer">采购员 · 演示</option><option value="demo-approver">审批人 · 演示</option><option value="demo-auditor">审计员 · 演示</option></select><button id="login" class="text-button">令牌登录</button></div></header>
+<section class="content">
+<div class="page-heading"><div><div class="eyebrow">PROCUREMENT / WORKBENCH</div><h1>让每一笔采购，都有据可依。</h1><p>从原始报价到审批快照，把不确定的信息与可执行的决策分开。</p></div><div class="heading-actions"><button id="load-demo" class="secondary">载入三份示例</button><button id="new-request" class="primary">＋ 新建采购需求</button></div></div>
+<div class="notice"><span class="notice-icon">i</span><span><strong>本地验证版</strong> &nbsp;确定性比较 · 独立身份审批 · 模拟 ERP 草稿 &nbsp;／&nbsp; 尚未完成真实 LLM、ERPNext 与生产部署验收。</span></div>
+<div id="metrics" class="metrics"></div>
+<div id="empty" class="empty panel"><div class="empty-icon">▤</div><h2>从一份采购需求开始</h2><p>创建需求并上传报价，或载入三份合成样例。<br>支持固定键值格式 TXT / CSV / 文本 PDF / XLSX。</p><button id="empty-demo" class="primary">体验证据与审批流程 →</button></div>
+<div id="detail" hidden>
+ <section class="request-panel panel"><div><div class="eyebrow" id="request-code"></div><h2 id="request-title"></h2><p id="request-meta"></p></div><div class="request-actions"><span id="request-status"></span><button id="edit-request" class="secondary">编辑需求</button></div></section>
+ <div class="steps"><span>01 &nbsp;录入报价</span><i>→</i><span>02 &nbsp;核对字段</span><i>→</i><span>03 &nbsp;生成方案</span><i>→</i><span>04 &nbsp;审批快照</span><i>→</i><span>05 &nbsp;模拟草稿</span></div>
+ <section class="panel quote-panel"><div class="section-head"><div><h2>供应商报价比较 <span id="quote-count" class="count">0</span></h2><p>金额由 Decimal 重算；未知税费不会被默认为 0。</p></div><div class="heading-actions"><input type="file" id="file-input" accept=".txt,.csv,.pdf,.xlsx" hidden><button id="upload" class="secondary">↑ 上传报价</button><button id="analyze" class="primary">校验并生成方案</button></div></div><div class="table-scroll"><table><thead><tr><th>供应商 / 原文件</th><th>数量</th><th>单价</th><th>税价模式</th><th>运费</th><th>统一总价</th><th>核对与操作</th></tr></thead><tbody id="quote-body"></tbody></table></div></section>
+ <div class="lower-grid"><section class="panel evidence-panel"><div class="section-head"><div><h2>字段证据</h2><p>点击表格中的字段，查看对应的原文位置。</p></div><span class="pill">PROVENANCE</span></div><div id="evidence-body" class="evidence-body"><div class="subtle-empty">请选择一项报价字段<br><small>保留源文件 SHA-256、页码或单元格定位。</small></div></div></section>
+ <section class="panel decision-panel"><div class="section-head"><div><h2>方案与审批</h2><p>授权绑定当前快照，而不是一个“已批准”标签。</p></div></div><div id="proposal-body"></div></section></div>
+ <section class="panel audit-panel" id="audit-panel"><div class="section-head"><div><h2>执行与审计时间线</h2><p>记录业务状态与外部操作；不是模型隐藏思考过程。</p></div><span class="live"><span class="dot"></span>SSE 事件流</span></div><div id="events"></div></section>
+</div>
+<footer>ProcureFlow v0.1.0a1 <span>本地演示 UI · 同一套真实后端 API · 原生 Next.js 源码另附</span></footer>
+</section>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="modal"><div class="modal-head"><h2 id="modal-title"></h2><button id="close-modal" aria-label="关闭">×</button></div><div id="modal-body"></div></dialog>
+<script type="module" src="/assets/app.js"></script>
+</body></html>

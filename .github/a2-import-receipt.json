@@ -1,0 +1,11 @@
+{
+  "archive_sha256": "39fa5c0dedace0d5cc389ed57f24d3a41918f6ca414a0aaa77daed695fe05233",
+  "archive_bytes": 214835,
+  "archive_files": 118,
+  "manifest_records_verified": 117,
+  "imported_files": 117,
+  "deferred_files": [
+    ".github/workflows/ci.yml"
+  ],
+  "source_execution": false
+}

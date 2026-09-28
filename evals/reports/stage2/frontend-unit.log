@@ -1,0 +1,94 @@
+TAP version 13
+# Subtest: preserves decimal strings and authenticates request without mutation retries
+ok 1 - preserves decimal strings and authenticates request without mutation retries
+  ---
+  duration_ms: 19.901186
+  type: 'test'
+  ...
+# Subtest: HTML error never masquerades as successful JSON
+ok 2 - HTML error never masquerades as successful JSON
+  ---
+  duration_ms: 0.458162
+  type: 'test'
+  ...
+# Subtest: passes FormData without overwriting multipart boundary
+ok 3 - passes FormData without overwriting multipart boundary
+  ---
+  duration_ms: 0.738396
+  type: 'test'
+  ...
+# Subtest: passes abort signals to fetch
+ok 4 - passes abort signals to fetch
+  ---
+  duration_ms: 0.474677
+  type: 'test'
+  ...
+# Subtest: refuses cross-origin API path injection
+ok 5 - refuses cross-origin API path injection
+  ---
+  duration_ms: 0.176977
+  type: 'test'
+  ...
+# Subtest: UTF-8 and CRLF frames may be split at every byte
+ok 6 - UTF-8 and CRLF frames may be split at every byte
+  ---
+  duration_ms: 0.912669
+  type: 'test'
+  ...
+# Subtest: multiline JSON event and several frames per packet
+ok 7 - multiline JSON event and several frames per packet
+  ---
+  duration_ms: 0.182005
+  type: 'test'
+  ...
+# Subtest: unfinished final event is not committed
+ok 8 - unfinished final event is not committed
+  ---
+  duration_ms: 0.166872
+  type: 'test'
+  ...
+# Subtest: malformed audit event is rejected
+ok 9 - malformed audit event is rejected
+  ---
+  duration_ms: 0.294705
+  type: 'test'
+  ...
+# Subtest: bounded SSE buffering
+ok 10 - bounded SSE buffering
+  ---
+  duration_ms: 0.317419
+  type: 'test'
+  ...
+# Subtest: SSE reconnect uses cursor and de-duplicates replays
+ok 11 - SSE reconnect uses cursor and de-duplicates replays
+  ---
+  duration_ms: 7.532589
+  type: 'test'
+  ...
+# Subtest: SSE denial terminates rather than retrying forever
+ok 12 - SSE denial terminates rather than retrying forever
+  ---
+  duration_ms: 0.312603
+  type: 'test'
+  ...
+# Subtest: partial demo failure reports retained request instead of silently recreating it
+ok 13 - partial demo failure reports retained request instead of silently recreating it
+  ---
+  duration_ms: 1.14508
+  type: 'test'
+  ...
+# Subtest: cancellation stops remaining events in the same SSE chunk
+ok 14 - cancellation stops remaining events in the same SSE chunk
+  ---
+  duration_ms: 0.706388
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 85.904467

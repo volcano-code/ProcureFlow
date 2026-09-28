@@ -1,0 +1,6 @@
+{
+  "command": "node --check apps/demo/app.js",
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": ""
+}

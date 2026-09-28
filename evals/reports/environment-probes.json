@@ -1,0 +1,8 @@
+{
+  "docker_available": false,
+  "psql_available": false,
+  "node_version": "v22.16.0",
+  "npm_version": "10.9.2",
+  "next_node_modules_present": false,
+  "npm_lockfile_present": false
+}

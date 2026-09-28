@@ -1,0 +1,12 @@
+field,value
+supplier_id,SUP-B
+sku,STAND-01
+quantity,20
+uom,EA
+unit_price,1120.00
+tax_mode,excluded
+tax_rate,0.13
+shipping_cost,unknown
+discount,0.00
+delivery_days,8
+currency,CNY

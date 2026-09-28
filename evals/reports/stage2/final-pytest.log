@@ -1,0 +1,5 @@
+.................ss..................................................... [ 63%]
+.........................................                                [100%]
+=========================== short test summary info ============================
+SKIPPED [2] tests/test_browser.py:75: ENVIRONMENT_BLOCKED: Chromium policy prohibits navigation to the local test server; browser E2E NOT verified
+111 passed, 2 skipped in 15.01s

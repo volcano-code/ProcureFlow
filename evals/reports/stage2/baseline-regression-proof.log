@@ -1,0 +1,62 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+__________________ test_demo_identity_cannot_target_real_erp ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-4/test_demo_identity_cannot_targ0')
+
+    def test_demo_identity_cannot_target_real_erp(tmp_path):
+>       with pytest.raises(ValueError, match='ERPNext requires PF_MODE=private'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests/test_stage2_guards.py:11: Failed
+_________________ test_model_null_message_is_controlled_error __________________
+
+    def test_model_null_message_is_controlled_error():
+        agent = ReadOnlyAgent('https://model.test','synthetic-secret','test',transport=httpx.MockTransport(
+            lambda _: httpx.Response(200,json={'choices':[{'message':None}]})))
+        try:
+            with pytest.raises(DomainError, match='malformed'):
+>               agent.run(lambda *_:{},set())
+
+tests/test_stage2_guards.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <procureflow.agent.ReadOnlyAgent object at 0x7f2ca6345400>
+invoke_tool = <function test_model_null_message_is_controlled_error.<locals>.<lambda> at 0x7f2ca63219e0>
+evidence_ids = set()
+
+    def run(self, invoke_tool: Callable[[str, dict], dict | list], evidence_ids: set[str]) -> dict:
+        messages = [{"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": "请读取比较结果、制度和必要证据，解释推荐与缺失项；不要执行任何写入。"}]
+        started = time.monotonic()
+        tool_count, trace = 0, []
+        for model_call in range(1, self.max_model_calls + 1):
+            remaining = self.max_wall_seconds - (time.monotonic() - started)
+            if remaining <= 0 or len(json.dumps(messages, ensure_ascii=False)) > 60000:
+                raise DomainError("BUDGET_EXCEEDED", "The explanation context/time budget was reached", 422)
+            try:
+                response = self.client.post("chat/completions", json={"model": self.model, "messages": messages,
+                    "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
+                    "max_tokens": 1600}, timeout=min(10, remaining))
+                response.raise_for_status()
+                if len(response.content) > 200_000:
+                    raise DomainError("MODEL_RESPONSE_LIMIT", "Model response exceeded the configured byte limit", 502)
+                result = response.json()
+                message = result["choices"][0]["message"]
+                trace.append({"model_call": model_call, "usage": result.get("usage"), "model": result.get("model", self.model)})
+            except DomainError:
+                raise
+            except (httpx.HTTPError, KeyError, ValueError, IndexError) as error:
+                raise DomainError("MODEL_CALL_FAILED", "Model call failed; no purchase state was changed", 502) from error
+            if time.monotonic() - started > self.max_wall_seconds:
+                raise DomainError("BUDGET_EXCEEDED", "The explanation wall-time budget was reached", 422)
+>           calls = message.get("tool_calls") or []
+                    ^^^^^^^^^^^
+E           AttributeError: 'NoneType' object has no attribute 'get'
+
+procureflow/agent.py:79: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_stage2_guards.py::test_demo_identity_cannot_target_real_erp - Failed: DID NOT RAISE <class 'ValueError'>
+FAILED tests/test_stage2_guards.py::test_model_null_message_is_controlled_error - AttributeError: 'NoneType' object has no attribute 'get'
+2 failed, 93 deselected in 0.15s

@@ -1,0 +1,173 @@
+{
+  "version": "0.1.0a2",
+  "verification_date": "2026-09-22",
+  "source_baseline_zip_sha256": "d5d2e22ccc8ea845aaa7c526eb74a9664fc873d0959aa13b8d3a9b906a4352b1",
+  "release_decision": "local_alpha_only; native_ui_and_live_integration_gates_not_passed",
+  "python": {
+    "collected": 113,
+    "passed": 111,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 2,
+    "modules": {
+      "test_adapters": {
+        "passed": 17,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_browser": {
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "test_domain": {
+        "passed": 23,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_erp_preflight": {
+        "passed": 13,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_migrations": {
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_parsers": {
+        "passed": 14,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_stage2_guards": {
+        "passed": 16,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_worker_crash": {
+        "passed": 2,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "test_workflow": {
+        "passed": 25,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "frontend_transport_unit": {
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0
+  },
+  "frontend_transport_real_http": {
+    "passed": 3,
+    "failed": 0,
+    "browser_or_react_e2e": false
+  },
+  "original_http_worker_smoke": {
+    "status": "passed",
+    "steps": [
+      "real-http-create",
+      "three-source-import",
+      "manual-confirmations",
+      "deterministic-total-24200",
+      "buyer-cannot-approve",
+      "independent-approval",
+      "durable-outbox-reservation",
+      "separate-worker-process",
+      "second-worker-drain-no-repeat",
+      "server-process-restart",
+      "persistent-request-and-operation",
+      "idempotent-replay",
+      "cross-tenant-denied",
+      "exactly-one-mock-draft-in-this-scenario"
+    ],
+    "supplier": "SUP-C",
+    "total_cny": "24200.00",
+    "remote_id": "MOCK-SQ-015ED58D4E67",
+    "mock_erp_draft_count": 1,
+    "live_erp": false,
+    "live_llm": false,
+    "browser_test": false,
+    "restart_test": "graceful API process restart and separate worker; not SIGKILL chaos"
+  },
+  "sigkill": [
+    {
+      "point": "after-commit",
+      "signal": "SIGKILL",
+      "child_returncode": -9,
+      "lease_expiry_injected": true,
+      "status": "COMPLETED",
+      "mock_draft_count": 1,
+      "live_erp": false,
+      "attempts": 2
+    },
+    {
+      "point": "before-create",
+      "signal": "SIGKILL",
+      "child_returncode": -9,
+      "lease_expiry_injected": true,
+      "status": "NEEDS_HUMAN",
+      "mock_draft_count": 0,
+      "live_erp": false,
+      "attempts": 2
+    }
+  ],
+  "typescript": {
+    "check": "typescript-transpile-syntax-only",
+    "files": [
+      "app/layout.tsx",
+      "app/page.tsx",
+      "components/workbench.tsx",
+      "lib/api.ts",
+      "next.config.ts"
+    ],
+    "errors": [],
+    "full_typecheck": false,
+    "next_build": false
+  },
+  "static_browser_strict_gate": {
+    "status": "failed_environment_policy",
+    "passed": 0,
+    "failed": 2,
+    "reason": "ERR_BLOCKED_BY_ADMINISTRATOR"
+  },
+  "native_next_gate": {
+    "scope": "Next.js production build + native React browser E2E",
+    "status": "blocked",
+    "steps": [],
+    "fallback_to_static_demo": false,
+    "browser_verified": false,
+    "live_erp": false,
+    "live_model": false,
+    "reason": "NEXT_DEPENDENCIES_MISSING"
+  },
+  "baseline_new_regression_proof": {
+    "target": "unmodified a1 source with two added test cases",
+    "failed": 2,
+    "expected_failures": true,
+    "failures": [
+      "demo mode accepted erpnext target",
+      "null model message leaked AttributeError"
+    ]
+  },
+  "live_erp": false,
+  "live_model": false,
+  "postgresql_verified": false,
+  "remote_ci_executed": false,
+  "benchmark_60_tasks_completed": false,
+  "new_native_browser_tests_authored": 4,
+  "new_native_browser_tests_executed": 0
+}

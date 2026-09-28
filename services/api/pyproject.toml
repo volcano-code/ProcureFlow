@@ -1,0 +1,13 @@
+[project]
+name = "procureflow-api"
+version = "0.1.0a2"
+description = "Evidence-first procurement local alpha"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["browser: Chromium browser integration tests", "live: external services explicitly configured by the developer"]
+
+[tool.ruff]
+line-length = 120

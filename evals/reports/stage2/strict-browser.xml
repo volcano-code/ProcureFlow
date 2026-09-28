@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="4.049" timestamp="2026-09-22T16:06:31.930259+00:00" hostname="localhost"><testcase classname="tests.test_browser" name="test_browser_end_to_end_with_evidence_and_persistence" time="1.897"><failure message="playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at http://127.0.0.1:48183/&#10;Call log:&#10;  - navigating to &quot;http://127.0.0.1:48183/&quot;, waiting until &quot;load&quot;">live_server = 'http://127.0.0.1:48183', browser_page = &lt;Page url='about:blank'&gt;
+
+    @pytest.mark.browser
+    def test_browser_end_to_end_with_evidence_and_persistence(live_server, browser_page):
+        page = browser_page
+&gt;       prepare(page, live_server)
+
+tests/test_browser.py:94: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_browser.py:72: in prepare
+    page.goto(url)
+/opt/pyvenv/lib/python3.13/site-packages/playwright/sync_api/_generated.py:9050: in goto
+    self._sync(
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_page.py:552: in goto
+    return await self._main_frame.goto(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_frame.py:153: in goto
+    await self._channel.send(
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;playwright._impl._connection.Connection object at 0x7fa373522f90&gt;
+cb = &lt;function Channel.send.&lt;locals&gt;.&lt;lambda&gt; at 0x7fa3731642c0&gt;
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -&gt; Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+    
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+&gt;           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at http://127.0.0.1:48183/
+E           Call log:
+E             - navigating to "http://127.0.0.1:48183/", waiting until "load"
+
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py:559: Error</failure></testcase><testcase classname="tests.test_browser" name="test_browser_edit_after_approval_invalidates_snapshot" time="1.796"><failure message="playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at http://127.0.0.1:45097/&#10;Call log:&#10;  - navigating to &quot;http://127.0.0.1:45097/&quot;, waiting until &quot;load&quot;">live_server = 'http://127.0.0.1:45097', browser_page = &lt;Page url='about:blank'&gt;
+
+    @pytest.mark.browser
+    def test_browser_edit_after_approval_invalidates_snapshot(live_server, browser_page):
+        page = browser_page
+&gt;       prepare(page, live_server)
+
+tests/test_browser.py:125: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_browser.py:72: in prepare
+    page.goto(url)
+/opt/pyvenv/lib/python3.13/site-packages/playwright/sync_api/_generated.py:9050: in goto
+    self._sync(
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_page.py:552: in goto
+    return await self._main_frame.goto(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_frame.py:153: in goto
+    await self._channel.send(
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;playwright._impl._connection.Connection object at 0x7fa37225c690&gt;
+cb = &lt;function Channel.send.&lt;locals&gt;.&lt;lambda&gt; at 0x7fa3731672e0&gt;
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -&gt; Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+    
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+&gt;           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at http://127.0.0.1:45097/
+E           Call log:
+E             - navigating to "http://127.0.0.1:45097/", waiting until "load"
+
+/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py:559: Error</failure></testcase></testsuite></testsuites>

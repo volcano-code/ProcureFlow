@@ -1,0 +1,38 @@
+{
+  "scope": "offline environment inventory, not integration acceptance",
+  "status": "inventory_only",
+  "python": "3.13.5",
+  "executables": {
+    "node": true,
+    "npm": true,
+    "docker": false,
+    "psql": false
+  },
+  "python_packages": {
+    "fastapi": true,
+    "sqlalchemy": true,
+    "httpx": true,
+    "playwright": true,
+    "psycopg": false,
+    "langgraph": false,
+    "mcp": false
+  },
+  "next_dependency_installed": false,
+  "npm_lockfile_present": false,
+  "erp_configuration_present": {
+    "ERP_BASE_URL": false,
+    "ERP_API_KEY": false,
+    "ERP_API_SECRET": false,
+    "ERP_COMPANY": false,
+    "PF_AUTH_TOKENS": false
+  },
+  "model_configuration_present": {
+    "LLM_BASE_URL": false,
+    "LLM_API_KEY": false,
+    "LLM_MODEL": false
+  },
+  "erp_probe_attempted": false,
+  "external_writes_attempted": 0,
+  "native_browser_verified": false,
+  "live_draft_roundtrip_verified": false
+}

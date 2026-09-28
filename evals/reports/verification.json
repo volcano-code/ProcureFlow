@@ -1,0 +1,66 @@
+{
+  "release": "0.1.0a1",
+  "verification_date": "2026-09-22",
+  "scope": "local-alpha; mock ERP and deterministic baseline",
+  "pytest": {
+    "tests": 82,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2,
+    "passed": 80,
+    "duration_seconds": 9.486
+  },
+  "test_groups": {
+    "test_adapters": {
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    "test_browser": {
+      "passed": 0,
+      "failed": 0,
+      "skipped": 2
+    },
+    "test_domain": {
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0
+    },
+    "test_migrations": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "test_parsers": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    "test_workflow": {
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "real_http_smoke": "passed",
+  "separate_worker_process_verified": true,
+  "graceful_api_restart_verified": true,
+  "mock_erp_response_lost_reconciliation_verified": true,
+  "sigkill_chaos_verified": false,
+  "sqlite_migration_roundtrip_verified": true,
+  "javascript_syntax_verified": true,
+  "typescript_transpile_syntax_only": true,
+  "next_typecheck_verified": false,
+  "next_build_verified": false,
+  "browser_e2e_verified": false,
+  "browser_block_reason": "ERR_BLOCKED_BY_ADMINISTRATOR: local test server navigation blocked by environment policy",
+  "live_model_verified": false,
+  "live_erpnext_verified": false,
+  "postgresql_verified": false,
+  "docker_verified": false,
+  "langgraph_implemented": false,
+  "mcp_implemented": false,
+  "ag_ui_implemented": false,
+  "sixty_task_benchmark_implemented": false,
+  "production_ready": false
+}

@@ -1,0 +1,10 @@
+{
+  "scope": "Next.js production build + native React browser E2E",
+  "status": "blocked",
+  "steps": [],
+  "fallback_to_static_demo": false,
+  "browser_verified": false,
+  "live_erp": false,
+  "live_model": false,
+  "reason": "NEXT_DEPENDENCIES_MISSING"
+}

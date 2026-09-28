@@ -1,0 +1,12 @@
+ProcureFlow synthetic quotation — not a real offer
+supplier_id: SUP-A
+sku: STAND-01
+quantity: 20
+uom: EA
+unit_price: 1200.00
+tax_mode: included
+tax_rate: 0.13
+shipping_cost: 800.00
+discount: 0.00
+delivery_days: 7
+currency: CNY

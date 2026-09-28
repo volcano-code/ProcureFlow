@@ -1,0 +1,28 @@
+# NOT executed in the authoring environment: Docker is unavailable there.
+# Local SQLite/mock-ERP alpha; this is not the target PostgreSQL/Celery architecture.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - '127.0.0.1:8000:8000'
+    volumes:
+      - local-data:/data
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    command: ['python', '-m', 'procureflow.worker']
+    volumes:
+      - local-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  local-data:
