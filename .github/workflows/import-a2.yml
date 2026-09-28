@@ -1,0 +1,90 @@
+name: Import verified ProcureFlow a2 baseline
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/import-a2.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: procureflow-a2-import
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.repository == 'volcano-code/ProcureFlow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Verify archive and import sources without executing them
+        env:
+          SOURCE_URL: https://7a1dbdde-05a7-4e38-bda3-96b84a91c526.sandbox.floot.app/_cdn/static/92de2d32-7653-408f-996d-e1a45cd73981-ProcureFlow_v0.1.0a2_source.zip
+        run: |
+          python - <<'PY'
+          import hashlib, io, json, os, stat, urllib.request, zipfile
+          from pathlib import Path, PurePosixPath
+          root = Path.cwd()
+          if (root / 'MANIFEST.json').exists() or (root / 'services').exists() or (root / 'README.md').exists():
+              raise SystemExit('Source already exists: refusing to overwrite it.')
+          expected_sha = '39fa5c0dedace0d5cc389ed57f24d3a41918f6ca414a0aaa77daed695fe05233'
+          with urllib.request.urlopen(os.environ['SOURCE_URL'], timeout=60) as response:
+              data = response.read(214836)
+          if len(data) != 214835 or hashlib.sha256(data).hexdigest() != expected_sha:
+              raise SystemExit('Archive size/SHA-256 mismatch; no files written.')
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              entries = archive.infolist()
+              if len(entries) != 118 or sum(i.file_size for i in entries) != 532279:
+                  raise SystemExit('Unexpected archive inventory.')
+              payload = {}
+              for entry in entries:
+                  p = PurePosixPath(entry.filename)
+                  if p.is_absolute() or '..' in p.parts or '\\' in entry.filename or not p.parts or p.parts[0] != 'procureflow':
+                      raise SystemExit('Unsafe archive path.')
+                  if entry.is_dir() or stat.S_ISLNK(entry.external_attr >> 16):
+                      raise SystemExit('Unexpected directory or symlink entry.')
+                  relative = PurePosixPath(*p.parts[1:])
+                  if not relative.parts or '.git' in relative.parts or relative.name in {'.env', 'id_rsa', 'id_ed25519'}:
+                      raise SystemExit('Forbidden archive entry.')
+                  name = relative.as_posix()
+                  if name in payload:
+                      raise SystemExit('Duplicate archive path.')
+                  payload[name] = archive.read(entry)
+          manifest = json.loads(payload['MANIFEST.json'])
+          if manifest['release'] != '0.1.0a2' or len(manifest['files']) != 117:
+              raise SystemExit('Unexpected manifest.')
+          declared = {item['path'] for item in manifest['files']}
+          if declared != set(payload) - {'MANIFEST.json'}:
+              raise SystemExit('Manifest inventory mismatch.')
+          for item in manifest['files']:
+              content = payload[item['path']]
+              if len(content) != item['bytes'] or hashlib.sha256(content).hexdigest() != item['sha256']:
+                  raise SystemExit('File hash mismatch: ' + item['path'])
+          # Workflow files are restored separately through the authenticated connector.
+          # The short-lived import job must not write new workflow definitions.
+          deferred = {'.github/workflows/ci.yml'}
+          for name in payload:
+              if name.startswith('.github/workflows/') and name not in deferred:
+                  raise SystemExit('Unexpected workflow in archive.')
+              destination = root / name
+              if name not in deferred and destination.exists():
+                  raise SystemExit('Destination conflict: ' + name)
+          for name, content in payload.items():
+              if name in deferred:
+                  continue
+              destination = root / name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(content)
+          report = {'archive_sha256': expected_sha, 'archive_bytes': len(data), 'archive_files': len(payload), 'manifest_records_verified': len(declared), 'imported_files': len(payload) - len(deferred), 'deferred_files': sorted(deferred), 'source_execution': False}
+          (root / '.github' / 'a2-import-receipt.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Commit imported sources (fast-forward only)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- .
+          git commit -m 'chore: import verified ProcureFlow v0.1.0a2 sources via Floot' -m 'Archive SHA-256: 39fa5c0dedace0d5cc389ed57f24d3a41918f6ca414a0aaa77daed695fe05233. Original ci.yml is restored separately.'
+          git push origin HEAD:main
