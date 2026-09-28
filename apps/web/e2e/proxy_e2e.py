@@ -35,6 +35,7 @@ def test_audit_sse_reaches_browser_through_native_proxy(page):
     result = page.evaluate("""async () => {
       const headers = {Authorization:'Bearer demo-buyer'};
       const requests = await (await fetch('/backend/api/v1/requests', {headers})).json();
+      const started = performance.now();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
       let reader;
@@ -48,9 +49,13 @@ def test_audit_sse_reaches_browser_through_native_proxy(page):
           if (chunk.done) break;
           text += new TextDecoder().decode(chunk.value);
         }
-        return {status:r.status, type:r.headers.get('content-type'), text};
+        return {status:r.status, type:r.headers.get('content-type'), text,
+                encoding:r.headers.get('content-encoding'), cache:r.headers.get('cache-control'),
+                firstEventMs:performance.now()-started};
       } finally {clearTimeout(timer); if(reader) await reader.cancel(); controller.abort();}
     }""")
     assert result['status'] == 200 and result['type'].startswith('text/event-stream')
     assert 'data:' in result['text'] and 'id:' in result['text']
     assert 'demo-buyer' not in result['text']
+    assert result['encoding'] is None and 'no-transform' in result['cache']
+    assert result['firstEventMs'] < 8000  # Before the API's ten-second stream ends.

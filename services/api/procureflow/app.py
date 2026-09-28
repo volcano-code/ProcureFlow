@@ -76,7 +76,9 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cache-Control"] = "no-store"
+        # Streaming audit events must not be buffered by a proxy compressor.
+        is_event_stream = response.headers.get("content-type", "").startswith("text/event-stream")
+        response.headers["Cache-Control"] = "no-store, no-transform" if is_event_stream else "no-store"
         if request.url.path == "/":
             response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
         return response

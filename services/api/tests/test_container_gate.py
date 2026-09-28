@@ -55,3 +55,17 @@ def test_native_gate_blocks_without_network_or_mutations(tmp_path, monkeypatch):
 def test_native_gate_refuses_arbitrary_targets(tmp_path, monkeypatch, url):
     monkeypatch.setattr(gate.httpx, "Client", lambda **_: pytest.fail("No network"))
     assert gate.run(url, tmp_path, True) == 2
+
+
+def test_sse_headers_prevent_proxy_buffering_without_relaxing_auth(system):
+    from conftest import BUYER, request
+    client, _, _ = system
+    r = request(client)
+    path = f"/api/v1/requests/{r['id']}/events/stream"
+    denied = client.get(path)
+    assert denied.status_code == 401 and denied.headers["cache-control"] == "no-store"
+    streamed = client.get(path, headers=BUYER)
+    assert streamed.status_code == 200
+    assert streamed.headers["cache-control"] == "no-store, no-transform"
+    assert streamed.headers["x-accel-buffering"] == "no"
+    assert "data:" in streamed.text and "id:" in streamed.text
