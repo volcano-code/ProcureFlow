@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,7 +35,6 @@ def run(output: Path) -> int:
         report.update(status="passed" if code == 0 else "failed", exit_code=code,
                       elapsed_seconds=round(time.monotonic() - start, 2))
         if code == 0:
-            import xml.etree.ElementTree as ET
             suites = ET.parse(output / "postgres.xml").getroot().iter("testsuite")
             counts = {k: 0 for k in ("tests", "failures", "errors", "skipped")}
             for suite in suites:
@@ -45,11 +45,16 @@ def run(output: Path) -> int:
                 code = 1
                 report.update(status="failed", reason="POSTGRES_TESTS_MISSING_OR_SKIPPED")
         return code
+    except (ET.ParseError, ValueError):
+        code = 1
+        report.update(status="failed", reason="POSTGRES_REPORT_INVALID")
+        return code
     except (subprocess.TimeoutExpired, OSError):
         code = 1
         report.update(status="failed", reason="POSTGRES_RUN_FAILED")
         return code
     finally:
+        report["exit_code"] = code
         (output / "postgres-gate.json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps(report, indent=2))
 

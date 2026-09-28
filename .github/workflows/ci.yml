@@ -51,6 +51,8 @@ jobs:
       # Runs actual tsc/build/production Next + 4 native browser tests;
       # no substitution of apps/demo, no skipping missing prerequisites.
       - run: python scripts/verify_next.py --output evals/reports/ci/next-gate
+      - name: Assert build preserves frontend configuration
+        run: git diff --exit-code -- apps/web/tsconfig.json apps/web/package-lock.json apps/web/package.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
