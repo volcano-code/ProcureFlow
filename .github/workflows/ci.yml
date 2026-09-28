@@ -16,7 +16,7 @@ jobs:
           node-version: '22'
       - run: python -m pip install -r services/api/requirements-dev.txt
       - run: python -m playwright install --with-deps chromium
-      - run: python scripts/test.py -q --junitxml=../../evals/reports/ci/pytest.xml
+      - run: python scripts/test.py -q -m 'not postgres' --junitxml=../../evals/reports/ci/pytest.xml
         env:
           PF_REQUIRE_BROWSER: '1'
           PF_CRASH_REPORT_DIR: ${{ github.workspace }}/evals/reports/ci/crash
@@ -30,7 +30,7 @@ jobs:
           name: core-validation-records
           path: evals/reports/ci
   native-next-browser:
-    # This is a pending strict gate, NOT evidence of a remotely executed green CI.
+    # Full native production build and browser checks; no static fallback.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,13 +43,11 @@ jobs:
           node-version: '22'
       - run: python -m pip install -r services/api/requirements-dev.txt
       - run: python -m playwright install --with-deps chromium
-      # Registry DNS was unavailable at artifact creation. Do not invent a lockfile.
-      # On first successful networked run review/commit package-lock.json.
-      # Require npm ci exclusively before any reproducible release claim.
-      - name: Install frontend dependencies (bootstrap until a reviewed lock exists)
+      - name: Frozen frontend install
         working-directory: apps/web
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+        run: npm ci
+      - name: Assert install did not rewrite the lock
+        run: git diff --exit-code -- apps/web/package-lock.json apps/web/package.json
       # Runs actual tsc/build/production Next + 4 native browser tests;
       # no substitution of apps/demo, no skipping missing prerequisites.
       - run: python scripts/verify_next.py --output evals/reports/ci/next-gate
@@ -60,3 +58,71 @@ jobs:
           path: |
             evals/reports/ci/next-gate
             apps/web/package-lock.json
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-only
+          POSTGRES_DB: procureflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procureflow_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      PF_TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-disposable-only@127.0.0.1:5432/procureflow_test
+      PF_ALLOW_DATABASE_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-postgres.txt
+      - run: python scripts/verify_postgres.py --output evals/reports/ci/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postgres-validation-records
+          path: evals/reports/ci/postgres
+  compose-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install httpx==0.28.1
+      - run: python scripts/init_postgres_env.py
+      - name: Build and start isolated local stack
+        run: docker compose --env-file .env.postgres -f compose.postgres.yaml up --build -d --wait --wait-timeout 180
+      - name: HTTP to independent container Worker
+        run: python scripts/compose_smoke.py --output evals/reports/ci/compose/smoke.json
+      - name: Inspect database side effects
+        run: |
+          docker compose --env-file .env.postgres -f compose.postgres.yaml exec -T api python -c "import sqlite3; n=sqlite3.connect('/data/mock-erp.sqlite3').execute('select count(*) from drafts').fetchone()[0]; assert n==1, n; print('mock_drafts=1')"
+          docker compose --env-file .env.postgres -f compose.postgres.yaml exec -T db psql -U procureflow -d procureflow -tAc "SELECT count(*) FROM external_operations WHERE status='COMPLETED'" | grep -x 1
+      - name: Check persistence after restart
+        run: |
+          docker compose --env-file .env.postgres -f compose.postgres.yaml restart api worker
+          sleep 5
+          python -c "import httpx,json; r=json.load(open('evals/reports/ci/compose/smoke.json')); c=httpx.Client(base_url='http://127.0.0.1:8000',headers={'Authorization':'Bearer demo-buyer'},timeout=10); assert c.get('/ready').status_code==200; x=c.get('/api/v1/operations/'+r['operation_id']); assert x.status_code==200 and x.json()['status']=='COMPLETED' and x.json()['remote_id']==r['remote_id']"
+      - name: Capture logs
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/compose
+          docker compose --env-file .env.postgres -f compose.postgres.yaml logs --no-color > evals/reports/ci/compose/containers.log 2>&1
+          docker compose --env-file .env.postgres -f compose.postgres.yaml ps -a > evals/reports/ci/compose/services.txt
+      - name: Remove only this disposable CI stack
+        if: always()
+        run: docker compose --env-file .env.postgres -f compose.postgres.yaml down -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compose-validation-records
+          path: evals/reports/ci/compose
