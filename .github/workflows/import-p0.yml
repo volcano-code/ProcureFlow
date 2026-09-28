@@ -1,0 +1,56 @@
+name: Import verified P0 development changes
+on:
+  push:
+    branches: ['develop/a3-p0-gates']
+    paths: ['.github/workflows/import-p0.yml']
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify archive and every preimage before applying
+        run: |
+          python - <<'PY'
+          import hashlib, io, json, subprocess, urllib.request, zipfile
+          from pathlib import Path, PurePosixPath
+          base='e53a6bd3c040b1532b36e14dd52020459781ef91'
+          assert subprocess.check_output(['git','rev-parse','HEAD^'], text=True).strip()==base, 'Branch changed; refuse import'
+          url='https://7a1dbdde-05a7-4e38-bda3-96b84a91c526.sandbox.floot.app/_cdn/static/64788743-00e2-4096-9189-cb01cbea9b55-ProcureFlow_p0_delta.zip'
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data=response.read(1000000)
+          assert len(data)==51160 and hashlib.sha256(data).hexdigest()=='09132ab31dcd6a38bc9598515e05c3f978c7a56bb836ed26abb5d538800ecb62'
+          archive=zipfile.ZipFile(io.BytesIO(data))
+          manifest=json.loads(archive.read('update.json'))
+          assert manifest['baseline']==base and len(manifest['files'])==22
+          names=['update.json']+['payload/'+f['path'] for f in manifest['files']]
+          assert len(set(names))==len(names) and sorted(names)==sorted(archive.namelist())
+          contents=[]
+          for record in manifest['files']:
+              name=record['path']; path=PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts and str(path)==name
+              assert path.parts[0] in {'apps','services','scripts','docs','infra','README.md','THIRD_PARTY_NOTICES.md','compose.postgres.yaml'}
+              target=Path(name)
+              assert not target.is_symlink()
+              old=record['before_sha256']
+              assert (hashlib.sha256(target.read_bytes()).hexdigest()==old) if old else not target.exists(), name
+              content=archive.read('payload/'+name)
+              assert hashlib.sha256(content).hexdigest()==record['sha256'], name
+              contents.append((target, content))
+          for target, content in contents:
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(content)
+          subprocess.run(['git','add','--',*[str(p) for p,_ in contents]],check=True)
+          print(json.dumps({'verified_files':len(contents),'archive_sha256':hashlib.sha256(data).hexdigest(),'source_execution':False}))
+          PY
+      - name: Commit without force-pushing
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --cached --check
+          git commit -m 'feat: lock frontend dependencies and implement PostgreSQL readiness, concurrency tests and local Compose stack'
+          git push origin HEAD:develop/a3-p0-gates
