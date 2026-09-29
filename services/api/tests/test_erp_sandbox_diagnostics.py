@@ -63,3 +63,39 @@ def test_remote_trace_rejects_oversized_or_malformed_values():
     assert module.remote_error_details({'exc': 'x'*65537, '_server_messages': 'x'*16385}) == {}
     assert module.remote_error_details({'exc': {}, '_server_messages': []}) == {}
     assert module.remote_error_details({'exc': json.dumps([{}])}) == {}
+
+
+@pytest.mark.parametrize('field', ['supplier', 'company', 'currency', 'transaction_date',
+    'custom_procureflow_operation_key', 'custom_procureflow_snapshot_hash', 'item_code', 'uom', 'qty', 'rate', 'grand_total'])
+def test_readback_diagnostics_expose_only_fixed_boolean_field_checks(field):
+    module = runner()
+    expected = {'supplier': 'PRIVATE_SUPPLIER', 'company': 'PRIVATE_COMPANY', 'currency': 'CNY',
+        'transaction_date': '2026-01-01', 'custom_procureflow_operation_key': 'PRIVATE_KEY',
+        'custom_procureflow_snapshot_hash': 'PRIVATE_HASH',
+        'items': [{'item_code': 'PRIVATE_ITEM', 'uom': 'EA', 'qty': '20', 'rate': '100.00'}]}
+    remote = json.loads(json.dumps(expected))
+    remote.update(docstatus=0, grand_total=2000)
+    assert all(module.document_contract_observation(expected, httpx.Response(200, json={'data': remote})).values())
+    if field in {'qty', 'rate'}:
+        remote['items'][0][field] = 1
+    elif field in {'item_code', 'uom'}:
+        remote['items'][0][field] = 'PRIVATE_DIFFERENT'
+    elif field == 'grand_total':
+        remote[field] = 1
+    else:
+        remote[field] = 'PRIVATE_DIFFERENT'
+    result = module.document_contract_observation(expected, httpx.Response(200, json={'data': remote}))
+    assert result[field + '_matches'] is False
+    assert all(type(value) is bool for value in result.values())
+    assert 'PRIVATE_' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('body', [None, [], {}, {'data': None}, {'data': {'items': []}}, {'data': {'items': [None]}}])
+def test_readback_diagnostics_reject_malformed_shape_without_echo(body):
+    assert runner().document_contract_observation({}, httpx.Response(200, json=body)) == {'document_shape_valid': False}
+
+
+def test_safe_failure_retains_known_readback_code_only():
+    module = runner()
+    assert module.safe_failure(RuntimeError('ERP_READBACK_PAYLOAD_MISMATCH')) == 'ERP_READBACK_PAYLOAD_MISMATCH'
+    assert module.safe_failure(RuntimeError('ERP_READBACK_PAYLOAD_MISMATCH PRIVATE_CANARY')) == 'BUSINESS_ROUNDTRIP_FAILED'

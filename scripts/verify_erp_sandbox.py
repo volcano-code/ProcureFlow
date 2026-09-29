@@ -6,6 +6,7 @@ approvals. No real human procurement approval or model quality is asserted.
 """
 from __future__ import annotations
 import argparse
+from decimal import Decimal, InvalidOperation
 from contextlib import contextmanager
 import http.server
 import json
@@ -96,12 +97,39 @@ def http_observation(method, path, response):
     return result
 
 
+def document_contract_observation(expected, response):
+    """Compare fixed draft fields without exporting either payload or document."""
+    try:
+        record = response.json().get('data')
+        if not isinstance(record, dict) or not isinstance(record.get('items'), list):
+            return {'document_shape_valid': False}
+        if len(record['items']) != 1 or not isinstance(record['items'][0], dict):
+            return {'document_shape_valid': False}
+        item, wanted = record['items'][0], expected['items'][0]
+        checks = {'document_shape_valid': True,
+            'draft_status_matches': type(record.get('docstatus')) is int and record['docstatus'] == 0}
+        for field in ('supplier', 'company', 'currency', 'transaction_date',
+                      'custom_procureflow_operation_key', 'custom_procureflow_snapshot_hash'):
+            checks[field + '_matches'] = record.get(field) == expected.get(field)
+        for field in ('item_code', 'uom'):
+            checks[field + '_matches'] = item.get(field) == wanted.get(field)
+        for field in ('qty', 'rate'):
+            checks[field + '_matches'] = Decimal(str(item.get(field))) == Decimal(str(wanted.get(field)))
+        checks['grand_total_matches'] = Decimal(str(record.get('grand_total'))) == (
+            Decimal(str(wanted['qty'])) * Decimal(str(wanted['rate'])))
+        return checks
+    except (ValueError, TypeError, KeyError, AttributeError, InvalidOperation):
+        return {'document_shape_valid': False}
+
+
 def safe_failure(error):
     reason = str(error)
     if re.fullmatch(r'ERP_HTTP_[0-9]{3}|HTTP_[0-9]{3}_EXPECTED_[0-9]{3}', reason):
         return reason
     if reason in {'PROCUREFLOW_START_FAILED', 'PROCUREFLOW_MIGRATION_FAILED',
-            'WORKER_FAILED', 'RECOVERY_NOT_ENTERED', 'NOT_COMPLETED'}:
+            'WORKER_FAILED', 'RECOVERY_NOT_ENTERED', 'NOT_COMPLETED',
+            'ERP_READBACK_PAYLOAD_MISMATCH', 'ERP_RESULT_UNKNOWN', 'ERP_ADAPTER_FAILURE',
+            'ERP_REMOTE_OPERATION_KEY_MISMATCH', 'REMOTE_PAYLOAD_MISMATCH'}:
         return reason
     return 'BUSINESS_ROUNDTRIP_FAILED'
 
@@ -110,6 +138,7 @@ def safe_failure(error):
 def fault_proxy():
     """Loopback-only forwarding of test traffic; lose one committed POST receipt."""
     state={'posts':[], 'lose_next':False, 'requests':[]}
+    expected_draft = {}  # Ephemeral local comparison input; never included in reports.
     upstream=httpx.Client(base_url=TARGET,trust_env=False,follow_redirects=False,timeout=30)
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args): pass
@@ -126,7 +155,14 @@ def fault_proxy():
             headers={k:self.headers[k] for k in ('Authorization','Content-Type','Accept') if k in self.headers}
             try:
                 response=upstream.request(self.command,self.path,content=body,headers=headers)
-                state['requests'] = (state['requests'] + [http_observation(self.command, path, response)])[-64:]
+                observation = http_observation(self.command, path, response)
+                if self.command == 'POST' and response.status_code < 300:
+                    expected_draft.clear()
+                    expected_draft.update(json.loads(body))
+                elif (self.command == 'GET' and path.startswith('/api/resource/Supplier Quotation/')
+                      and expected_draft and response.status_code < 300):
+                    observation['draft_contract'] = document_contract_observation(expected_draft, response)
+                state['requests'] = (state['requests'] + [observation])[-64:]
                 content=response.content; status=response.status_code
                 if self.command=='POST':
                     key=json.loads(body).get('custom_procureflow_operation_key')
