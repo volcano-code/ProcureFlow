@@ -38,6 +38,8 @@ def test_seed_bootstraps_reference_fixtures_before_company_without_bypassing_lin
     rt = runtime()
     rt.lab_session = lambda: nullcontext(fake)
     monkeypatch.setitem(sys.modules, 'lab_runtime', rt)
+    # Match Python's script-directory import path used by the real container.
+    monkeypatch.syspath_prepend(str(ROOT / 'integrations/erpnext/sandbox'))
     spec = importlib.util.spec_from_file_location('seed_reference_test', ROOT / 'integrations/erpnext/sandbox/seed.py')
     seed = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(seed)
