@@ -14,6 +14,8 @@ jobs:
       COMPOSE_PROJECT_NAME: pf-erp-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
+      - name: Archive only tracked source at this exact commit
+        run: git archive --format=zip --output="${RUNNER_TEMP}/procureflow-source.zip" "${GITHUB_SHA}"
       - uses: actions/setup-python@v5
         with: {python-version: '3.13'}
       - run: python -m pip install -r services/api/requirements-dev.txt
@@ -43,6 +45,9 @@ jobs:
       - name: Require complete ERP validation evidence
         if: always()
         run: python scripts/check_erp_sandbox_evidence.py --directory evals/reports/ci/erp-sandbox > evals/reports/ci/erp-sandbox/acceptance.json
+      - name: Require select-only Account permissions in both stages
+        if: always()
+        run: python integrations/erpnext/sandbox/lab_permissions.py --directory evals/reports/ci/erp-sandbox > evals/reports/ci/erp-sandbox/reference-access.json
       - name: Destroy only this disposable lab
         if: always()
         run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml down -v --remove-orphans
@@ -52,3 +57,10 @@ jobs:
           name: real-erpnext-validation-records
           path: evals/reports/ci/erp-sandbox
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: erp-sandbox-source
+          path: ${{ runner.temp }}/procureflow-source.zip
+          if-no-files-found: error
+          retention-days: 7

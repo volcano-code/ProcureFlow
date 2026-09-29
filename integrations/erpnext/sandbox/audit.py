@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import frappe
 import erpnext
-from seed import USER
+from seed import COMPANY, USER
 from lab_runtime import lab_session, phase, run_stage
+from lab_permissions import verify_account_reference
 
 
 def main():
@@ -36,10 +37,14 @@ def main():
         assert duplicate_blocked
         denied={p:not frappe.has_permission('Supplier Quotation',p,user=USER) for p in ('submit','cancel','delete')}
         assert all(denied.values()) and not frappe.has_permission('Purchase Order','create',user=USER)
+        phase('account-reference-permissions')
+        account = frappe.db.get_value('Company', COMPANY, 'default_payable_account')
+        reference_permissions = verify_account_reference(frappe.has_permission, USER, account)
         result={'status':'passed','erpnext_version':erpnext.__version__,'frappe_version':frappe.__version__,
             'database_version':frappe.db.sql('SELECT VERSION()')[0][0],
             'draft_count':2,'purchase_order_count':0,'submitted_count':0,
             'remote_unique_index_present':True,'duplicate_key_update_rejected_and_rolled_back':True,
+            'reference_permissions':reference_permissions,
             'restricted_permissions':denied,'adapter_readback_independently_checked':True}
         frappe.db.rollback()
         return result

@@ -15,6 +15,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from erpnext.setup.setup_wizard.operations import install_fixtures
 
 from lab_runtime import SITE, lab_session, phase, run_stage
+from lab_permissions import verify_account_reference
 COMPANY = 'ProcureFlow Sandbox'
 USER = 'pf-integration@example.invalid'
 ROLE = 'ProcureFlow Draft Integration'
@@ -60,6 +61,9 @@ def main():
         frappe.get_doc({'doctype':'Role','role_name':ROLE,'desk_access':1}).insert()
         for dt in ('Supplier Quotation','Supplier','Company','Item','UOM','Currency','Custom Field','Price List'):
             add_permission(dt,ROLE,ptype='read')
+        # ERPNext v16.36.0 party.get_party_account validates Account select/read
+        # even for a Supplier Quotation. Select is sufficient; do NOT grant read.
+        add_permission('Account', ROLE, ptype='select')
         for right in ('create','write'):
             update_permission_property('Supplier Quotation',ROLE,0,right,1)
         # Explicitly no submit/cancel/delete or purchase-order permissions.
@@ -79,6 +83,9 @@ def main():
             raise RuntimeError('DRAFT_ROLE_NOT_RESTRICTED')
         if frappe.has_permission('Purchase Order','create',user=USER):
             raise RuntimeError('UNEXPECTED_PO_PERMISSION')
+        phase('account-reference-permissions')
+        account = frappe.db.get_value('Company', COMPANY, 'default_payable_account')
+        reference_permissions = verify_account_reference(frappe.has_permission, USER, account)
         phase('private-credentials')
         path = Path('/tmp/pf-erp-sandbox-credentials.json')
         fd=os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
@@ -87,6 +94,7 @@ def main():
                 'api_key':key,'api_secret':secret,'company':COMPANY,'user':USER,
                 'supplier':supplier,'sku':'PF-SANDBOX-ITEM','permissions':permissions},f)
         return {'synthetic_only': True, 'permissions': permissions,
+            'reference_permissions': reference_permissions,
             'credentials_written_privately': True, 'site_context': 'bench-sites',
             'integration_user_type': 'System User'}
 
