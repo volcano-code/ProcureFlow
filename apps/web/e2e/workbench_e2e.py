@@ -56,6 +56,10 @@ def test_native_success_evidence_and_persisted_request(page):
     # Credentials are intentionally kept in memory, not persisted to localStorage.
     page.reload();page.get_by_test_id('login-demo-buyer').click()
     expect(page.get_by_test_id('proposal-body')).to_contain_text('MOCK-SQ-')
+    page.get_by_test_id('verify-erp').click()
+    expect(page.get_by_test_id('erp-verification')).to_contain_text('草稿与审批快照一致')
+    expect(page.get_by_test_id('erp-verification')).to_contain_text('本次仅回读')
+    expect(page.get_by_test_id('request-status')).to_have_text('草稿已创建')
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     output=os.getenv('PF_SCREENSHOT_DIR')
     if output:

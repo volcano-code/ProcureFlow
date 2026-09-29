@@ -12,6 +12,7 @@ const labels: Record<keyof QuoteValues,string> = {supplier_id:"供应商编码",
 const fields = Object.keys(labels) as (keyof QuoteValues)[];
 const requestFields = [["title","需求名称","研发工位支架采购"], ["sku","型号","STAND-01"],
   ["quantity","数量","20"], ["budget","预算","30000.00"], ["max_delivery_days","最长交期","14"]] as const;
+type VerificationReceipt = {status:string; verified_at:string; remote_id:string|null; reason?:string; simulated:boolean};
 const isFrozen = (r:ProcurementRequest|null) => !!r && ["ERP_PENDING","ERP_CREATED","RECONCILING","NEEDS_HUMAN"].includes(r.status);
 
 export default function Workbench() {
@@ -27,6 +28,7 @@ export default function Workbench() {
   const [confirming,setConfirming] = useState<Quote|null>(null);
   const [requestForm,setRequestForm] = useState<ProcurementRequest|"new"|null>(null);
   const [operation,setOperation] = useState<Operation|null>(null);
+  const [verification,setVerification] = useState<VerificationReceipt|null>(null);
   const [error,setError] = useState("");
   const [busy,setBusy] = useState(false);
   const [stream,setStream] = useState("idle");
@@ -45,13 +47,13 @@ export default function Workbench() {
     finally { mutationLock.current = false; setBusy(false); }
   },[]);
   const clearContext = useCallback(() => {
-    setSelected(null); setQuotes([]); setEvents([]); setOperation(null); setEvidence(null);
+    setSelected(null); setQuotes([]); setEvents([]); setOperation(null); setEvidence(null); setVerification(null);
     setEditing(null); setConfirming(null); setRequestForm(null); setStream("idle");
   },[]);
   const refresh = useCallback(async(id:string, credential=token) => {
     const epoch = ++readEpoch.current;
     activeScope.current = credential + "\n" + id;
-    setEvidence(null); setEditing(null); setConfirming(null);
+    setEvidence(null); setEditing(null); setConfirming(null); setVerification(null);
     const [r,q,e,list] = await Promise.all([
       api<ProcurementRequest>(`/requests/${id}`,credential), api<Quote[]>(`/requests/${id}/quotes`,credential),
       api<AuditEvent[]>(`/requests/${id}/events`,credential), api<ProcurementRequest[]>("/requests",credential),
@@ -206,7 +208,15 @@ export default function Workbench() {
                 <button className="secondary" data-testid="reject" disabled={busy} onClick={()=>void approve("reject")}>拒绝此方案</button></div>}
               {buyer && selected.status === "APPROVED" && <button className="primary" data-testid="execute" disabled={busy||!cap?.erp_draft_writes_enabled} onClick={()=>void execute()}>
                 {cap?.erp_mode === "mock" ? "创建模拟 ERP 草稿" : "创建已批准的 ERPNext 草稿"}</button>}
-              {operation && <><p className="decision-result">{operation.status} · {operation.remote_id||operation.error}</p>
+              {operation && <><button className="secondary" data-testid="verify-erp" disabled={busy} onClick={()=>void act(async()=>{
+                const scope = activeScope.current;
+                const receipt = await api<VerificationReceipt>(`/operations/${operation.id}/verify`,token,"POST");
+                if (activeScope.current === scope) setVerification(receipt);
+              })}>独立回读核对 ERP 草稿</button>
+                {verification && <div data-testid="erp-verification" role="status"><strong>{verification.status === "verified" ? "草稿与审批快照一致" : "核对未通过：" + verification.status}</strong>
+                  <p>{verification.simulated ? "模拟 ERP" : "ERPNext"} · {verification.verified_at} · {verification.remote_id||verification.reason}</p>
+                  <small>本次仅回读，不创建、不重试、不改写历史执行状态。</small></div>}
+                <p className="decision-result">{operation.status} · {operation.remote_id||operation.error}</p>
                 {buyer && operation.status !== "COMPLETED" && <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{
                   await api(`/operations/${operation.id}/process`,token,"POST"); await refresh(selected.id);
                 })}>处理 / 只读核对</button>}</>}
