@@ -64,6 +64,10 @@ def main():
         # ERPNext v16.36.0 party.get_party_account validates Account select/read
         # even for a Supplier Quotation. Select is sufficient; do NOT grant read.
         add_permission('Account', ROLE, ptype='select')
+        # Custom DocPerm defaults read/export to 1 even for ptype='select'.
+        # Revoke export before read; keep Frappe's validation enabled.
+        update_permission_property('Account', ROLE, 0, 'export', 0)
+        update_permission_property('Account', ROLE, 0, 'read', 0)
         for right in ('create','write'):
             update_permission_property('Supplier Quotation',ROLE,0,right,1)
         # Explicitly no submit/cancel/delete or purchase-order permissions.

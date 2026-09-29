@@ -115,3 +115,32 @@ def test_seed_grants_select_without_account_read_or_mutation():
     audit = (ROOT / 'integrations/erpnext/sandbox/audit.py').read_text()
     assert 'verify_account_reference(frappe.has_permission, USER, account)' in audit
     assert 'ignore_permissions=True' not in source
+
+
+@pytest.mark.parametrize('implicit_read,implicit_export', [(True, True), (True, False), (False, True), (False, False)])
+def test_seed_revokes_frappe_implicit_defaults_without_disabling_validation(implicit_read, implicit_export):
+    # Execute the actual seed configuration statements against a default-aware
+    # permission store. A fake that defaults every omitted flag to 0 hid this bug.
+    tree = ast.parse((ROOT / 'integrations/erpnext/sandbox/seed.py').read_text())
+    statements = sorted((node for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id in {'add_permission', 'update_permission_property'}
+        and node.value.args and isinstance(node.value.args[0], ast.Constant)
+        and node.value.args[0].value == 'Account'), key=lambda node: node.lineno)
+    stored = {}
+    events = []
+    def add(doctype, role, *, ptype):
+        assert doctype == 'Account' and role == 'Restricted Test Role' and ptype == 'select'
+        stored.update({right: False for right in lab.ACCOUNT_RIGHTS})
+        stored.update(read=implicit_read, export=implicit_export, select=True)
+        events.append(('grant', ptype))
+    def update(doctype, role, level, right, value, validate=True):
+        assert doctype == 'Account' and role == 'Restricted Test Role' and level == 0
+        assert validate is True and value == 0
+        stored[right] = bool(value)
+        events.append(('revoke', right))
+    code = compile(ast.Module(body=statements, type_ignores=[]), '<seed-account-configuration>', 'exec')
+    exec(code, {'add_permission': add, 'update_permission_property': update, 'ROLE': 'Restricted Test Role'})
+    assert events == [('grant', 'select'), ('revoke', 'export'), ('revoke', 'read')]
+    assert lab.require_select_only(stored) == permissions()
