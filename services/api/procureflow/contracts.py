@@ -61,9 +61,11 @@ class QuoteValues(Contract):
     delivery_days: int | None = Field(default=None, ge=1, le=365, strict=True)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
-    @field_validator("supplier_id", "sku", "uom", "currency")
+    # ERP document names are opaque identifiers, not case-insensitive codes.
+    # Preserve supplier_id and sku through extraction, approval and readback.
+    @field_validator("uom", "currency")
     @classmethod
-    def clean_codes(cls, value):
+    def clean_units_and_currency(cls, value):
         return value.upper() if value is not None else value
 
 
