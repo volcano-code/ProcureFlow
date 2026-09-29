@@ -12,6 +12,7 @@ import secrets
 import frappe
 from frappe.permissions import add_permission, update_permission_property
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from erpnext.setup.setup_wizard.operations import install_fixtures
 
 from lab_runtime import SITE, lab_session, phase, run_stage
 COMPANY = 'ProcureFlow Sandbox'
@@ -23,6 +24,10 @@ def main():
     with lab_session():
         if frappe.db.exists('Company', COMPANY) or frappe.db.exists('User', USER):
             raise RuntimeError('REFUSE_ALREADY_SEEDED_LAB')
+        # bench --install-app does not run the setup wizard's reference fixtures.
+        # Use ERPNext's own initializer; do not ignore missing link validation.
+        phase('reference-fixtures')
+        install_fixtures.install(country='China')
         phase('fiscal-year')
         today = datetime.date.today(); year = str(today.year)
         if not frappe.db.exists('Fiscal Year', year):
@@ -32,16 +37,18 @@ def main():
         frappe.get_doc({'doctype':'Company','company_name':COMPANY,'abbr':'PFL',
             'default_currency':'CNY','country':'China',
             'create_chart_of_accounts_based_on':'Standard Template', 'chart_of_accounts':'Standard'}).insert()
+        phase('company-defaults')
+        install_fixtures.install_defaults(frappe._dict(currency='CNY', company_name=COMPANY))
         phase('uom')
         if not frappe.db.exists('UOM','EA'):
             frappe.get_doc({'doctype':'UOM','uom_name':'EA','must_be_whole_number':1}).insert()
         phase('supplier')
         frappe.get_doc({'doctype':'Supplier','supplier_name':'PF Synthetic Supplier',
-            'supplier_type':'Company','supplier_group':'All Supplier Groups'}).insert()
+            'supplier_type':'Company','supplier_group':'Local'}).insert()
         supplier = frappe.db.get_value('Supplier', {'supplier_name':'PF Synthetic Supplier'}, 'name')
         phase('item')
         frappe.get_doc({'doctype':'Item','item_code':'PF-SANDBOX-ITEM','item_name':'Synthetic Test Item',
-            'item_group':'All Item Groups','stock_uom':'EA','is_stock_item':0,'is_purchase_item':1}).insert()
+            'item_group':'Products','stock_uom':'EA','is_stock_item':0,'is_purchase_item':1}).insert()
         phase('custom-fields')
         create_custom_fields({'Supplier Quotation':[
             {'fieldname':'custom_procureflow_operation_key','label':'ProcureFlow operation', 'fieldtype':'Data','unique':1,'no_copy':1},
