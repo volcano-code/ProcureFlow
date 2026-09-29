@@ -55,7 +55,9 @@ def main():
             {'fieldname':'custom_procureflow_snapshot_hash','label':'ProcureFlow snapshot', 'fieldtype':'Data','no_copy':1}
         ]})
         phase('role')
-        frappe.get_doc({'doctype':'Role','role_name':ROLE,'desk_access':0}).insert()
+        # Frappe derives user_type from role desk access, not the User input alone.
+        # Only the explicitly listed document permissions below are granted.
+        frappe.get_doc({'doctype':'Role','role_name':ROLE,'desk_access':1}).insert()
         for dt in ('Supplier Quotation','Supplier','Company','Item','UOM','Currency','Custom Field','Price List'):
             add_permission(dt,ROLE,ptype='read')
         for right in ('create','write'):
@@ -70,6 +72,8 @@ def main():
         frappe.clear_cache(user=USER)
         frappe.db.commit()
         phase('verify-permissions')
+        if frappe.db.get_value('User', USER, 'user_type') != 'System User':
+            raise RuntimeError('INTEGRATION_USER_TYPE_MISMATCH')
         permissions = {p:bool(frappe.has_permission('Supplier Quotation',p,user=USER)) for p in ('read','create','write','submit','cancel','delete')}
         if not all(permissions[p] for p in ('read','create','write')) or any(permissions[p] for p in ('submit','cancel','delete')):
             raise RuntimeError('DRAFT_ROLE_NOT_RESTRICTED')
@@ -83,7 +87,8 @@ def main():
                 'api_key':key,'api_secret':secret,'company':COMPANY,'user':USER,
                 'supplier':supplier,'sku':'PF-SANDBOX-ITEM','permissions':permissions},f)
         return {'synthetic_only': True, 'permissions': permissions,
-            'credentials_written_privately': True, 'site_context': 'bench-sites'}
+            'credentials_written_privately': True, 'site_context': 'bench-sites',
+            'integration_user_type': 'System User'}
 
 if __name__ == '__main__':
     raise SystemExit(run_stage('seed', main))

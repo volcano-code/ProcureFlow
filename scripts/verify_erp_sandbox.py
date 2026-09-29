@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import socket
@@ -36,10 +37,43 @@ def validate_lab(credentials, env_file):
     return data
 
 
+def http_observation(method, path, response):
+    """Retain only fixed endpoint families, status and allowlisted error classes."""
+    family = 'other'
+    for resource in ('Custom Field', 'Company', 'Supplier Quotation', 'Supplier'):
+        prefix = '/api/resource/' + resource
+        if path == prefix or path.startswith(prefix + '/'):
+            family = resource
+            break
+    if path == '/api/method/frappe.auth.get_logged_user':
+        family = 'identity'
+    result = {'method': method if method in {'GET', 'POST'} else 'other',
+        'endpoint': family, 'status': response.status_code}
+    try:
+        body = response.json()
+        kind = body.get('exc_type') if isinstance(body, dict) else None
+        if kind in {'PermissionError', 'AuthenticationError', 'ValidationError',
+                'LinkValidationError', 'MandatoryError', 'DoesNotExistError'}:
+            result['error_type'] = kind
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def safe_failure(error):
+    reason = str(error)
+    if re.fullmatch(r'ERP_HTTP_[0-9]{3}|HTTP_[0-9]{3}_EXPECTED_[0-9]{3}', reason):
+        return reason
+    if reason in {'PROCUREFLOW_START_FAILED', 'PROCUREFLOW_MIGRATION_FAILED',
+            'WORKER_FAILED', 'RECOVERY_NOT_ENTERED', 'NOT_COMPLETED'}:
+        return reason
+    return 'BUSINESS_ROUNDTRIP_FAILED'
+
+
 @contextmanager
 def fault_proxy():
     """Loopback-only forwarding of test traffic; lose one committed POST receipt."""
-    state={'posts':[], 'lose_next':False}
+    state={'posts':[], 'lose_next':False, 'requests':[]}
     upstream=httpx.Client(base_url=TARGET,trust_env=False,follow_redirects=False,timeout=30)
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args): pass
@@ -56,6 +90,7 @@ def fault_proxy():
             headers={k:self.headers[k] for k in ('Authorization','Content-Type','Accept') if k in self.headers}
             try:
                 response=upstream.request(self.command,self.path,content=body,headers=headers)
+                state['requests'] = (state['requests'] + [http_observation(self.command, path, response)])[-64:]
                 content=response.content; status=response.status_code
                 if self.command=='POST':
                     key=json.loads(body).get('custom_procureflow_operation_key')
@@ -108,6 +143,7 @@ def exercise(data):
         if migrated.returncode != 0:
             log.close();raise AssertionError('PROCUREFLOW_MIGRATION_FAILED')
         p=start()
+        phase='erp-preflight'
         try:
             with httpx.Client(base_url=base,trust_env=False,timeout=30) as client:
                 def call(method,path,role='buyer',expected=200,**kwargs):
@@ -138,6 +174,7 @@ def exercise(data):
                 try:report['preflight']=adapter.preflight(expected_user=data['user'])
                 finally:adapter.client.close()
                 report['steps'].append('dedicated_identity_get_only_preflight')
+                phase='approval-safeguards'
                 req,proposal=prepare('Synthetic approval safeguards')
                 call('POST',f"/requests/{req['id']}/execute",expected=409,json={'snapshot_hash':proposal['snapshot_hash']})
                 call('POST',f"/requests/{req['id']}/approval",role='self',expected=403,json={'snapshot_hash':proposal['snapshot_hash']})
@@ -150,6 +187,7 @@ def exercise(data):
                 report['steps'].append('unapproved_self_approved_and_stale_writes_denied')
                 verified=[]
                 for label,lose in [('normal',False),('lost-receipt',True)]:
+                    phase=label
                     req,proposal=prepare('Synthetic '+label);approve(req,proposal);op=enqueue(req,proposal)
                     wire['lose_next']=lose;worker()
                     first=call('GET',f"/operations/{op['id']}")
@@ -168,6 +206,7 @@ def exercise(data):
                     verified.append({'operation_id':op['id'],'snapshot_hash':proposal['snapshot_hash'],
                         'remote_id':final['remote_id'],'expected_total':'2000.00','scenario':label})
                     report['steps'].append(label+'_independent_worker_draft_readback_and_replay')
+                phase='restart'
                 stop(p);p=start()
                 for result in verified:
                     assert call('GET',f"/operations/{result['operation_id']}")['remote_id']==result['remote_id']
@@ -175,6 +214,9 @@ def exercise(data):
                 report.update(status='passed',operations=verified,post_attempts=len(wire['posts']),
                     real_erpnext_drafts_verified=len(verified),api_business_database='SQLite',real_erp_database='MariaDB',
                     fault_injection='loopback HTTP gateway returns 504 after ERP commits; next worker only reads')
+        except Exception as error:
+            report.update(status='failed', phase=phase, reason=safe_failure(error),
+                network_attempted=True, http_evidence=wire['requests'])
         finally:stop(p);log.close()
     return report
 
@@ -193,10 +235,11 @@ def main(argv=None):
         except (OSError,ValueError,KeyError,TypeError):
             report['reason']='LAB_CONFIGURATION_MISMATCH'
         else:
-            try: report=exercise(data);code=0
+            try:
+                report=exercise(data)
+                code=0 if report.get('status')=='passed' else 1
             except Exception as error:
-                reason=str(error)
-                report={'status':'failed','network_attempted':True,'reason':reason if reason.replace('_','').isalnum() else type(error).__name__}
+                report={'status':'failed','network_attempted':True,'reason':safe_failure(error)}
                 code=1
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(report,indent=2)+'\n')
