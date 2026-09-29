@@ -49,15 +49,6 @@ def lab_session():
             os.chdir(previous)
 
 
-class _Discard:
-    """Do not retain or publish Frappe stdout, document values, or credentials."""
-    def write(self, value):
-        return len(value)
-
-    def flush(self):
-        pass
-
-
 def failure(error):
     kind = type(error).__name__
     frames = traceback.extract_tb(error.__traceback__)[-8:]
@@ -74,7 +65,9 @@ def run_stage(stage, function):
         raise ValueError('unknown lab stage')
     phase('initialization')
     try:
-        with redirect_stdout(_Discard()), redirect_stderr(_Discard()):
+        # A real text stream supports isatty/encoding/fileno used by Frappe.
+        # Discard output without retaining secrets or arbitrary-size buffers.
+        with open(os.devnull, 'w', encoding='utf-8') as sink, redirect_stdout(sink), redirect_stderr(sink):
             result = function()
         report = {'stage': stage, 'status': 'passed', **(result or {})}
         code = 0

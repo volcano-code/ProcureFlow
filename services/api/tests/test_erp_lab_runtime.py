@@ -123,3 +123,23 @@ def test_guard_code_preserved_and_success_machine_readable(capsys):
     assert module.run_stage('database-audit', lambda: {'draft_count': 2}) == 0
     assert json.loads(capsys.readouterr().out) == {
         'stage': 'database-audit', 'status': 'passed', 'draft_count': 2}
+
+
+def test_diagnostic_sink_supports_frappe_terminal_detection(capsys):
+    module = runtime()
+    canary = 'CANARY_TERMINAL_WARNING'
+    def initialize():
+        # Frappe's deprecation decorator checks this during module import.
+        assert sys.stdout.isatty() is False
+        assert sys.stderr.isatty() is False
+        assert sys.stdout.encoding == 'utf-8'
+        assert sys.stdout.writable()
+        assert isinstance(sys.stdout.fileno(), int)
+        print(canary)
+        sys.stderr.writelines([canary, '\n'])
+        sys.stdout.flush()
+        return {'stream_compatible': True}
+    assert module.run_stage('seed', initialize) == 0
+    capture = capsys.readouterr()
+    assert canary not in capture.out + capture.err
+    assert json.loads(capture.out)['stream_compatible'] is True
