@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      COMPOSE_PROJECT_NAME: pf-erp-${{ github.run_id }}
+      COMPOSE_PROJECT_NAME: pf-erp-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,7 +23,9 @@ jobs:
         run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml up -d
       - name: Seed synthetic master data and restricted identity
         run: |
-          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/seed.py
+          set -o pipefail
+          mkdir -p evals/reports/ci/erp-sandbox
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/seed.py | tee evals/reports/ci/erp-sandbox/seed.json
           mkdir -p .data
           docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp erp-backend:/tmp/pf-erp-sandbox-credentials.json .data/erp-sandbox.json
           chmod 600 .data/erp-sandbox.json
@@ -46,3 +48,4 @@ jobs:
         with:
           name: real-erpnext-validation-records
           path: evals/reports/ci/erp-sandbox
+          if-no-files-found: error

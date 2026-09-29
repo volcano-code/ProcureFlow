@@ -3,12 +3,13 @@ import json
 from pathlib import Path
 import frappe
 import erpnext
-from seed import connect_lab, USER
+from seed import USER
+from lab_runtime import lab_session, phase, run_stage
 
 
 def main():
-    connect_lab()
-    try:
+    with lab_session():
+        phase('database-evidence')
         ops=json.loads(Path('/tmp/pf-erp-result.json').read_text())['operations']
         assert len(ops)==2
         rows=frappe.get_all('Supplier Quotation',fields=['name','docstatus','grand_total','custom_procureflow_operation_key','custom_procureflow_snapshot_hash'])
@@ -40,7 +41,8 @@ def main():
             'draft_count':2,'purchase_order_count':0,'submitted_count':0,
             'remote_unique_index_present':True,'duplicate_key_update_rejected_and_rolled_back':True,
             'restricted_permissions':denied,'adapter_readback_independently_checked':True}
-        print(json.dumps(result,indent=2))
-    finally:frappe.db.rollback();frappe.destroy()
+        frappe.db.rollback()
+        return result
 
-if __name__=='__main__':main()
+if __name__ == '__main__':
+    raise SystemExit(run_stage('database-audit', main))
