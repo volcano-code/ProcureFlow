@@ -46,3 +46,20 @@ def test_cli_preserves_failure_exit_status(tmp_path, monkeypatch, status, code):
     output = tmp_path / 'report.json'
     assert module.main(['--ephemeral-test', '--output', str(output)]) == code
     assert json.loads(output.read_text())['status'] == status
+
+
+def test_remote_trace_exposes_only_allowlisted_locations_and_type_names():
+    module = runner()
+    raw = 'File "/SECRET_CANARY/controllers/get_item_details.py", line 123, in private\n  SECRET_CANARY\nFile "/SECRET_CANARY/SECRET_CANARY.py", line 9, in hidden'
+    body = {'exc': json.dumps([raw]), '_server_messages': 'No permission for Item Price SECRET_CANARY'}
+    result = module.remote_error_details(body)
+    assert result['source_locations'] == [{'file': 'get_item_details.py', 'line': 123}]
+    assert 'Item Price' in result['mentioned_doctypes']
+    assert 'SECRET_CANARY' not in json.dumps(result)
+
+
+def test_remote_trace_rejects_oversized_or_malformed_values():
+    module = runner()
+    assert module.remote_error_details({'exc': 'x'*65537, '_server_messages': 'x'*16385}) == {}
+    assert module.remote_error_details({'exc': {}, '_server_messages': []}) == {}
+    assert module.remote_error_details({'exc': json.dumps([{}])}) == {}

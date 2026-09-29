@@ -37,6 +37,41 @@ def validate_lab(credentials, env_file):
     return data
 
 
+
+def remote_error_details(body):
+    """Extract only allowlisted source locations and DocType names, never messages."""
+    files = {'app.py', '__init__.py', 'v1.py', 'client.py', 'document.py', 'base_document.py',
+        'permissions.py', 'db_query.py', 'query.py', 'builder.py', 'utils.py',
+        'supplier_quotation.py', 'buying_controller.py', 'accounts_controller.py',
+        'stock_controller.py', 'transaction_base.py', 'get_item_details.py',
+        'taxes_and_totals.py', 'pricing_rule.py', 'party.py', 'item.py', 'item_price.py',
+        'price_list.py', 'warehouse.py', 'stock_ledger.py'}
+    doctypes = ('Supplier Quotation', 'Supplier', 'Company', 'Item Price', 'Item', 'UOM',
+        'Currency', 'Custom Field', 'Price List', 'Account', 'Cost Center', 'Warehouse',
+        'Item Tax Template', 'Purchase Taxes and Charges Template', 'Buying Settings',
+        'Stock Settings', 'Supplier Group', 'Item Group', 'Currency Exchange', 'Pricing Rule')
+    details = {}
+    raw = body.get('exc', '')
+    if isinstance(raw, str) and len(raw) <= 65536:
+        try:
+            traces = json.loads(raw)
+        except ValueError:
+            traces = [raw]
+        if isinstance(traces, list) and all(isinstance(x, str) for x in traces):
+            frames = []
+            for filename, line in re.findall(r'File "[^"\n]*/([A-Za-z0-9_.-]+)", line ([0-9]{1,6})', '\n'.join(traces)):
+                if filename in files:
+                    frames.append({'file': filename, 'line': int(line)})
+            if frames:
+                details['source_locations'] = frames[-8:]
+    messages = body.get('_server_messages', '')
+    if isinstance(messages, str) and len(messages) <= 16384:
+        mentioned = [dt for dt in doctypes if re.search(r'(?<![A-Za-z])' + re.escape(dt) + r'(?![A-Za-z])', messages)]
+        if mentioned:
+            details['mentioned_doctypes'] = mentioned
+    return details
+
+
 def http_observation(method, path, response):
     """Retain only fixed endpoint families, status and allowlisted error classes."""
     family = 'other'
@@ -55,6 +90,7 @@ def http_observation(method, path, response):
         if kind in {'PermissionError', 'AuthenticationError', 'ValidationError',
                 'LinkValidationError', 'MandatoryError', 'DoesNotExistError'}:
             result['error_type'] = kind
+            result.update(remote_error_details(body))
     except (ValueError, TypeError):
         pass
     return result

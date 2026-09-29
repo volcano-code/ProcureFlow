@@ -10,13 +10,13 @@ The verifier checks the operation key, document identity, draft status, supplier
 
 All workspace readers, including auditors, can request a receipt. Unauthenticated and cross-workspace requests remain rejected. The model still has no approval or external-write authority. Legacy mock drafts lacking price/date are not silently enriched or certified; retain their historical records and use a new synthetic request for a complete new receipt.
 
-## Disposable real-software ERP lab: not yet accepted
+## Disposable real-software ERP lab: historical state at fc41b86
 
 `compose.erp-sandbox.yaml` creates a separate ERPNext/MariaDB test installation, fixed to `pf-erp-test.local`, with random local credentials and a matching random lab marker. It does not use the user's company account. The initializer requires `--create-ephemeral`, refuses to overwrite credentials, and writes a mode-0600 file. The roundtrip runner requires `--ephemeral-test` and refuses mismatched markers, company, site, user or item before networking.
 
 The intended gate provisions synthetic master data plus an integration role without submit/cancel/delete/Purchase Order creation permissions. It then tests normal draft creation and a gateway-injected 504 after the real ERP commits. It must independently read the ERP database, prove uniqueness, preserve draft status and retain the same IDs after API restart. Business state in this dedicated experiment is SQLite; ERP state is MariaDB. This is not a PostgreSQL+ERP joint test, a real human approval study, a live-model benchmark, or production certification.
 
-The first actual run, 36525414089 at commit 00ad3c7, FAILED in `Seed synthetic master data and restricted identity`, after the ERP startup step succeeded. Business roundtrip and independent database assertions did not execute. The exact initialization exception was not reliably extracted. Do not treat container startup, this configuration, or the existing mock tests as successful real-ERP acceptance.
+The first actual run, 36525414089 at commit 00ad3c7, FAILED in `Seed synthetic master data and restricted identity`, after the ERP startup step succeeded. Business roundtrip and independent database assertions did not execute. At that delivery the exact exception had not been reliably extracted. Stage 6 subsequently identified the relative logging-path failure and added repairs plus bounded diagnostics; see [stage 6](stage6-erp-sandbox.md) and the exact-commit CI results for the current state. Do not treat container startup, this configuration, or the existing mock tests as successful real-ERP acceptance.
 
 Run instructions for a fresh isolated lab (development diagnostics only until this gate is repaired):
 

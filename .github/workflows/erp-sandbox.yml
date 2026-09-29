@@ -40,6 +40,9 @@ jobs:
         run: |
           mkdir -p evals/reports/ci/erp-sandbox
           docker image inspect frappe/erpnext:v16.36.0 --format '{{json .RepoDigests}}' > evals/reports/ci/erp-sandbox/image-digests.json
+      - name: Require complete ERP validation evidence
+        if: always()
+        run: python scripts/check_erp_sandbox_evidence.py --directory evals/reports/ci/erp-sandbox > evals/reports/ci/erp-sandbox/acceptance.json
       - name: Destroy only this disposable lab
         if: always()
         run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml down -v --remove-orphans
