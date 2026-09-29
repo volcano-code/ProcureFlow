@@ -236,6 +236,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     def operation(operation_id: str, principal=Depends(identity)):
         return service.get_operation(principal, operation_id)
 
+    @app.post("/api/v1/operations/{operation_id}/verify")
+    def verify_operation(operation_id: str, principal=Depends(identity)):
+        return service.verify_operation(principal, operation_id)
+
     @app.post("/api/v1/operations/{operation_id}/process")
     def process(operation_id: str, principal=Depends(identity)):
         return service.process_operation(principal, operation_id)

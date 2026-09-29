@@ -142,7 +142,8 @@ def test_erp_transport_ambiguity():
 def test_remote_document_company_and_uom_must_match(field,value):
     p=payload()
     remote={"name":"SQ-TEST","docstatus":0,"snapshot_hash":p["snapshot_hash"],"supplier_id":"SUP-A",
-            "sku":"STAND-01","currency":"CNY","quantity":"2","total":"200.00","company":"Demo","uom":"EA"}
+            "sku":"STAND-01","currency":"CNY","quantity":"2","total":"200.00","company":"Demo","uom":"EA",
+            "unit_price":"100.00","transaction_date":p["transaction_date"]}
     assert remote_matches(remote,p)
     remote[field]=value
     assert not remote_matches(remote,p)

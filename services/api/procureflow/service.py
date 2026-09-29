@@ -359,6 +359,55 @@ class ProcurementService:
                 raise DomainError("NOT_FOUND", "Operation not found in this workspace", 404)
             return op_dto(row)
 
+    def _execution_target_matches(self, payload):
+        """Recovery must not consult another ERP or trust a modified stored snapshot."""
+        return (payload.get("erp_mode") == self.erp.mode
+                and payload.get("erp_company") == self.settings.erp_company
+                and payload.get("erp_target_fingerprint") == digest({"mode": self.erp.mode, "url": self.settings.erp_url})
+                and payload.get("snapshot_hash") == digest({k: v for k, v in payload.items() if k != "snapshot_hash"}))
+
+    def verify_operation(self, principal, operation_id):
+        """Independently read the ERP now. Never dispatch, retry, or alter business status.
+
+        An earlier COMPLETED record is historical; this receipt detects later ERP
+        drift without rewriting that record. Any workspace reader can verify.
+        """
+        with self.db.transaction() as session:
+            operation = session.scalar(select(OperationRow).where(
+                OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
+            if operation is None:
+                raise DomainError("NOT_FOUND", "Operation not found in this workspace", 404)
+            payload = dict(operation.payload)
+            request_id, expected_id = operation.request_id, operation.remote_id
+            historical_status = operation.status
+        receipt = {"operation_id": operation_id, "snapshot_hash": payload["snapshot_hash"],
+                   "operation_status": historical_status, "verified_at": now(),
+                   "status": "unavailable", "matches_snapshot": False, "draft_verified": False,
+                   "network_attempted": False, "external_write_attempted": False,
+                   "simulated": self.erp.mode == "mock", "remote_id": None}
+        if not self._execution_target_matches(payload):
+            receipt.update(status="blocked", reason="EXECUTION_TARGET_OR_SNAPSHOT_CHANGED")
+        else:
+            try:
+                receipt["network_attempted"] = self.erp.mode != "mock"
+                remote = self.erp.find(operation_id)
+                if remote is None:
+                    receipt.update(status="missing", reason="REMOTE_ABSENCE_NOT_PROOF_OF_NO_COMMIT")
+                elif (remote_matches(remote, payload, operation_id)
+                      and (expected_id is None or expected_id == remote["name"])):
+                    receipt.update(status="verified", matches_snapshot=True, draft_verified=True, remote_id=remote["name"])
+                else:
+                    receipt.update(status="mismatch", reason="REMOTE_PAYLOAD_MISMATCH")
+            except ERPRejected:
+                receipt.update(status="mismatch", reason="ERP_DOCUMENT_REJECTED")
+            except Exception:
+                # Do not persist arbitrary upstream errors, URLs, credentials or document prose.
+                receipt.update(status="unavailable", reason="ERP_VERIFICATION_UNAVAILABLE")
+        with self.db.transaction(write=True) as session:
+            self._request(session, principal, request_id, lock=True)
+            audit(session, principal, request_id, "ERP_VERIFICATION_" + receipt["status"].upper(), receipt)
+        return receipt
+
     def process_operation(self, principal, operation_id):
         require(principal, "buyer")
         with self.db.transaction(write=True) as session:
@@ -370,6 +419,12 @@ class ProcurementService:
             if operation.status == "COMPLETED":
                 return op_dto(operation)
             if operation.status == "IN_FLIGHT" and operation.lease_until and operation.lease_until > now():
+                return op_dto(operation)
+            if not self._execution_target_matches(operation.payload):
+                operation.status, operation.error = "NEEDS_HUMAN", "EXECUTION_TARGET_OR_SNAPSHOT_CHANGED"
+                request.status = "NEEDS_HUMAN"
+                session.scalar(select(OutboxRow).where(OutboxRow.operation_id == operation_id)).status = "DONE"
+                audit(session, principal, request.id, "DISPATCH_DENIED", {"operation_id": operation_id, "reason": operation.error})
                 return op_dto(operation)
             fresh = operation.status == "PENDING"
             if fresh:
@@ -403,7 +458,7 @@ class ProcurementService:
                 remote = self.erp.create_draft(operation_id, payload)
             if remote is None:
                 error = "REMOTE_ABSENCE_NOT_PROOF_OF_NO_COMMIT"
-            elif remote_matches(remote, payload):
+            elif remote_matches(remote, payload, operation_id):
                 status = "COMPLETED"
             else:
                 error = "REMOTE_PAYLOAD_MISMATCH"

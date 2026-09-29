@@ -62,7 +62,8 @@ class MockERP:
             raise ERPRejected("UNKNOWN_SUPPLIER")
         record = {"name": "MOCK-SQ-" + operation_key[:12].upper(), "docstatus": 0,
                   "snapshot_hash": payload["snapshot_hash"], "operation_key": operation_key, "supplier_id": v["supplier_id"],
-                  "sku": v["sku"], "quantity": v["quantity"], "total": payload["total"],
+                  "sku": v["sku"], "quantity": v["quantity"], "unit_price": v["unit_price"],
+                  "transaction_date": payload["transaction_date"], "total": payload["total"],
                   "currency": v["currency"], "uom": v["uom"], "company": payload["erp_company"], "simulated": True}
         payload_hash = digest(payload)
         with self._connect() as connection:
@@ -206,7 +207,7 @@ class ERPNextClient:
                 "remote_database_uniqueness_tested": False, "live_draft_roundtrip_verified": False}
 
     def _checked_result(self, remote, operation_key, payload):
-        if (remote.get("operation_key") != operation_key or not remote_matches(remote, payload)
+        if (remote.get("operation_key") != operation_key or not remote_matches(remote, payload, operation_key)
                 or Decimal(remote["unit_price"]) != Decimal(payload["quote_values"]["unit_price"])
                 or remote.get("transaction_date") != payload["transaction_date"]):
             raise ERPRejected("ERP_READBACK_PAYLOAD_MISMATCH")
@@ -251,16 +252,19 @@ class ERPNextClient:
         return self._checked_result(self._normalize(persisted, expected_key=operation_key), operation_key, payload)
 
 
-def remote_matches(remote: dict, payload: dict) -> bool:
+def remote_matches(remote: dict, payload: dict, operation_key: str | None = None) -> bool:
     """Never treat an arbitrary object returned by a search as successful execution."""
     values = payload["quote_values"]
     try:
-        return (bool(remote.get("name")) and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
+        return ((operation_key is None or remote.get("operation_key") == operation_key)
+                and isinstance(remote.get("name"), str) and bool(remote.get("name")) and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
                 and remote.get("snapshot_hash") == payload["snapshot_hash"]
                 and remote.get("supplier_id") == values["supplier_id"]
                 and remote.get("sku") == values["sku"] and remote.get("currency") == values["currency"]
                 and remote.get("uom") == values["uom"] and remote.get("company") == payload["erp_company"]
                 and Decimal(remote["quantity"]) == Decimal(values["quantity"])
-                and Decimal(remote["total"]) == Decimal(payload["total"]))
+                and Decimal(remote["total"]) == Decimal(payload["total"])
+                and Decimal(remote["unit_price"]) == Decimal(values["unit_price"])
+                and remote.get("transaction_date") == payload["transaction_date"])
     except (ValueError, TypeError, KeyError, ArithmeticError):
         return False

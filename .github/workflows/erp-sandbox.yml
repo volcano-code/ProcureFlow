@@ -1,0 +1,48 @@
+name: isolated-real-erpnext-validation
+on:
+  push:
+    branches: [main, 'develop/**']
+    paths: ['services/api/**', 'scripts/**', 'integrations/erpnext/**', 'compose.erp-sandbox.yaml', '.github/workflows/erp-sandbox.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-erpnext:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: pf-erp-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Create new isolated credentials without printing them
+        run: python scripts/init_erp_sandbox.py --create-ephemeral
+      - name: Start real ERPNext with a fresh MariaDB
+        run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml up -d
+      - name: Seed synthetic master data and restricted identity
+        run: |
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/seed.py
+          mkdir -p .data
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp erp-backend:/tmp/pf-erp-sandbox-credentials.json .data/erp-sandbox.json
+          chmod 600 .data/erp-sandbox.json
+      - name: Real business HTTP approval and Worker execution
+        run: python scripts/verify_erp_sandbox.py --ephemeral-test --output evals/reports/ci/erp-sandbox/roundtrip.json
+      - name: Independently query ERP database and enforce uniqueness
+        run: |
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp evals/reports/ci/erp-sandbox/roundtrip.json erp-backend:/tmp/pf-erp-result.json
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/audit.py > evals/reports/ci/erp-sandbox/database-audit.json
+      - name: Record image identities
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/erp-sandbox
+          docker image inspect frappe/erpnext:v16.36.0 --format '{{json .RepoDigests}}' > evals/reports/ci/erp-sandbox/image-digests.json
+      - name: Destroy only this disposable lab
+        if: always()
+        run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml down -v --remove-orphans
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-erpnext-validation-records
+          path: evals/reports/ci/erp-sandbox
