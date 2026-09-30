@@ -5,8 +5,13 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/erpnext/sandbox'))
+from probe_erp_permissions import require_probe_evidence, PROBES, REQUIRED_TRUE as PROBE_REQUIRED_TRUE
+from lab_permissions import require_select_only
 
-FILES = ('seed.json', 'roundtrip.json', 'database-audit.json', 'image-digests.json')
+FILES = ('seed.json', 'roundtrip.json', 'database-audit.json', 'image-digests.json', 'permission-probes.json')
 STEPS = [
     'dedicated_identity_get_only_preflight',
     'unapproved_self_approved_and_stale_writes_denied',
@@ -33,7 +38,7 @@ def unique_object(pairs):
     return result
 
 
-def check(directory: Path) -> dict:
+def check(directory: Path, backend='sqlite') -> dict:
     records, digests = {}, {}
     for name in FILES:
         with (directory / name).open('rb') as stream:
@@ -41,7 +46,9 @@ def check(directory: Path) -> dict:
         require(len(raw) <= 1024 * 1024, 'OVERSIZED_EVIDENCE')
         records[name] = json.loads(raw, object_pairs_hook=unique_object)
         digests[name] = hashlib.sha256(raw).hexdigest()
-    seed, run, audit, images = (records[name] for name in FILES)
+    seed, run, audit, images, probes = (records[name] for name in FILES)
+    require_probe_evidence(probes)
+    require(backend in {'sqlite', 'postgresql'}, 'INVALID_EXPECTED_BACKEND')
     require(all(isinstance(x, dict) and x.get('status') == 'passed' for x in (seed, run, audit)), 'INCOMPLETE_STAGES')
     require(seed.get('stage') == 'seed' and seed.get('synthetic_only') is True, 'INVALID_SEED')
     require(seed.get('integration_user_type') == 'System User', 'INVALID_INTEGRATION_USER_TYPE')
@@ -52,7 +59,17 @@ def check(directory: Path) -> dict:
         ('real_user_account_used', 'human_approval_measured', 'model_used')), 'INVALID_SCOPE')
     require(run.get('steps') == STEPS, 'MISSING_OR_REPEATED_STEPS')
     require(count_is(run.get('post_attempts'), 2) and count_is(run.get('real_erpnext_drafts_verified'), 2), 'INVALID_WRITE_COUNTS')
-    require(run.get('api_business_database') == 'SQLite' and run.get('real_erp_database') == 'MariaDB', 'INVALID_DATABASE_SCOPE')
+    require(run.get('api_business_database') == {'sqlite': 'SQLite', 'postgresql': 'PostgreSQL'}[backend]
+            and run.get('real_erp_database') == 'MariaDB', 'INVALID_DATABASE_SCOPE')
+    if backend == 'postgresql':
+        business = run.get('business_database_audit', {})
+        require(business.get('status') == 'passed' and business.get('database') == 'PostgreSQL', 'BUSINESS_AUDIT_MISSING')
+        require(all(business.get(key) is True for key in ('isolated_schema', 'migration_current',
+            'operation_identity_matches', 'read_only_audit', 'after_api_restart')), 'BUSINESS_AUDIT_INCOMPLETE')
+        require(all(count_is(business.get(key), 2) for key in ('operation_count', 'completed_operation_count',
+            'outbox_count', 'done_outbox_count', 'verified_receipt_count')), 'BUSINESS_AUDIT_INVALID_COUNTS')
+        require(isinstance(business.get('server_version_num'), str)
+            and re.fullmatch('[0-9]{5,6}', business['server_version_num']) is not None, 'POSTGRES_VERSION_MISSING')
     preflight = run.get('preflight', {})
     require(preflight.get('integration_identity_verified') is True and preflight.get('write_probe_performed') is False,
             'IDENTITY_NOT_VERIFIED')
@@ -71,6 +88,8 @@ def check(directory: Path) -> dict:
             'DUPLICATE_OPERATION_OR_DRAFT')
     require(audit.get('stage') == 'database-audit' and count_is(audit.get('draft_count'), 2) and
             count_is(audit.get('purchase_order_count'), 0) and count_is(audit.get('submitted_count'), 0), 'INVALID_DATABASE_COUNTS')
+    require_select_only(seed.get('reference_permissions'))
+    require_select_only(audit.get('reference_permissions'))
     require(all(audit.get(k) is True for k in ('remote_unique_index_present',
         'duplicate_key_update_rejected_and_rolled_back', 'adapter_readback_independently_checked')), 'DATABASE_CHECKS_MISSING')
     require(all(audit.get('restricted_permissions', {}).get(k) is True for k in ('submit', 'cancel', 'delete')),
@@ -81,15 +100,18 @@ def check(directory: Path) -> dict:
         re.fullmatch(r'frappe/erpnext@sha256:[0-9a-f]{64}', x) for x in images), 'IMAGE_DIGEST_MISSING')
     return {'status': 'passed', 'record_sha256': digests, 'synthetic_only': True,
         'normal_and_lost_receipt_checked': True, 'database_audit_checked': True,
+        'api_business_database': run['api_business_database'], 'negative_rest_permissions_checked': True,
+        'business_database_audit_checked': backend == 'postgresql',
         'scope': 'Consistency check of CI records, not a new ERP execution or cryptographic attestation'}
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--business-database', choices=('sqlite', 'postgresql'), default='sqlite')
     args = parser.parse_args(argv)
     try:
-        result = check(args.directory)
+        result = check(args.directory, args.business_database)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         # Never echo malformed record content or paths into public CI output.
         print(json.dumps({'status': 'failed', 'reason': 'ERP_EVIDENCE_INCOMPLETE_OR_INVALID'}))

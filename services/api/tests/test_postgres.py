@@ -197,3 +197,38 @@ def test_postgres_rollback_keeps_operation_and_outbox_atomic(pg_system, monkeypa
         assert session.scalar(select(func.count()).select_from(OperationRow)) == 0
         assert session.scalar(select(func.count()).select_from(OutboxRow)) == 0
         assert session.get(RequestRow, r["id"]).status == "APPROVED"
+
+
+def test_real_erp_gate_business_schema_is_migrated_isolated_and_removed(pg_database, tmp_path, monkeypatch):
+    """Storage harness only: real PostgreSQL, no ERP calls or false ERP evidence."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+    sys.path.insert(0, str(ROOT / 'scripts'))
+    import erp_business_database as storage
+    # pg_database has already enforced the test-only opt-in; use the separate
+    # configured admin URL, never its existing test schema or PF_DATABASE_URL.
+    admin = create_engine(storage.postgres_test_url(), hide_parameters=True)
+    name = None
+    try:
+        with storage.business_database('postgresql', str(tmp_path)) as url:
+            name = make_url(url).query['options'].split('=', 1)[1]
+            db = Database(url)
+            try:
+                with pytest.raises(RuntimeError, match='SCHEMA_MISSING'):
+                    db.check_ready()
+                cfg = Config(str(ROOT / 'services/api/alembic.ini'))
+                cfg.set_main_option('script_location', str(ROOT / 'services/api/alembic'))
+                with db.engine.begin() as connection:
+                    cfg.attributes['connection'] = connection
+                    command.upgrade(cfg, 'head')
+                assert db.check_ready()['database'] == 'postgresql'
+                # Missing operations must fail rather than certifying an empty run.
+                with pytest.raises(ValueError, match='POSTGRES_BUSINESS_AUDIT_FAILED'):
+                    storage.audit_business_database(url, [])
+            finally:
+                db.engine.dispose()
+        with admin.connect() as connection:
+            assert connection.scalar(text('SELECT count(*) FROM pg_namespace WHERE nspname=:name'), {'name': name}) == 0
+        assert pg_database.check_ready()['database'] == 'postgresql'
+    finally:
+        admin.dispose()

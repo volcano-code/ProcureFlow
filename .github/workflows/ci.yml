@@ -15,6 +15,8 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Check aggregate API contract drift
+        run: python scripts/export_contracts.py --check
       - run: python -m playwright install --with-deps chromium
       - run: python scripts/test.py -q -m 'not postgres' --junitxml=../../evals/reports/ci/pytest.xml
         env:

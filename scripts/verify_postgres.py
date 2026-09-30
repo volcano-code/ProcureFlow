@@ -41,7 +41,7 @@ def run(output: Path) -> int:
                 for key in counts:
                     counts[key] += int(suite.get(key, "0"))
             report["junit"] = counts
-            if counts["tests"] < 34 or any(counts[k] for k in ("failures", "errors", "skipped")):
+            if counts["tests"] < 35 or any(counts[k] for k in ("failures", "errors", "skipped")):
                 code = 1
                 report.update(status="failed", reason="POSTGRES_TESTS_MISSING_OR_SKIPPED")
         return code

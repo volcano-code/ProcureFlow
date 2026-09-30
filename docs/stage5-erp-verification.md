@@ -33,6 +33,6 @@ Only after successful initialization should the private credential file be copie
 
 Local combined non-browser/non-PostgreSQL suite: 210 passed, 11 deselected. This includes 17 new ERP verification/recovery cases and nine sandbox authorization/file-safety cases. The native E2E success case now exercises the read-back button and asserts that the historical status remains unchanged. Browser/PG/container results must be checked on the final commit; earlier 215bc8f results do not certify this change.
 
-The REST server exposes its current OpenAPI dynamically. The checked-in aggregate OpenAPI export predates this endpoint; regenerate with `python scripts/export_contracts.py` when updating the aggregate contracts. No business-table migration is introduced in this iteration. Main is unchanged; no automatic merge, release or production ordering is requested.
+Historical note: at this stage, the checked-in aggregate OpenAPI export predated this endpoint. [Stage 7](stage7-combined-acceptance.md) regenerates the aggregate and adds a non-mutating CI drift gate. The REST server also exposes its current OpenAPI dynamically. No business-table migration is introduced in this iteration. Main is unchanged; no automatic merge, release or production ordering is requested.
 
 Next engineering blocker: obtain a bounded, sanitized initialization exception from the disposable ERP job, fix the fixture provisioning and pass normal/lost-receipt/database-audit checks. Real provider credentials and user-account integration remain separate, opt-in work.

@@ -35,8 +35,18 @@ def reports(tmp_path):
             'duplicate_key_update_rejected_and_rolled_back': True, 'adapter_readback_independently_checked': True,
             'restricted_permissions': {'submit': True, 'cancel': True, 'delete': True},
             'erpnext_version': 'fixture', 'frappe_version': 'fixture', 'database_version': 'fixture'},
+        'permission-probes.json': {'stage': 'permission-probes', 'status': 'passed',
+            **{key: True for key in gate.PROBE_REQUIRED_TRUE},
+            'real_user_account_used': False, 'draft_documents_checked': 2,
+            'probes': [{'name': name, 'method': method, 'endpoint': endpoint, 'status': 403,
+                       'error_type': 'PermissionError', 'permission_denied': True}
+                      for name, method, endpoint in gate.PROBES]},
         'image-digests.json': ['frappe/erpnext@sha256:' + '0'*64],
     }
+    rights = ('select', 'read', 'create', 'write', 'delete', 'submit', 'cancel',
+              'amend', 'import', 'export', 'report', 'print', 'email', 'share')
+    for filename in ('seed.json', 'database-audit.json'):
+        values[filename]['reference_permissions'] = {right: right == 'select' for right in rights}
     def write():
         for name, value in values.items():
             (tmp_path/name).write_text(json.dumps(value))
@@ -47,7 +57,7 @@ def reports(tmp_path):
 def test_valid_consistent_fixture_reports_are_hashed_not_promoted_to_new_execution(reports):
     gate, path, _, _ = reports
     result = gate.check(path)
-    assert result['status'] == 'passed' and len(result['record_sha256']) == 4
+    assert result['status'] == 'passed' and len(result['record_sha256']) == 5
     assert 'not a new ERP execution' in result['scope']
 
 
@@ -102,3 +112,42 @@ def test_invalid_duplicate_or_oversized_json_not_echoed(reports, raw, capsys):
     capture = capsys.readouterr()
     assert json.loads(capture.out) == {'status': 'failed', 'reason': 'ERP_EVIDENCE_INCOMPLETE_OR_INVALID'}
     assert 'SECRET_CANARY' not in capture.out + capture.err
+
+
+@pytest.mark.parametrize('mutation', ['wrong-backend', 'no-audit', 'count', 'boolean-count',
+        'wrong-version', 'not-isolated', 'missing-migration', 'unverified-probes', 'escalated-account'])
+def test_combined_postgres_gate_rejects_incomplete_evidence(reports, mutation):
+    gate, path, values, write = reports
+    run = values['roundtrip.json']
+    run['api_business_database'] = 'PostgreSQL'
+    run['business_database_audit'] = {
+        'status': 'passed', 'database': 'PostgreSQL', 'server_version_num': '170011',
+        **{key: True for key in ('isolated_schema', 'migration_current', 'operation_identity_matches',
+                                 'read_only_audit', 'after_api_restart')},
+        **{key: 2 for key in ('operation_count', 'completed_operation_count', 'outbox_count',
+                              'done_outbox_count', 'verified_receipt_count')}}
+    write()
+    result = gate.check(path, 'postgresql')
+    assert result['business_database_audit_checked'] is True
+    assert result['negative_rest_permissions_checked'] is True
+    if mutation == 'wrong-backend':
+        run['api_business_database'] = 'SQLite'
+    elif mutation == 'no-audit':
+        del run['business_database_audit']
+    elif mutation == 'count':
+        run['business_database_audit']['done_outbox_count'] = 1
+    elif mutation == 'boolean-count':
+        run['business_database_audit']['outbox_count'] = True
+    elif mutation == 'wrong-version':
+        run['business_database_audit']['server_version_num'] = 'not observed'
+    elif mutation == 'not-isolated':
+        run['business_database_audit']['isolated_schema'] = False
+    elif mutation == 'missing-migration':
+        run['business_database_audit']['migration_current'] = False
+    elif mutation == 'unverified-probes':
+        values['permission-probes.json']['probes'][0]['status'] = 400
+    elif mutation == 'escalated-account':
+        values['database-audit.json']['reference_permissions']['read'] = True
+    write()
+    with pytest.raises(ValueError):
+        gate.check(path, 'postgresql')

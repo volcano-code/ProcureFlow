@@ -24,6 +24,8 @@ from urllib.parse import unquote
 import httpx
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from erp_business_database import business_database, postgres_test_url, audit_business_database
 TARGET='http://127.0.0.1:18080'
 
 
@@ -126,7 +128,7 @@ def safe_failure(error):
     reason = str(error)
     if re.fullmatch(r'ERP_HTTP_[0-9]{3}|HTTP_[0-9]{3}_EXPECTED_[0-9]{3}', reason):
         return reason
-    if reason in {'PROCUREFLOW_START_FAILED', 'PROCUREFLOW_MIGRATION_FAILED',
+    if reason in {'PROCUREFLOW_START_FAILED', 'PROCUREFLOW_MIGRATION_FAILED', 'BUSINESS_DATABASE_BACKEND_MISMATCH', 'POSTGRES_BUSINESS_AUDIT_FAILED',
             'WORKER_FAILED', 'RECOVERY_NOT_ENTERED', 'NOT_COMPLETED',
             'ERP_READBACK_PAYLOAD_MISMATCH', 'ERP_RESULT_UNKNOWN', 'ERP_ADAPTER_FAILURE',
             'ERP_REMOTE_OPERATION_KEY_MISMATCH', 'REMOTE_PAYLOAD_MISMATCH'}:
@@ -183,15 +185,15 @@ def fault_proxy():
         server.shutdown();server.server_close();thread.join(timeout=5);upstream.close()
 
 
-def exercise(data):
+def exercise(data, backend='sqlite'):
     report={'scope':'disposable real ERPNext draft roundtrip','status':'running','synthetic_only':True,
         'real_user_account_used':False,'human_approval_measured':False,'model_used':False,'steps':[]}
-    with tempfile.TemporaryDirectory(prefix='pf-real-erp-') as tmp, fault_proxy() as (erp_url,wire):
+    with tempfile.TemporaryDirectory(prefix='pf-real-erp-') as tmp, business_database(backend, tmp) as database_url, fault_proxy() as (erp_url,wire):
         tokens={role:secrets.token_hex(32) for role in ('buyer','approver','self','other','auditor')}
         identities={tokens[role]:{'tenant_id':'lab' if role!='other' else 'other','user_id':'buyer' if role=='self' else role,
             'role':'approver' if role=='self' else 'buyer' if role=='other' else role} for role in tokens}
         env={k:v for k,v in os.environ.items() if not k.startswith(('PF_','ERP_','LLM_'))}
-        env.update(PYTHONPATH=str(ROOT/'services/api'),PF_DATA_DIR=tmp,PF_DATABASE_URL=f'sqlite:///{tmp}/business.sqlite3',
+        env.update(PYTHONPATH=str(ROOT/'services/api'),PF_DATA_DIR=tmp,PF_DATABASE_URL=database_url,
             PF_MODE='private',PF_AUTH_TOKENS=json.dumps(identities),PF_ERP_MODE='erpnext',ERP_BASE_URL=erp_url,
             ERP_COMPANY=data['company'],ERP_API_KEY=data['api_key'],ERP_API_SECRET=data['api_secret'],ERP_ALLOW_DRAFT_WRITES='true')
         with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
@@ -201,7 +203,12 @@ def exercise(data):
             p=subprocess.Popen([sys.executable,str(ROOT/'scripts/start.py'),'--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log)
             for _ in range(150):
                 try:
-                    if httpx.get(base+'/ready',timeout=1,trust_env=False).status_code==200:return p
+                    ready=httpx.get(base+'/ready',timeout=1,trust_env=False)
+                    if ready.status_code==200:
+                        if ready.json().get('database') != backend:
+                            stop(p)
+                            raise AssertionError('BUSINESS_DATABASE_BACKEND_MISMATCH')
+                        return p
                 except httpx.HTTPError: pass
                 if p.poll() is not None:break
                 time.sleep(.1)
@@ -283,8 +290,11 @@ def exercise(data):
                 for result in verified:
                     assert call('GET',f"/operations/{result['operation_id']}")['remote_id']==result['remote_id']
                 report['steps'].append('api_process_restart_retains_remote_ids')
+                if backend == 'postgresql':
+                    phase = 'business-database-audit'
+                    report['business_database_audit'] = audit_business_database(database_url, verified)
                 report.update(status='passed',operations=verified,post_attempts=len(wire['posts']),
-                    real_erpnext_drafts_verified=len(verified),api_business_database='SQLite',real_erp_database='MariaDB',
+                    real_erpnext_drafts_verified=len(verified),api_business_database='PostgreSQL' if backend == 'postgresql' else 'SQLite',real_erp_database='MariaDB',
                     fault_injection='loopback HTTP gateway returns 504 after ERP commits; next worker only reads')
         except Exception as error:
             report.update(status='failed', phase=phase, reason=safe_failure(error),
@@ -296,19 +306,24 @@ def exercise(data):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--ephemeral-test',action='store_true')
+    p.add_argument('--business-database', choices=('sqlite', 'postgresql'), default='sqlite')
     p.add_argument('--credentials',type=Path,default=Path('.data/erp-sandbox.json'))
     p.add_argument('--env-file',type=Path,default=Path('.env.erp-sandbox'))
     p.add_argument('--output',type=Path,required=True)
     a=p.parse_args(argv)
     report={'status':'blocked','network_attempted':False,'reason':'EXPLICIT_EPHEMERAL_TEST_REQUIRED'};code=2
-    if a.ephemeral_test:
+    if sys.flags.optimize:
+        report['reason'] = 'OPTIMIZED_PYTHON_NOT_SUPPORTED'
+    elif a.ephemeral_test:
         try:
             data=validate_lab(a.credentials,a.env_file)
+            if a.business_database == 'postgresql':
+                postgres_test_url()
         except (OSError,ValueError,KeyError,TypeError):
             report['reason']='LAB_CONFIGURATION_MISMATCH'
         else:
             try:
-                report=exercise(data)
+                report=exercise(data) if a.business_database == 'sqlite' else exercise(data, 'postgresql')
                 code=0 if report.get('status')=='passed' else 1
             except Exception as error:
                 report={'status':'failed','network_attempted':True,'reason':safe_failure(error)}
