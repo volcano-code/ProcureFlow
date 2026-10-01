@@ -87,6 +87,8 @@ def test_erp_rest_contract_draft_only():
     def handle(request):
         seen.append(request)
         assert request.headers['Authorization']=='token key:secret'
+        if '/Company/' in request.url.path:
+            return httpx.Response(200,json={'data':{'name':'Demo', 'default_currency':'CNY'}})
         if request.url.path.endswith('/Custom Field'):
             field=json.loads(request.url.params['filters'])[-1][-1]
             return httpx.Response(200,json={"data":[{"fieldname":field,"unique":1,"fieldtype":"Data"}]})
@@ -94,7 +96,8 @@ def test_erp_rest_contract_draft_only():
             body=json.loads(request.content)
             assert body['docstatus']==0 and body['doctype']=='Supplier Quotation'
             assert body['custom_procureflow_operation_key']=='op-123'
-            body.update(name='SQ-TEST',grand_total='200.00')
+            body.update(name='SQ-TEST',grand_total='200.00', total='200.00', net_total='200.00', total_taxes_and_charges='0')
+            body["items"][0].update(amount="200.00", net_amount="200.00", net_rate="100.00")
             persisted.update(body)
             return httpx.Response(200,json={'data':body})
         if request.url.path.endswith('/SQ-TEST'):
@@ -118,14 +121,14 @@ def test_erp_disabled_before_network():
 
 def test_erp_complex_mapping_fails_closed():
     adapter=ERPNextClient('https://erp.test','key','secret','Demo',True,transport=httpx.MockTransport(lambda _:None))
-    p=payload();p['quote_values']['shipping_cost']='800'
-    with pytest.raises(ERPRejected,match='MAPPING_NOT_IMPLEMENTED'):
+    p=payload();p['quote_values']['shipping_cost']='800'; p['total']='1000.00'
+    with pytest.raises(ERPRejected,match='COST_ACCOUNT_REQUIRED'):
         adapter.create_draft('op',p)
     adapter.client.close()
 
 
 def test_erp_remote_uniqueness_required():
-    adapter=ERPNextClient('https://erp.test','key','secret','Demo',True,transport=httpx.MockTransport(lambda _:httpx.Response(200,json={'data':[]})))
+    adapter=ERPNextClient('https://erp.test','key','secret','Demo',True,transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'data':{'name':'Demo','default_currency':'CNY'} if '/Company/' in request.url.path else []})))
     with pytest.raises(ERPRejected,match='ERP_UNIQUE_FIELD_NOT_VERIFIED'):
         adapter.create_draft('op',payload())
     adapter.client.close()
@@ -143,7 +146,8 @@ def test_remote_document_company_and_uom_must_match(field,value):
     p=payload()
     remote={"name":"SQ-TEST","docstatus":0,"snapshot_hash":p["snapshot_hash"],"supplier_id":"SUP-A",
             "sku":"STAND-01","currency":"CNY","quantity":"2","total":"200.00","company":"Demo","uom":"EA",
-            "unit_price":"100.00","transaction_date":p["transaction_date"]}
+            "unit_price":"100.00","transaction_date":p["transaction_date"], "simulated": True,
+            "cost_values": {k:p["quote_values"][k] for k in ("tax_mode", "tax_rate", "shipping_cost", "discount")}}
     assert remote_matches(remote,p)
     remote[field]=value
     assert not remote_matches(remote,p)

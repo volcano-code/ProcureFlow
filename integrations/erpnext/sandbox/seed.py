@@ -16,6 +16,7 @@ from erpnext.setup.setup_wizard.operations import install_fixtures
 
 from lab_runtime import SITE, lab_session, phase, run_stage
 from lab_permissions import verify_account_reference
+from cost_fixtures import TAX_ACCOUNT, FREIGHT_ACCOUNT
 COMPANY = 'ProcureFlow Sandbox'
 USER = 'pf-integration@example.invalid'
 ROLE = 'ProcureFlow Draft Integration'
@@ -40,6 +41,22 @@ def main():
             'create_chart_of_accounts_based_on':'Standard Template', 'chart_of_accounts':'Standard'}).insert()
         phase('company-defaults')
         install_fixtures.install_defaults(frappe._dict(currency='CNY', company_name=COMPANY))
+        phase('cost-accounts')
+        # Two distinct, non-posting lab fixtures. No accounting recommendation.
+        parent = frappe.db.get_value('Account', {'company': COMPANY, 'root_type': 'Asset', 'is_group': 1, 'parent_account': ['is', 'not set']}, 'name')
+        if not parent:
+            raise RuntimeError('SYNTHETIC_ACCOUNT_PARENT_MISSING')
+        for account in (TAX_ACCOUNT, FREIGHT_ACCOUNT):
+            doc = frappe.get_doc({'doctype': 'Account', 'account_name': account.removesuffix(' - PFL'),
+                'company': COMPANY, 'parent_account': parent, 'account_type': 'Tax',
+                'account_currency': 'CNY', 'is_group': 0}).insert()
+            if doc.name != account:
+                raise RuntimeError('SYNTHETIC_ACCOUNT_NAME_MISMATCH')
+        phase('cost-precision')
+        frappe.db.set_single_value('System Settings', 'currency_precision', '2')
+        frappe.db.set_single_value('System Settings', 'float_precision', '6')
+        frappe.db.set_single_value('System Settings', 'rounding_method', 'Commercial Rounding')
+        frappe.clear_cache()
         phase('uom')
         if not frappe.db.exists('UOM','EA'):
             frappe.get_doc({'doctype':'UOM','uom_name':'EA','must_be_whole_number':1}).insert()
@@ -90,6 +107,8 @@ def main():
         phase('account-reference-permissions')
         account = frappe.db.get_value('Company', COMPANY, 'default_payable_account')
         reference_permissions = verify_account_reference(frappe.has_permission, USER, account)
+        cost_reference_permissions = {kind: verify_account_reference(frappe.has_permission, USER, account)
+            for kind, account in [('tax', TAX_ACCOUNT), ('freight', FREIGHT_ACCOUNT)]}
         phase('private-credentials')
         path = Path('/tmp/pf-erp-sandbox-credentials.json')
         fd=os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
@@ -98,9 +117,10 @@ def main():
                 'api_key':key,'api_secret':secret,'company':COMPANY,'user':USER,
                 'supplier':supplier,'sku':'PF-SANDBOX-ITEM','permissions':permissions},f)
         return {'synthetic_only': True, 'permissions': permissions,
-            'reference_permissions': reference_permissions,
+            'reference_permissions': reference_permissions, 'cost_reference_permissions': cost_reference_permissions,
             'credentials_written_privately': True, 'site_context': 'bench-sites',
-            'integration_user_type': 'System User'}
+            'integration_user_type': 'System User',
+            'currency_precision': '2', 'float_precision': '6', 'rounding_method': 'Commercial Rounding'}
 
 if __name__ == '__main__':
     raise SystemExit(run_stage('seed', main))

@@ -10,7 +10,7 @@ from .contracts import Principal, QuoteValues
 from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, OutboxRow,
                  QuoteRow, QuoteVersionRow, RequestRow, audit, now, uid)
 from .domain import POLICY, digest, offer_check
-from .erp import ERPPort, ERPRejected, ERPUnknown, remote_matches
+from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
 from .errors import DomainError
 from .parsers import parse_document
 
@@ -239,6 +239,8 @@ class ProcurementService:
                 "document_sha256": document.sha256, "total": checked["total"],
                 "policy_id": POLICY["id"], "policy_version": POLICY["version"], "policy_hash": digest(POLICY),
                 "erp_mode": self.erp.mode, "erp_company": self.settings.erp_company,
+                "erp_cost_mapping_version": COST_MAPPING_VERSION,
+                "erp_cost_accounts": {"tax": self.settings.erp_tax_account, "freight": self.settings.erp_freight_account},
                 "erp_target_fingerprint": digest({"mode": self.erp.mode, "url": self.settings.erp_url}),
                 "transaction_date": request.created_at[:10]}
         return {**body, "snapshot_hash": digest(body)}
@@ -363,6 +365,8 @@ class ProcurementService:
         """Recovery must not consult another ERP or trust a modified stored snapshot."""
         return (payload.get("erp_mode") == self.erp.mode
                 and payload.get("erp_company") == self.settings.erp_company
+                and payload.get("erp_cost_mapping_version") == COST_MAPPING_VERSION
+                and payload.get("erp_cost_accounts") == {"tax": self.settings.erp_tax_account, "freight": self.settings.erp_freight_account}
                 and payload.get("erp_target_fingerprint") == digest({"mode": self.erp.mode, "url": self.settings.erp_url})
                 and payload.get("snapshot_hash") == digest({k: v for k, v in payload.items() if k != "snapshot_hash"}))
 

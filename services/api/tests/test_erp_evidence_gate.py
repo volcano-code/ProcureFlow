@@ -24,20 +24,20 @@ def reports(tmp_path):
                 'read': True, 'create': True, 'write': True, 'submit': False, 'cancel': False, 'delete': False}},
         'roundtrip.json': {'status': 'passed', 'synthetic_only': True, 'real_user_account_used': False,
             'human_approval_measured': False, 'model_used': False, 'steps': gate.STEPS[:],
-            'post_attempts': 2, 'real_erpnext_drafts_verified': 2,
+            'post_attempts': 4, 'real_erpnext_drafts_verified': 4,
             'api_business_database': 'SQLite', 'real_erp_database': 'MariaDB',
-            'preflight': {'integration_identity_verified': True, 'write_probe_performed': False},
+            'preflight': {'integration_identity_verified': True, 'company_currency_verified': True, 'write_probe_performed': False},
             'operations': [{'operation_id': 'synthetic-op-'+str(i), 'remote_id': 'synthetic-draft-'+str(i),
-                'snapshot_hash': str(i) * 64, 'scenario': scenario, 'expected_total': '2000.00'}
-                for i, scenario in enumerate(('normal', 'lost-receipt'))]},
-        'database-audit.json': {'stage': 'database-audit', 'status': 'passed', 'draft_count': 2,
+                'snapshot_hash': str(i) * 64, 'scenario': scenario, 'expected_total': gate.COST_CASES[scenario]['total'], 'cost_components_verified': True}
+                for i, scenario in enumerate(gate.COST_CASES)]},
+        'database-audit.json': {'stage': 'database-audit', 'status': 'passed', 'draft_count': 4,
             'purchase_order_count': 0, 'submitted_count': 0, 'remote_unique_index_present': True,
-            'duplicate_key_update_rejected_and_rolled_back': True, 'adapter_readback_independently_checked': True,
+            'duplicate_key_update_rejected_and_rolled_back': True, 'adapter_readback_independently_checked': True, 'cost_components_independently_checked': True,
             'restricted_permissions': {'submit': True, 'cancel': True, 'delete': True},
             'erpnext_version': 'fixture', 'frappe_version': 'fixture', 'database_version': 'fixture'},
         'permission-probes.json': {'stage': 'permission-probes', 'status': 'passed',
             **{key: True for key in gate.PROBE_REQUIRED_TRUE},
-            'real_user_account_used': False, 'draft_documents_checked': 2,
+            'real_user_account_used': False, 'draft_documents_checked': 4,
             'probes': [{'name': name, 'method': method, 'endpoint': endpoint, 'status': 403,
                        'error_type': 'PermissionError', 'permission_denied': True}
                       for name, method, endpoint in gate.PROBES]},
@@ -46,7 +46,9 @@ def reports(tmp_path):
     rights = ('select', 'read', 'create', 'write', 'delete', 'submit', 'cancel',
               'amend', 'import', 'export', 'report', 'print', 'email', 'share')
     for filename in ('seed.json', 'database-audit.json'):
+        values[filename].update(currency_precision='2', float_precision='6', rounding_method='Commercial Rounding')
         values[filename]['reference_permissions'] = {right: right == 'select' for right in rights}
+        values[filename]['cost_reference_permissions'] = {kind: {right: right == 'select' for right in rights} for kind in ('tax', 'freight')}
     def write():
         for name, value in values.items():
             (tmp_path/name).write_text(json.dumps(value))
@@ -124,7 +126,7 @@ def test_combined_postgres_gate_rejects_incomplete_evidence(reports, mutation):
         'status': 'passed', 'database': 'PostgreSQL', 'server_version_num': '170011',
         **{key: True for key in ('isolated_schema', 'migration_current', 'operation_identity_matches',
                                  'read_only_audit', 'after_api_restart')},
-        **{key: 2 for key in ('operation_count', 'completed_operation_count', 'outbox_count',
+        **{key: 4 for key in ('operation_count', 'completed_operation_count', 'outbox_count',
                               'done_outbox_count', 'verified_receipt_count')}}
     write()
     result = gate.check(path, 'postgresql')
@@ -151,3 +153,27 @@ def test_combined_postgres_gate_rejects_incomplete_evidence(reports, mutation):
     write()
     with pytest.raises(ValueError):
         gate.check(path, 'postgresql')
+
+
+@pytest.mark.parametrize('change', ['missing-cost-proof', 'wrong-total', 'old-count', 'precision',
+    'rounding', 'float-precision', 'missing-account', 'escalated-account', 'missing-db-proof'])
+def test_cost_increment_requires_all_four_precise_independent_results(reports, change):
+    gate, path, values, write = reports
+    if change == 'missing-cost-proof': del values['roundtrip.json']['operations'][0]['cost_components_verified']
+    elif change == 'wrong-total': values['roundtrip.json']['operations'][0]['expected_total'] = '24800.01'
+    elif change == 'old-count': values['roundtrip.json']['operations'] = values['roundtrip.json']['operations'][:2]
+    elif change == 'precision': values['database-audit.json']['currency_precision'] = '3'
+    elif change == 'rounding': values['database-audit.json']['rounding_method'] = "Banker's Rounding"
+    elif change == 'float-precision': del values['seed.json']['float_precision']
+    elif change == 'missing-account': del values['seed.json']['cost_reference_permissions']['tax']
+    elif change == 'escalated-account': values['database-audit.json']['cost_reference_permissions']['freight']['read'] = True
+    elif change == 'missing-db-proof': del values['database-audit.json']['cost_components_independently_checked']
+    write()
+    with pytest.raises(ValueError): gate.check(path)
+
+
+def test_company_currency_preflight_evidence_is_required(reports):
+    gate, path, values, write=reports
+    values['roundtrip.json']['preflight'].pop('company_currency_verified')
+    write()
+    with pytest.raises(ValueError): gate.check(path)

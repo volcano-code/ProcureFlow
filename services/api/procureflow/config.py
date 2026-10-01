@@ -30,6 +30,8 @@ class Settings:
     erp_api_key: str = field(default_factory=lambda: os.getenv("ERP_API_KEY", ""), repr=False)
     erp_api_secret: str = field(default_factory=lambda: os.getenv("ERP_API_SECRET", ""), repr=False)
     erp_company: str = field(default_factory=lambda: os.getenv("ERP_COMPANY", ""))
+    erp_tax_account: str = field(default_factory=lambda: os.getenv("ERP_TAX_ACCOUNT", ""))
+    erp_freight_account: str = field(default_factory=lambda: os.getenv("ERP_FREIGHT_ACCOUNT", ""))
     erp_allow_draft_writes: bool = field(default_factory=lambda: os.getenv("ERP_ALLOW_DRAFT_WRITES", "false").lower() == "true")
 
     def __post_init__(self):

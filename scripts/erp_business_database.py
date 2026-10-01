@@ -90,18 +90,18 @@ def audit_business_database(url: str, operations: list[dict]) -> dict:
             rows = connection.execute(text(
                 'SELECT id, tenant_id, status, snapshot_hash, remote_id FROM external_operations'
             )).mappings().all()
-            require(len(rows) == len(operations) == 2)
+            require(len(rows) == len(operations) and len(operations) > 0)
             for expected in operations:
                 row, = [row for row in rows if row['id'] == expected['operation_id']]
                 require(row['tenant_id'] == 'lab' and row['status'] == 'COMPLETED')
                 require(row['snapshot_hash'] == expected['snapshot_hash'] and row['remote_id'] == expected['remote_id'])
             outbox = connection.execute(text('SELECT operation_id, status FROM outbox')).mappings().all()
-            require(len(outbox) == 2 and {row['operation_id'] for row in outbox} == {row['id'] for row in rows})
+            require(len(outbox) == len(operations) and {row['operation_id'] for row in outbox} == {row['id'] for row in rows})
             require(all(row['status'] == 'DONE' for row in outbox))
             receipts = connection.execute(text(
                 "SELECT payload FROM audit_events WHERE type = 'ERP_VERIFICATION_VERIFIED'"
             )).scalars().all()
-            require(len(receipts) == 2)
+            require(len(receipts) == len(operations))
             require({receipt['operation_id'] for receipt in receipts} == {row['id'] for row in rows})
             for receipt in receipts:
                 expected, = [op for op in operations if op['operation_id'] == receipt['operation_id']]
@@ -110,9 +110,9 @@ def audit_business_database(url: str, operations: list[dict]) -> dict:
             version = connection.scalar(text("SELECT current_setting('server_version_num')"))
             require(isinstance(version, str) and version.isdigit())
             return {'status': 'passed', 'database': 'PostgreSQL', 'server_version_num': version,
-                'isolated_schema': True, 'migration_current': True, 'operation_count': 2,
-                'completed_operation_count': 2, 'outbox_count': 2, 'done_outbox_count': 2,
-                'verified_receipt_count': 2, 'operation_identity_matches': True,
+                'isolated_schema': True, 'migration_current': True, 'operation_count': len(operations),
+                'completed_operation_count': len(operations), 'outbox_count': len(operations), 'done_outbox_count': len(operations),
+                'verified_receipt_count': len(operations), 'operation_identity_matches': True,
                 'read_only_audit': True, 'after_api_restart': True}
     finally:
         engine.dispose()

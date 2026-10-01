@@ -143,3 +143,14 @@ def test_diagnostic_sink_supports_frappe_terminal_detection(capsys):
     capture = capsys.readouterr()
     assert canary not in capture.out + capture.err
     assert json.loads(capture.out)['stream_compatible'] is True
+
+
+def test_optimized_lab_stage_never_runs_assertion_based_audit(tmp_path):
+    import subprocess
+    import sys
+    script = Path(__file__).resolve().parents[3] / 'integrations/erpnext/sandbox'
+    code = ('import sys; sys.path.insert(0, sys.argv[1]); import lab_runtime as r; '
+            'raise SystemExit(r.run_stage("database-audit", lambda: (_ for _ in ()).throw(Exception("SHOULD_NOT_RUN"))))')
+    result = subprocess.run([sys.executable, '-O', '-c', code, str(script)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1 and 'OPTIMIZED_PYTHON_NOT_SUPPORTED' in result.stdout
+    assert 'SHOULD_NOT_RUN' not in result.stdout + result.stderr

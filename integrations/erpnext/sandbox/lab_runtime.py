@@ -4,13 +4,14 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import traceback
 
 SITE = 'pf-erp-test.local'
 SITES = Path('/home/frappe/frappe-bench/sites')
 PHASE = 'initialization'
 CODES = frozenset({'EPHEMERAL_LAB_ONLY', 'LAB_MARKER_MISMATCH',
-    'REFUSE_ALREADY_SEEDED_LAB', 'DRAFT_ROLE_NOT_RESTRICTED', 'UNEXPECTED_PO_PERMISSION', 'INTEGRATION_USER_TYPE_MISMATCH'})
+    'OPTIMIZED_PYTHON_NOT_SUPPORTED', 'REFUSE_ALREADY_SEEDED_LAB', 'DRAFT_ROLE_NOT_RESTRICTED', 'UNEXPECTED_PO_PERMISSION', 'INTEGRATION_USER_TYPE_MISMATCH'})
 
 
 def phase(name):
@@ -65,6 +66,8 @@ def run_stage(stage, function):
         raise ValueError('unknown lab stage')
     phase('initialization')
     try:
+        if sys.flags.optimize:
+            raise RuntimeError('OPTIMIZED_PYTHON_NOT_SUPPORTED')
         # A real text stream supports isatty/encoding/fileno used by Frappe.
         # Discard output without retaining secrets or arbitrary-size buffers.
         with open(os.devnull, 'w', encoding='utf-8') as sink, redirect_stdout(sink), redirect_stderr(sink):

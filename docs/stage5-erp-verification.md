@@ -1,5 +1,7 @@
 # ERP draft verification and recovery hardening
 
+> Historical scope: this document describes the earlier ERP gate. The current four-draft tax/freight/discount contract and its verification limits are in [ERP cost mapping](erp-cost-mapping.md). Earlier passing results do not validate the new mapping.
+
 ## User-facing change
 
 The native Next.js workbench now offers an independent ERP read-back action on an existing operation. `POST /api/v1/operations/{id}/verify` writes a local audit event but performs only ERP reads. It never creates, retries, submits or deletes an ERP document and never changes the historical operation status.

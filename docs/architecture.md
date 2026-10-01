@@ -3,7 +3,7 @@
 ## 已实现架构
 
 ```text
-本地静态工作台 / 原生 Next.js 源码 / HTTP 客户端
+本地静态工作台 / 原生 Next.js 工作台 / HTTP 客户端
                     │ Bearer + typed JSON / SSE
                     ▼
               FastAPI Business API
@@ -11,20 +11,20 @@
                     │
   文档解析 / Decimal / 版本 / 审批快照 / 操作账本
                     │
-      SQLAlchemy + SQLite（本轮已验证）
+      SQLAlchemy + SQLite / PostgreSQL
        ├─原文件：受控本地存储，SHA-256
        ├─Outbox：独立 Python Worker 或 API 触发
        └─审计事件：业务事实，不含模型隐藏思考过程
                     │
              ERPPort（草稿边界）
        ├─独立 SQLite 模拟 ERP（已测试）
-       └─ERPNext REST（契约测试，真实联调未做）
+       └─ERPNext REST（合成隔离沙箱与独立回读）
 
-可选 ReadOnlyAgent → get_comparison / search_policy / get_evidence
+可选 LangGraph ReadOnlyAgent → get_comparison / search_policy / get_evidence
 模型输出只有解释权限，不能授权、批准、创建外部对象。
 ```
 
-不把当前实现称为 LangGraph、AG-UI、向量 RAG 或 Celery。业务规则不依赖运行时名称，后续框架应通过明确接口复用已有服务。
+只读建议已使用真实 LangGraph 图；不宣称 AG-UI、向量 RAG、Celery、图 checkpoint 或可自动恢复模型调用。业务规则和审批仍由确定性服务负责。当前提交是否通过环境门槛必须核对对应 CI；早期阶段报告不是当前验收结果。
 
 ## 数据表
 
@@ -36,8 +36,9 @@
 `external_operations`：稳定操作键、批准快照、执行状态、租约、远端 ID。
 `outbox`：与操作预留同一事务产生的执行意图。
 `audit_events`：带租户与 actor 的业务审计。
+`advice_runs`：版本与来源绑定的只读建议运行/结果账本，含一次性领取、中断和过期状态。
 
-Alembic revision 创建上述 8 表及索引/唯一约束；SQLite 的 upgrade/downgrade/upgrade 已实测。数据库管理员仍可篡改审计，当前不是密码学不可抵赖的审计系统。
+Alembic 迁移创建上述业务表及索引/唯一约束，当前 head `5ce3ab9b84a2` 增加 advice_runs。SQLite 与 PostgreSQL 有独立迁移门槛。数据库管理员仍可篡改审计，当前不是密码学不可抵赖的审计系统。
 
 ## 金额合同
 
@@ -45,7 +46,7 @@ Alembic revision 创建上述 8 表及索引/唯一约束；SQLite 的 upgrade/d
 
 先将 quantity × unit_price 舍入到分，扣除明确的商品绝对折扣；若不含税，则单独计算并舍入税额；最后加明确的最终含税运费。采用 ROUND_HALF_UP。
 
-“含税”报价可不额外要求税率来计算总成本，但该字段仍可保持未知；“不含税”报价缺税率则总成本未知。缺运费、缺折扣值、税价模式不明等均不默认为零。单位、币种、SKU、数量不匹配不做隐式换算。该简化合同不是任意 ERP 税务模型，更不是税务建议。
+“含税”报价可不额外要求税率来计算总成本，但该字段仍可保持未知；“不含税”报价缺税率则总成本未知。缺运费、缺折扣值、税价模式不明等均不默认为零。单位、币种、SKU、数量不匹配不做隐式换算。该简化合同不是任意 ERP 税务模型，更不是税务建议。真实 ERP 映射还要求明确税率、整数 EA、受限金额及可逐项严格回读的舍入结果，见 [费用映射边界](erp-cost-mapping.md)；确定性可比较不代表 ERP 一定可表示。
 
 ## 证据和版本
 
@@ -57,7 +58,7 @@ PDF 提供页码与抽取文本行号，不伪造视觉坐标；XLSX 提供真�
 
 ## 审批合同
 
-服务端重建规范 JSON 并计算 SHA-256。快照含需求和报价版本、全部报价值、确认人、证据和源文件哈希、规则版本、总价、ERP 目标指纹、公司和日期。
+服务端重建规范 JSON 并计算 SHA-256。快照含需求和报价版本、全部报价值、确认人、证据和源文件哈希、规则版本、总价、ERP 目标指纹、费用映射版本、税/运费账户、公司和日期。历史快照不被补写；缺少新费用字段的旧快照在执行/回读前安全阻断，不自动重放。
 
 审批请求必须提交用户正在看的哈希；服务端比较当前哈希，不接受只传 `approved=true`。采购创建人与审批人必须不同。执行预留与实际首次 dispatch 均检查审批仍有效、角色未撤销、快照未变。客户端无法使用 X-Role 或任意 approver ID 提权。
 
@@ -82,16 +83,18 @@ SQLite 使用 BEGIN IMMEDIATE 序列化写入；操作在网络前先提交状�
 
 远端“没有查到”不是“确定没创建”；当前选择停住而不是冒险重复。NEEDS_HUMAN 仍可人工触发只读核对，但没有实现“人工断言没有副作用后重开操作”的完整流程。这是有意的安全优先取舍。
 
-PostgreSQL 路径保留 aggregate row locking 代码，但本轮没有服务实例、驱动和并发实测，不能把 SQLite 的测试结果推广为 PostgreSQL 保证。真实 ERP 唯一键和读写一致性也必须另测。
+PostgreSQL 使用 aggregate row locking，并有真实 PostgreSQL 并发/迁移/建议门槛。联合沙箱分别执行 SQLite/PostgreSQL 业务库 + ERPNext/MariaDB，独立审计真实唯一索引与持久化回读。各后端结果必须绑定同一确切提交，不能互相替代。
 
 ## 恢复测试的准确范围
 
-已有：对象/数据库重开、模拟成功后丢回执、过期在途租约、并发执行、实际 HTTP 服务优雅重启、独立 Worker 进程双次 drain。
+已有测试路径：对象/数据库重开、模拟 ERP 成功后丢回执、模拟 ERP 的两个 SIGKILL 窗口、过期在途租约、并发执行、实际 HTTP 服务优雅重启、独立 Worker 进程双次 drain；真实 ERP 沙箱还有提交成功后 HTTP 504 丢回执及只读恢复。
 
 没有：SIGKILL 全窗口故障注入、机器断电、磁盘损坏、跨主机租约、真实 ERP 服务重启、读副本延迟测试。不能把当前结果写成“所有崩溃场景均已验证”。
 
 
-## v0.1.0a2 增量（2026-09-22）
+## v0.1.0a2 历史增量（2026-09-22）
+
+本节仅记录当时状态；后续实现见阶段三至十及当前 README。
 
 业务表与审批/Outbox 授权源不变。新增 capabilities、合成样例 API、严格模型消息 Schema、要求读取比较工具后才允许解释、逐工具审计事件、ERPNext Custom Field/持久化回读核对。真实 ERP 目标仅 private 模式可用；CORS origin 由显式配置限定。
 

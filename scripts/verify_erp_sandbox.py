@@ -26,6 +26,8 @@ import httpx
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from erp_business_database import business_database, postgres_test_url, audit_business_database
+sys.path.insert(0, str(ROOT / 'integrations/erpnext/sandbox'))
+from cost_fixtures import COST_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT
 TARGET='http://127.0.0.1:18080'
 
 
@@ -117,8 +119,26 @@ def document_contract_observation(expected, response):
             checks[field + '_matches'] = item.get(field) == wanted.get(field)
         for field in ('qty', 'rate'):
             checks[field + '_matches'] = Decimal(str(item.get(field))) == Decimal(str(wanted.get(field)))
-        checks['grand_total_matches'] = Decimal(str(record.get('grand_total'))) == (
-            Decimal(str(wanted['qty'])) * Decimal(str(wanted['rate'])))
+        goods = (Decimal(str(wanted['qty'])) * Decimal(str(wanted['rate']))).quantize(Decimal('0.01'), rounding='ROUND_HALF_UP')
+        discount = Decimal(str(expected.get('discount_amount', '0')))
+        rows = expected.get('taxes', [])
+        tax = sum((Decimal(str(row['rate'])) / 100 for row in rows
+                   if row['charge_type'] == 'On Net Total' and not row['included_in_print_rate']), Decimal(0))
+        freight = sum((Decimal(str(row['tax_amount'])) for row in rows if row['charge_type'] == 'Actual'), Decimal(0))
+        target = goods - discount + ((goods - discount) * tax).quantize(Decimal('0.01'), rounding='ROUND_HALF_UP') + freight
+        checks['grand_total_matches'] = Decimal(str(record.get('grand_total'))) == target
+        if 'taxes' in expected:
+            actual_rows = record.get('taxes')
+            checks['cost_rows_match'] = isinstance(actual_rows, list) and len(actual_rows) == len(rows)
+            if checks['cost_rows_match']:
+                for actual, want in zip(actual_rows, rows, strict=True):
+                    checks['cost_rows_match'] &= all(actual.get(key) == want.get(key) for key in
+                        ('charge_type', 'category', 'add_deduct_tax', 'account_head', 'included_in_print_rate'))
+                    checks['cost_rows_match'] &= Decimal(str(0 if actual.get('rate') is None and actual.get('charge_type') == 'Actual' else actual.get('rate'))) == Decimal(str(want['rate']))
+                    if want['charge_type'] == 'Actual':
+                        checks['cost_rows_match'] &= Decimal(str(actual.get('tax_amount_after_discount_amount'))) == Decimal(str(want['tax_amount']))
+            checks['discount_amount_matches'] = Decimal(str(record.get('discount_amount'))) == discount
+            checks['apply_discount_on_matches'] = record.get('apply_discount_on') == expected.get('apply_discount_on')
         return checks
     except (ValueError, TypeError, KeyError, AttributeError, InvalidOperation):
         return {'document_shape_valid': False}
@@ -195,7 +215,8 @@ def exercise(data, backend='sqlite'):
         env={k:v for k,v in os.environ.items() if not k.startswith(('PF_','ERP_','LLM_'))}
         env.update(PYTHONPATH=str(ROOT/'services/api'),PF_DATA_DIR=tmp,PF_DATABASE_URL=database_url,
             PF_MODE='private',PF_AUTH_TOKENS=json.dumps(identities),PF_ERP_MODE='erpnext',ERP_BASE_URL=erp_url,
-            ERP_COMPANY=data['company'],ERP_API_KEY=data['api_key'],ERP_API_SECRET=data['api_secret'],ERP_ALLOW_DRAFT_WRITES='true')
+            ERP_COMPANY=data['company'],ERP_API_KEY=data['api_key'],ERP_API_SECRET=data['api_secret'],ERP_ALLOW_DRAFT_WRITES='true',
+            ERP_TAX_ACCOUNT=TAX_ACCOUNT, ERP_FREIGHT_ACCOUNT=FREIGHT_ACCOUNT)
         with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         base=f'http://127.0.0.1:{port}'
         log=open(Path(tmp)/'api.log','w')
@@ -229,15 +250,16 @@ def exercise(data, backend='sqlite'):
                     r=client.request(method,'/api/v1'+path,headers={'Authorization':'Bearer '+tokens[role]},**kwargs)
                     if r.status_code!=expected:raise AssertionError(f'HTTP_{r.status_code}_EXPECTED_{expected}')
                     return r.json()
-                def prepare(title):
-                    req=call('POST','/requests',expected=201,json={'title':title,'sku':data['sku'],'quantity':'20','budget':'3000.00','max_delivery_days':14})
-                    values={'supplier_id':data['supplier'],'sku':data['sku'],'quantity':'20','uom':'EA','unit_price':'100.00',
-                        'tax_mode':'excluded','tax_rate':'0','shipping_cost':'0','discount':'0','delivery_days':7,'currency':'CNY'}
+                def prepare(title, scenario='normal'):
+                    fixture = COST_CASES[scenario]
+                    req=call('POST','/requests',expected=201,json={'title':title,'sku':data['sku'],'quantity':'20','budget':'30000.00','max_delivery_days':14})
+                    values={'supplier_id':data['supplier'],'sku':data['sku'],'quantity':'20','uom':'EA','delivery_days':7,'currency':'CNY',
+                        **{key: fixture[key] for key in ('unit_price', 'tax_mode', 'tax_rate', 'shipping_cost', 'discount')}}
                     text='\n'.join(f'{k}: {v}' for k,v in values.items()).encode()
                     q=call('POST',f"/requests/{req['id']}/documents",expected=201,files={'file':('synthetic.txt',text)})
                     call('POST',f"/quotes/{q['id']}/confirm",json={'expected_version':q['version'],'acknowledge':True})
                     proposal=call('POST',f"/requests/{req['id']}/analyze",json={})['proposal']
-                    assert proposal and proposal['total']=='2000.00'
+                    assert proposal and proposal['total']==fixture['total']
                     return req,proposal
                 def approve(req,proposal):
                     call('POST',f"/requests/{req['id']}/approval",role='approver',json={'snapshot_hash':proposal['snapshot_hash']})
@@ -249,7 +271,7 @@ def exercise(data, backend='sqlite'):
                 # Dedicated ERP identity, not Administrator, before any business write.
                 sys.path.insert(0,str(ROOT/'services/api'))
                 from procureflow.erp import ERPNextClient
-                adapter=ERPNextClient(erp_url,data['api_key'],data['api_secret'],data['company'])
+                adapter=ERPNextClient(erp_url,data['api_key'],data['api_secret'],data['company'], tax_account=TAX_ACCOUNT, freight_account=FREIGHT_ACCOUNT)
                 try:report['preflight']=adapter.preflight(expected_user=data['user'])
                 finally:adapter.client.close()
                 report['steps'].append('dedicated_identity_get_only_preflight')
@@ -265,9 +287,10 @@ def exercise(data, backend='sqlite'):
                 assert wire['posts']==[]
                 report['steps'].append('unapproved_self_approved_and_stale_writes_denied')
                 verified=[]
-                for label,lose in [('normal',False),('lost-receipt',True)]:
+                for label in COST_CASES:
+                    lose = label == 'lost-receipt'
                     phase=label
-                    req,proposal=prepare('Synthetic '+label);approve(req,proposal);op=enqueue(req,proposal)
+                    req,proposal=prepare('Synthetic '+label, label);approve(req,proposal);op=enqueue(req,proposal)
                     wire['lose_next']=lose;worker()
                     first=call('GET',f"/operations/{op['id']}")
                     if lose:
@@ -283,7 +306,8 @@ def exercise(data, backend='sqlite'):
                     assert enqueue(req,proposal)['id']==op['id'];worker()
                     assert len([x for x in wire['posts'] if x['key']==op['id']])==1
                     verified.append({'operation_id':op['id'],'snapshot_hash':proposal['snapshot_hash'],
-                        'remote_id':final['remote_id'],'expected_total':'2000.00','scenario':label})
+                        'remote_id':final['remote_id'],'expected_total':COST_CASES[label]['total'],'scenario':label,
+                        'cost_components_verified': True})
                     report['steps'].append(label+'_independent_worker_draft_readback_and_replay')
                 phase='restart'
                 stop(p);p=start()

@@ -47,7 +47,8 @@ def run_probe(target: str, allow_network: bool) -> tuple[dict, int]:
                 if expected_user.casefold() in {"administrator", "guest"}:
                     return {**report, "reason": "DEDICATED_INTEGRATION_IDENTITY_REQUIRED"}, 2
                 client = ERPNextClient(settings.erp_url, settings.erp_api_key, settings.erp_api_secret,
-                                       settings.erp_company, allow_writes=False)
+                                       settings.erp_company, allow_writes=False,
+                                       tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
                 try:
                     report["network_attempted"] = True
                     report["checks"] = client.preflight(expected_user=expected_user)

@@ -46,7 +46,7 @@ def test_probe_against_loopback_protocol_fixture(tmp_path, target):
                 field = json.loads(parse_qs(url.query)["filters"][0])[-1][-1]
                 self.reply({"data": [{"fieldname": field, "unique": 1, "fieldtype": "Data"}]})
             elif "/Company/" in path:
-                self.reply({"data": {"name": "SyntheticCompany"}})
+                self.reply({"data": {"name": "SyntheticCompany", "default_currency": "CNY"}})
             elif path.endswith("Supplier"):
                 self.reply({"data": []})
             else:
@@ -75,6 +75,7 @@ def test_probe_against_loopback_protocol_fixture(tmp_path, target):
         if target == "erp":
             assert len(seen) == 5 and all(method == "GET" for method, _ in seen)
             assert result["checks"]["integration_identity_verified"]
+            assert result["checks"]["company_currency_verified"] is True
             assert result["checks"]["least_privilege_verified"] is False
         else:
             assert len(seen) == 2 and result["model_calls"] == 2 and result["tool_calls"] == 2

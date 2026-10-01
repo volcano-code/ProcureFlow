@@ -1,5 +1,7 @@
 # Disposable real ERPNext gate: initialization, permissions and evidence
 
+> Historical scope: this document describes the earlier ERP gate. The current four-draft tax/freight/discount contract and its verification limits are in [ERP cost mapping](erp-cost-mapping.md). Earlier passing results do not validate the new mapping.
+
 This continues stage 5 on the existing FastAPI/Next.js/independent Python Worker stack. It does not migrate the application, access an existing ERP account, merge main, or submit a procurement document. Consult PR #1 and the Actions run bound to the exact commit for execution results; this document is not a passing test record.
 
 ## Repairs and diagnostics

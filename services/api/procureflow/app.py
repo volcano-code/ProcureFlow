@@ -33,7 +33,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         create_schema=settings.mode == "demo" and settings.database_url.startswith("sqlite"))
     if erp is None:
         erp = MockERP(settings.data_dir / "mock-erp.sqlite3") if settings.erp_mode == "mock" else ERPNextClient(
-            settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes)
+            settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes,
+            tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
     service = ProcurementService(db, settings, erp)
     advice_service = AdviceService(service)
 

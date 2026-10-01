@@ -20,8 +20,8 @@ def inputs():
         'supplier': 'PF Synthetic Supplier', 'nonce': 'a' * 64,
         'api_key': CANARY + '_KEY', 'api_secret': CANARY + '_SECRET'}
     operations = [{'remote_id': f'PUR-SQTN-2026-0000{idx + 1}', 'operation_id': c * 64,
-        'snapshot_hash': d * 64, 'expected_total': '2000.00'}
-        for idx, (c, d) in enumerate([('a', 'c'), ('b', 'd')])]
+        'snapshot_hash': d * 64, 'expected_total': probe.COST_CASES[scenario]['total'], 'scenario': scenario}
+        for idx, (scenario, c, d) in enumerate(zip(probe.COST_CASES, 'abcd', 'cdef', strict=True))]
     return data, operations
 
 
@@ -39,9 +39,9 @@ def draft(data, operation):
     return {'doctype': 'Supplier Quotation', 'name': operation['remote_id'], 'docstatus': 0,
         'company': data['company'], 'supplier': data['supplier'], 'currency': 'CNY',
         'custom_procureflow_operation_key': operation['operation_id'],
-        'custom_procureflow_snapshot_hash': operation['snapshot_hash'], 'grand_total': 2000,
+        'custom_procureflow_snapshot_hash': operation['snapshot_hash'], 'grand_total': operation['expected_total'],
         'transaction_date': '2026-09-30', 'modified': '2026-09-30 00:00:00',
-        'items': [{'item_code': data['sku'], 'uom': 'EA', 'qty': 20, 'rate': 100}]}
+        'items': [{'item_code': data['sku'], 'uom': 'EA', 'qty': 20, 'rate': probe.COST_CASES[operation['scenario']]['unit_price']}]}
 
 
 def fake_erp(*, changed=None, identity=None, bad_account_selection=False, failed_probe=None,
@@ -88,7 +88,7 @@ def fake_erp(*, changed=None, identity=None, bad_account_selection=False, failed
 
 def passed_record():
     return {'stage': 'permission-probes', 'status': 'passed', 'real_user_account_used': False,
-        'draft_documents_checked': 2, **dict.fromkeys(probe.REQUIRED_TRUE, True),
+        'draft_documents_checked': 4, **dict.fromkeys(probe.REQUIRED_TRUE, True),
         'probes': [{'name': name, 'method': method, 'endpoint': endpoint, 'status': 403,
             'error_type': 'PermissionError', 'permission_denied': True} for name, method, endpoint in probe.PROBES]}
 
@@ -99,7 +99,7 @@ def test_all_realistic_rest_denials_and_positive_controls_are_required():
     result = probe.exercise(data, operations, transport=transport)
     assert result['status'] == 'passed'
     assert probe.require_probe_evidence(result) is result
-    assert len(negatives) == 7 and len(calls) == 14
+    assert len(negatives) == 7 and len(calls) == 18
     assert json.loads(negatives[3].content) == {'docstatus': 1}
     assert json.loads(negatives[1].content) == {'disabled': 0}
     po = json.loads(negatives[-1].content)

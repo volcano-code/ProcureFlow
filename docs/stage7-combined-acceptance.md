@@ -1,5 +1,7 @@
 # Combined PostgreSQL + ERPNext acceptance
 
+> Historical scope: this is the earlier two-draft zero-cost acceptance record. The current [ERP cost mapping](erp-cost-mapping.md) adds a four-draft cost contract; these prior results do not certify it.
+
 This increment preserves FastAPI, native Next.js and the independent Python Worker. It adds acceptance coverage, not a production ERP connector configuration or new procurement permissions.
 
 ## What the gate now requires
