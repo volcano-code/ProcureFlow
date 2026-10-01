@@ -8,7 +8,7 @@ export interface DocumentEvidence {id:string;filename:string;sha256:string;trust
 export interface Quote {id:string;request_id:string;document_id:string;filename:string;version:number;version_id:string;values:QuoteValues;evidence:Record<string,EvidenceRef>;confirmed_by:string|null;calculation:{total:string|null;violations:string[];eligible:boolean}}
 export interface AuditEvent {id:number;type:string;actor_id:string;created_at:string;payload:Record<string,unknown>}
 export interface Operation {id:string;status:string;remote_id:string|null;error:string|null}
-export interface Capabilities {mode:"demo"|"private";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"bounded-read-only-tool-loop"}
+export interface Capabilities {mode:"demo"|"private";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"langgraph-read-only-v1";advice_runtime_version:string}
 export interface AdviceOutput {
   summary:string;evidence_ids:string[];runtime:string;llm_used:boolean;advisory_only:true;
   semantic_factuality_verified:false;evidence_read_verified?:boolean;model_calls:number;tool_calls:number;

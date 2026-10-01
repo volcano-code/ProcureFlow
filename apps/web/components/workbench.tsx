@@ -134,7 +134,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
       <p data-testid="advice-provider">{cap?.advice_configured
         ? "模型提供方已配置：仅检测到服务端密钥与模型设置，尚未验证连通性或质量。显式生成可能产生模型费用。"
         : "模型提供方未配置：请在服务端设置 LLM_API_KEY 与 LLM_MODEL；当前不能生成建议。"}</p>
-      <p>运行方式：{cap?.advice_runtime||"bounded-read-only-tool-loop"}。仅供参考，必须人工核对。引用 ID 存在校验不代表语义真实性验证。</p>
+      <p>运行方式：{cap?.advice_runtime||"未报告"}。仅供参考，必须人工核对。引用 ID 存在校验不代表语义真实性验证。</p>
       {!buyer && <p data-testid="advice-read-only">当前身份只能查看历史；仅采购员可发起运行。</p>}
       {readError && <p role="alert" className="form-error" data-testid="advice-read-error">历史读取失败：{readError}。请回读状态后再操作。</p>}
       {runError && <p role="alert" className="form-error" data-testid="advice-error">{runError}</p>}

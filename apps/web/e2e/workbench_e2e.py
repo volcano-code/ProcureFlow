@@ -133,7 +133,7 @@ class MockAdviceRoutes:
         if path=='/capabilities':
             original=route.fetch().json()
             self.respond(route,{**original,'advice_configured':self.configured,
-                'advice_runtime':'bounded-read-only-tool-loop'})
+                'advice_runtime':'langgraph-read-only-v1'})
             return
         quotes=re.fullmatch(r'/requests/([^/]+)/quotes',path)
         if quotes and route.request.method=='GET':
@@ -180,7 +180,7 @@ class MockAdviceRoutes:
             evidence_id=(self.quote_sources[run['request_id']][0]['evidence']['unit_price']['fragment_id']
                          if self.cite_real_source else 'mock-document:fragment-1')
             run['output']={'summary':'MOCK PROVIDER：请人工核对运费，建议不能代替采购审批。',
-                'evidence_ids':[evidence_id],'runtime':'bounded-read-only-tool-loop',
+                'evidence_ids':[evidence_id],'runtime':'langgraph-read-only-v1',
                 'llm_used':True,'advisory_only':True,'semantic_factuality_verified':False,
                 'evidence_read_verified':True,
                 'model_calls':2,'tool_calls':1,'trace':[{'type':'tool_completed','tool':'get_comparison'}],
@@ -240,6 +240,7 @@ def test_native_advice_mock_provider_persisted_history_and_no_replay(page):
     prepare_advice(page)
     version=int(re.search(r'v(\d+)',page.get_by_test_id('request-meta').inner_text())[1])
     expect(page.get_by_test_id('advice-provider')).to_contain_text('尚未验证连通性或质量')
+    expect(page.get_by_test_id('advice-panel')).to_contain_text('运行方式：langgraph-read-only-v1')
     # Wait for actionability and dispatch the same-tick clicks atomically. An SSE history
     # refresh may disable the button between separate readiness and evaluate calls.
     page.wait_for_function("""() => {

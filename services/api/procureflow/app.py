@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from . import __version__
-from .agent import ReadOnlyAgent
+from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
 from .config import Settings
 from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
@@ -105,7 +105,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
                 "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
-                "advice_runtime": "bounded-read-only-tool-loop",
+                "advice_runtime": RUNTIME, "advice_runtime_version": LANGGRAPH_VERSION,
                 "erp_draft_writes_enabled": erp.mode == "mock" or settings.erp_allow_draft_writes,
                 "approval_authority": "business-database", "production_ready": False}
 

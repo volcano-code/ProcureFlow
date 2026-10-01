@@ -368,6 +368,9 @@ def test_durable_api_graph_receipts_are_safe_and_never_replayed(system, monkeypa
     from procureflow.db import AdviceRunRow, EventRow
 
     client, service, erp = system
+    capabilities = client.get("/api/v1/capabilities", headers=BUYER).json()
+    assert capabilities["advice_runtime"] == RUNTIME
+    assert capabilities["advice_runtime_version"] == LANGGRAPH_VERSION
     req = create_request(client)
     before = client.get(f"/api/v1/requests/{req['id']}", headers=BUYER).json()
     created = client.post(f"/api/v1/requests/{req['id']}/advice-runs", headers=BUYER,
