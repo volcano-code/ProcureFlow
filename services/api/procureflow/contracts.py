@@ -84,6 +84,12 @@ class AnalyzeCommand(Contract):
     preferred_quote_id: str | None = None
 
 
+class AdviceRunCommand(Contract):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    expected_version: int = Field(ge=1, strict=True)
+    idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$", strict=True)
+
+
 class ApprovalCommand(Contract):
     snapshot_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     decision: Literal["approve", "reject"] = "approve"

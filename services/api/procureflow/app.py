@@ -14,8 +14,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .agent import ReadOnlyAgent
+from .advice import AdviceService
 from .config import Settings
-from .contracts import (AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
+from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
     QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
 from .db import Database, audit
 from .domain import POLICY
@@ -34,6 +35,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         erp = MockERP(settings.data_dir / "mock-erp.sqlite3") if settings.erp_mode == "mock" else ERPNextClient(
             settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes)
     service = ProcurementService(db, settings, erp)
+    advice_service = AdviceService(service)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -102,6 +104,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     def capabilities(principal=Depends(identity)):
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
+                "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
+                "advice_runtime": "bounded-read-only-tool-loop",
                 "erp_draft_writes_enabled": erp.mode == "mock" or settings.erp_allow_draft_writes,
                 "approval_authority": "business-database", "production_ready": False}
 
@@ -223,6 +227,22 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "model_calls": output["model_calls"], "tool_calls": output["tool_calls"],
                 "advisory_only": True, "trace": output["trace"]})
         return output
+
+    @app.post("/api/v1/requests/{request_id}/advice-runs", status_code=201)
+    def reserve_advice(request_id: str, command: AdviceRunCommand, principal=Depends(identity)):
+        return advice_service.reserve(principal, request_id, command)
+
+    @app.get("/api/v1/requests/{request_id}/advice-runs")
+    def list_advice(request_id: str, principal=Depends(identity)):
+        return advice_service.list(principal, request_id)
+
+    @app.get("/api/v1/advice-runs/{run_id}")
+    def get_advice(run_id: str, principal=Depends(identity)):
+        return advice_service.get(principal, run_id)
+
+    @app.post("/api/v1/advice-runs/{run_id}/process")
+    def process_advice(run_id: str, principal=Depends(identity)):
+        return advice_service.process(principal, run_id, ReadOnlyAgent.from_env)
 
     @app.post("/api/v1/requests/{request_id}/approval")
     def approve(request_id: str, command: ApprovalCommand, principal=Depends(identity)):

@@ -28,6 +28,7 @@ def run(output: Path) -> int:
         env = {**os.environ, "PF_TEST_BACKEND": "postgresql", "PF_REQUIRE_POSTGRES": "1"}
         start = time.monotonic()
         cmd = [sys.executable, str(ROOT / "scripts/test.py"), "tests/test_workflow.py", "tests/test_postgres.py",
+               "tests/test_advice_runs.py",
                "-q", "--junitxml=" + str(output / "postgres.xml")]
         with (output / "postgres.log").open("w") as log:
             result = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log, stderr=log, timeout=360)

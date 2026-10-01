@@ -119,6 +119,27 @@ class EventRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+class AdviceRunRow(Base):
+    """A durable advisory receipt, never an approval or an execution command."""
+    __tablename__ = "advice_runs"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key",
+                                      name="uq_advice_request_key"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    idempotency_key: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_until: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class Database:
     def __init__(self, url: str, create_schema: bool = False):
         url = normalize_database_url(url)

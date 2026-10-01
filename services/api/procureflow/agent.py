@@ -57,7 +57,8 @@ class ReadOnlyAgent:
     def __init__(self, base_url: str, api_key: str, model: str,
                  max_model_calls=4, max_tool_calls=8, max_wall_seconds=35,
                  transport: httpx.BaseTransport | None = None, *, thinking_mode="default",
-                 max_reported_tokens=16000, require_usage=False, required_tools=("get_comparison",)):
+                 max_reported_tokens=16000, require_usage=False, required_tools=("get_comparison",),
+                 require_evidence_reads=False):
         if not model or not api_key:
             raise DomainError("MODEL_NOT_CONFIGURED", "Configure LLM_MODEL and LLM_API_KEY on the server", 503)
         try:
@@ -74,6 +75,7 @@ class ReadOnlyAgent:
         self.max_reported_tokens = max_reported_tokens
         self.require_usage = require_usage
         self.required_tools = set(required_tools)
+        self.require_evidence_reads = require_evidence_reads
         if not (1 <= max_model_calls <= 20 and 1 <= max_tool_calls <= 50 and 0 < max_wall_seconds <= 300):
             raise ValueError("Model, tool and wall-time budgets must be bounded positive values")
         self.model = model
@@ -91,11 +93,15 @@ class ReadOnlyAgent:
 
     def run(self, invoke_tool: Callable[[str, dict], dict | list], evidence_ids: set[str],
             observer: Callable[[dict], None] | None = None) -> dict:
-        messages = [{"role": "system", "content": SYSTEM},
+        grounding = (" Read every cited fragment through get_evidence before finishing. When source fragments exist, "
+                     "cite at least one relevant fragment; comparison output alone does not satisfy this check."
+                     if self.require_evidence_reads else "")
+        messages = [{"role": "system", "content": SYSTEM + grounding},
                     {"role": "user", "content": "请读取比较结果、制度和必要证据，解释推荐与缺失项；不要执行任何写入。"}]
         started = time.monotonic()
         tool_count, trace = 0, []
         completed_tools: set[str] = set()
+        read_evidence_ids: set[str] = set()
         seen_call_ids: set[str] = set()
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         usage_complete = True
@@ -163,8 +169,14 @@ class ReadOnlyAgent:
                     raise DomainError("EVIDENCE_NOT_FOUND", "Model cited an unknown source fragment", 502)
                 if not self.required_tools.issubset(completed_tools):
                     raise DomainError("MODEL_GROUNDING_REQUIRED", "Read server-calculated comparison before claiming an explanation", 502)
+                if self.require_evidence_reads:
+                    if evidence_ids and not narrative.evidence_ids:
+                        raise DomainError("EVIDENCE_REQUIRED", "Cite source evidence for this advice run", 502)
+                    if not set(narrative.evidence_ids).issubset(read_evidence_ids):
+                        raise DomainError("EVIDENCE_NOT_READ", "Read the cited source fragments before returning advice", 502)
                 return {**narrative.model_dump(), "runtime": "bounded-read-only-tool-loop", "llm_used": True,
                         "advisory_only": True, "semantic_factuality_verified": False,
+                        "evidence_read_verified": bool(self.require_evidence_reads),
                         "model_calls": model_call, "tool_calls": tool_count, "trace": trace,
                         "usage": usage_total if usage_complete else None, "usage_complete": usage_complete,
                         "usage_source": "provider_reported", "cost": None}
@@ -202,6 +214,12 @@ class ReadOnlyAgent:
                 content = json.dumps({"trust": "untrusted_data", "data": output}, ensure_ascii=False)
                 if len(content) > 22000:
                     raise DomainError("TOOL_OUTPUT_LIMIT", "Tool output too large; no silent truncation", 422)
+                if name == "get_evidence" and isinstance(output, dict):
+                    fragments = output.get("fragments", [])
+                    if isinstance(fragments, list):
+                        read_evidence_ids.update(fragment["id"] for fragment in fragments
+                            if isinstance(fragment, dict) and isinstance(fragment.get("id"), str)
+                            and fragment["id"] in evidence_ids)
                 tool_count += 1
                 completed_tools.add(name)
                 record({"type": "tool_completed", "model_call": model_call, "tool": name,
