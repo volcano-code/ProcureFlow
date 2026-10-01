@@ -93,7 +93,8 @@ def http_observation(method, path, response):
         body = response.json()
         kind = body.get('exc_type') if isinstance(body, dict) else None
         if kind in {'PermissionError', 'AuthenticationError', 'ValidationError',
-                'LinkValidationError', 'MandatoryError', 'DoesNotExistError'}:
+                'LinkValidationError', 'MandatoryError', 'DoesNotExistError',
+                'TypeError', 'ValueError', 'AttributeError', 'KeyError', 'ZeroDivisionError'}:
             result['error_type'] = kind
             result.update(remote_error_details(body))
     except (ValueError, TypeError):

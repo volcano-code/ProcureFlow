@@ -14,6 +14,8 @@ The adapter maps one CNY Supplier Quotation item, EA, with a positive integral q
 
 The inclusive-discount path is intentionally narrower than all arithmetic-valid quotes. It rounds the original goods net amount to cents, then distributes the gross goods discount on that rounded net. Both original and discounted net-plus-tax must equal their exact gross goods amounts. Otherwise `ERP_INCLUSIVE_ROUNDING_UNSUPPORTED` stops before any network write. For example, 0.05 of goods at 13% inclusive tax with a 0.01 discount is rejected; ERP's rounding correction must not conceal a component mismatch. With no discount, inclusive tax is calculated from the original unrounded net base.
 
+The ProcureFlow API and approval snapshot retain decimal strings. The ERP REST boundary serializes numeric fields as exact JSON number tokens directly from Decimal, without a binary-float conversion; Frappe header validation can treat the string "0" as truthy before coercion.
+
 ERPNext uses configurable precision and floating arithmetic. The sandbox pins currency precision 2, float precision 6, and Commercial Rounding; both seed and independent database evidence must report these settings. Exact persisted component comparisons remain mandatory even under that configuration. Other site versions, regional apps, defaults, or numeric edge cases can reject a write or leave a draft requiring human review; offline tests do not establish universal monetary equivalence.
 
 ## Explicit account configuration and approval binding

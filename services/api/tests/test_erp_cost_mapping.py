@@ -344,3 +344,63 @@ def test_non_cny_or_unverified_company_currency_fails_before_business_access(cur
             else:adapter.preflight()
         assert all(request.method=='GET' for request in calls)
     finally:adapter.client.close()
+
+
+@pytest.mark.parametrize('scenario', COST_CASES)
+def test_wire_uses_numeric_tokens_before_erp_header_arithmetic(scenario):
+    adapter, calls, _=endpoint(scenario)
+    try: adapter.create_draft('cost-op', payload(scenario))
+    finally: adapter.client.close()
+    request, = [call for call in calls if call.method == 'POST']
+    assert request.headers['Content-Type'] == 'application/json'
+    decoded=json.loads(request.content, parse_float=Decimal)
+    for key in ('discount_amount', 'additional_discount_percentage', 'conversion_rate'):
+        assert isinstance(decoded[key], (int, Decimal)) and not isinstance(decoded[key], bool)
+    for row in decoded['items']:
+        for key in ('qty', 'rate', 'price_list_rate', 'discount_amount', 'discount_percentage'):
+            assert isinstance(row[key], (int, Decimal))
+    for row in decoded['taxes']:
+        assert isinstance(row['rate'], (int, Decimal)) and isinstance(row['tax_amount'], (int, Decimal))
+    # ERPNext v16.36.0 set_discount_amount tests this before multiplication.
+    # The former string "0" enters this branch and raises TypeError.
+    assert not decoded['additional_discount_percentage']
+    assert Decimal(str(decoded['discount_amount'])) == Decimal(COST_CASES[scenario]['discount'])
+    assert not isinstance(payload(scenario)['quote_values']['unit_price'], (int, Decimal))
+
+
+def test_numeric_serializer_is_exact_and_does_not_mutate_snapshot_or_escape_text():
+    from procureflow.erp import erp_numeric_json
+    body={'discount_amount':'0.01','additional_discount_percentage':'0',
+          'items':[{'rate':'999999.99','qty':'1','item_code':'Quoted " SKU\\end'}],
+          'taxes':[{'rate':'12.3456','tax_amount':'123.45','description':'税费'}]}
+    original=deepcopy(body)
+    encoded=erp_numeric_json(body)
+    decoded=json.loads(encoded, parse_float=Decimal)
+    assert body==original and decoded['items'][0]['rate']==Decimal('999999.99')
+    assert decoded['taxes'][0]['rate']==Decimal('12.3456')
+    assert decoded['items'][0]['item_code']==body['items'][0]['item_code']
+    assert b'"rate":999999.99' in encoded and b'"rate":12.3456' in encoded
+    assert decoded['taxes'][0]['description']=='税费'
+
+
+@pytest.mark.parametrize('value', ['NaN', 'Infinity', 'not-a-number', True, 0.1, None, {}])
+def test_numeric_serializer_rejects_nonfinite_or_float_wire_values(value):
+    from procureflow.erp import erp_numeric_json
+    with pytest.raises(ERPRejected, match='NUMERIC_WIRE_INVALID'):
+        erp_numeric_json({'discount_amount':value})
+
+
+def test_erp_header_arithmetic_reproduces_previous_truthy_zero_typeerror():
+    from procureflow.erp import erp_numeric_json
+    def header_validation(values):
+        # Source-equivalent control flow from tagged set_discount_amount:
+        # Frappe has not generically coerced REST document header values yet.
+        amount=values['discount_amount']
+        if values['additional_discount_percentage']:
+            amount=24800.0 * values['additional_discount_percentage'] / 100
+        return amount <= 24800.0
+    old={'additional_discount_percentage':'0','discount_amount':'0.00'}
+    with pytest.raises(TypeError): header_validation(old)
+    assert header_validation(json.loads(erp_numeric_json(old)))
+    nonzero={'additional_discount_percentage':'0','discount_amount':'113.00'}
+    assert header_validation(json.loads(erp_numeric_json(nonzero)))

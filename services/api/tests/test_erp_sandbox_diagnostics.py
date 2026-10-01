@@ -99,3 +99,13 @@ def test_safe_failure_retains_known_readback_code_only():
     module = runner()
     assert module.safe_failure(RuntimeError('ERP_READBACK_PAYLOAD_MISMATCH')) == 'ERP_READBACK_PAYLOAD_MISMATCH'
     assert module.safe_failure(RuntimeError('ERP_READBACK_PAYLOAD_MISMATCH PRIVATE_CANARY')) == 'BUSINESS_ROUNDTRIP_FAILED'
+
+
+@pytest.mark.parametrize('kind', ['TypeError','ValueError','AttributeError','KeyError','ZeroDivisionError'])
+def test_numeric_validation_errors_expose_only_fixed_class_and_source_location(kind):
+    body={'exc_type':kind, 'exception':'SECRET_CANARY',
+          'exc':json.dumps(['File "/SECRET_CANARY/erpnext/controllers/taxes_and_totals.py", line 789, in set_discount_amount\n SECRET_CANARY'])}
+    result=runner().http_observation('POST','/api/resource/Supplier Quotation',httpx.Response(500,json=body))
+    assert result=={'method':'POST','endpoint':'Supplier Quotation','status':500,
+                   'error_type':kind,'source_locations':[{'file':'taxes_and_totals.py','line':789}]}
+    assert 'SECRET_CANARY' not in json.dumps(result)

@@ -200,6 +200,36 @@ def cost_proof_matches(observed, expected):
         return False
 
 
+def erp_numeric_json(body: dict) -> bytes:
+    """Encode only the adapter's explicit ERP numeric fields as JSON numbers.
+
+    Our API/snapshot decimal strings stay unchanged. Frappe validates header
+    arithmetic before universal coercion; a string "0" is truthy there. Format
+    Decimal tokens directly instead of converting money through binary floats.
+    """
+    numeric = {"qty", "rate", "price_list_rate", "discount_amount",
+               "discount_percentage", "additional_discount_percentage", "conversion_rate", "tax_amount"}
+
+    def encode(value, key=None):
+        if key in numeric:
+            if isinstance(value, bool) or not isinstance(value, (str, Decimal, int)):
+                raise ERPRejected("ERP_NUMERIC_WIRE_INVALID")
+            try:
+                number = Decimal(value)
+                if not number.is_finite():
+                    raise ValueError("nonfinite numeric field")
+                return format(number, "f")
+            except (ValueError, ArithmeticError) as error:
+                raise ERPRejected("ERP_NUMERIC_WIRE_INVALID") from error
+        if isinstance(value, dict):
+            return "{" + ",".join(json.dumps(k) + ":" + encode(v, k) for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(encode(v) for v in value) + "]"
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+
+    return encode(body).encode("utf-8")
+
+
 class ERPNextClient:
     """REST adapter; live deployment must be separately tested.
 
@@ -387,7 +417,8 @@ class ERPNextClient:
                 "qty": values["quantity"], "uom": values["uom"], "rate": values["unit_price"], "price_list_rate": values["unit_price"],
                 "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}], **costs}
         try:
-            record = self._call("POST", "api/resource/Supplier Quotation", json=body)
+            record = self._call("POST", "api/resource/Supplier Quotation", content=erp_numeric_json(body),
+                headers={"Content-Type": "application/json"})
         except ERPRejected:
             # A conflicting unique insert can be somebody else's identical delivery.
             found = self.find(operation_key)
