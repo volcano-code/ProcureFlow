@@ -1,4 +1,5 @@
 import importlib.util
+import ast
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pytest
@@ -10,9 +11,10 @@ spec.loader.exec_module(gate)
 
 
 def make_report(path, names=None, flag=None):
+    names = sorted(gate.EXPECTED if names is None else names)
     root = ET.Element("testsuites")
-    suite = ET.SubElement(root, "testsuite", tests="7", failures="0", errors="0", skipped="0")
-    for name in sorted(gate.EXPECTED if names is None else names):
+    suite = ET.SubElement(root, "testsuite", tests=str(len(names)), failures="0", errors="0", skipped="0")
+    for name in names:
         case = ET.SubElement(suite, "testcase", name=name)
         if flag:
             ET.SubElement(case, flag)
@@ -25,7 +27,16 @@ def test_native_gate_requires_all_named_cases(tmp_path):
     assert gate.report_passed(path)
 
 
-@pytest.mark.parametrize("kind", ["missing", "broken", "few", "duplicates", "skipped", "failure", "error", "aggregate_error"])
+def test_native_gate_expected_names_match_collected_source():
+    names = set()
+    for file in ("workbench_e2e.py", "proxy_e2e.py"):
+        tree = ast.parse((ROOT / "apps/web/e2e" / file).read_text())
+        names.update(node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name.startswith("test_"))
+    assert names == gate.EXPECTED
+
+
+@pytest.mark.parametrize("kind", ["missing", "broken", "few", "duplicates", "skipped", "failure", "error", "aggregate_error", "wrong_count", "unexpected_name"])
 def test_native_gate_cannot_report_false_success(tmp_path, kind):
     path = tmp_path / "result.xml"
     if kind == "missing":
@@ -35,7 +46,14 @@ def test_native_gate_cannot_report_false_success(tmp_path, kind):
     elif kind == "few":
         make_report(path, names=list(gate.EXPECTED)[:-1])
     elif kind == "duplicates":
-        make_report(path, names=[next(iter(gate.EXPECTED))] * 7)
+        make_report(path, names=[next(iter(gate.EXPECTED))] * len(gate.EXPECTED))
+    elif kind == "unexpected_name":
+        make_report(path, names=[*sorted(gate.EXPECTED)[:-1], "test_unexpected"])
+    elif kind == "wrong_count":
+        make_report(path)
+        tree = ET.parse(path)
+        tree.getroot().find("testsuite").set("tests", "7")
+        tree.write(path)
     elif kind == "aggregate_error":
         make_report(path)
         tree = ET.parse(path)

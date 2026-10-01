@@ -20,6 +20,16 @@ EXPECTED = {
     "test_native_rejection_blocks_execution", "test_native_identity_change_clears_evidence_and_prior_tenant",
     "test_proxy_keeps_auth_and_scope_boundaries", "test_browser_uses_only_same_origin_business_api",
     "test_audit_sse_reaches_browser_through_native_proxy",
+    "test_native_advice_real_backend_unconfigured_history",
+    "test_native_advice_unconfigured_never_calls_model",
+    "test_native_advice_mock_provider_persisted_history_and_no_replay",
+    "test_native_advice_mock_failure_interrupted_stale_and_recovery",
+    "test_native_advice_mock_late_reservation_cannot_process_after_request_switch",
+    "test_native_advice_mock_late_process_cannot_leak_across_identity",
+    "test_native_advice_mock_read_failure_is_recoverable_without_writes",
+    "test_native_advice_mock_lost_process_response_reads_receipt_without_replay",
+    "test_native_advice_mock_citation_opens_verified_real_source",
+    "test_native_advice_mock_business_audit_event_refreshes_freshness",
 }
 
 
@@ -28,6 +38,7 @@ def report_passed(path: Path) -> bool:
         root = ET.parse(path).getroot()
         cases = list(root.iter("testcase"))
         return (len(cases) == len(EXPECTED) and {c.get("name") for c in cases} == EXPECTED
+                and sum(int(s.get("tests", "0")) for s in root.iter("testsuite")) == len(cases)
                 and not any(list(root.iter(tag)) for tag in ("failure", "error", "skipped"))
                 and all(int(s.get(k, "0")) == 0 for s in root.iter("testsuite") for k in ("failures", "errors", "skipped")))
     except (OSError, ET.ParseError, ValueError, TypeError):

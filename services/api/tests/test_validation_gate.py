@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize("xml, process_code, expected_status, expected_code", [
     (None, 0, "failed", 1),
     ("<broken", 0, "failed", 1),
-    ('<testsuites><testsuite tests="34"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="35" skipped="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="35" failures="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="35" errors="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="35"/></testsuites>', 0, "passed", 0),
+    ('<testsuites><testsuite tests="78"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="79" skipped="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="79" failures="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="79" errors="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="79"/></testsuites>', 0, "passed", 0),
     (None, 1, "failed", 1),
 ])
 def test_postgres_gate_report_matches_exit_status(tmp_path, monkeypatch, xml, process_code,
@@ -28,6 +28,7 @@ def test_postgres_gate_report_matches_exit_status(tmp_path, monkeypatch, xml, pr
     monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object())
     output = tmp_path / "result"
     def fake_run(*args, **kwargs):
+        assert "tests/test_advice_runs.py" in args[0]
         if xml is not None:
             (output / "postgres.xml").write_text(xml)
         return subprocess.CompletedProcess(args[0], process_code)

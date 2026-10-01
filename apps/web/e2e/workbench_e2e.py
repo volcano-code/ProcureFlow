@@ -240,8 +240,15 @@ def test_native_advice_mock_provider_persisted_history_and_no_replay(page):
     prepare_advice(page)
     version=int(re.search(r'v(\d+)',page.get_by_test_id('request-meta').inner_text())[1])
     expect(page.get_by_test_id('advice-provider')).to_contain_text('尚未验证连通性或质量')
-    # Same-tick repeated clicks exercise the synchronous mutation lock, not only disabled styling.
-    page.get_by_test_id('new-advice').evaluate('(button)=>{button.click();button.click()}')
+    # Wait for actionability and dispatch the same-tick clicks atomically. An SSE history
+    # refresh may disable the button between separate readiness and evaluate calls.
+    page.wait_for_function("""() => {
+        const button = document.querySelector('[data-testid="new-advice"]');
+        if (!button || button.disabled) return false;
+        button.click();
+        button.click();
+        return true;
+    }""")
     expect(page.get_by_test_id('new-advice')).to_be_disabled()
     expect(page.get_by_test_id('advice-run')).to_have_count(1)
     assert len(mock.reservations)==1 and mock.reservations[0]['expected_version']==version
