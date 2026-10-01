@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize("xml, process_code, expected_status, expected_code", [
     (None, 0, "failed", 1),
     ("<broken", 0, "failed", 1),
-    ('<testsuites><testsuite tests="78"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="79" skipped="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="79" failures="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="79" errors="1"/></testsuites>', 0, "failed", 1),
-    ('<testsuites><testsuite tests="79"/></testsuites>', 0, "passed", 0),
+    ('<testsuites><testsuite tests="81"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="82" skipped="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="82" failures="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="82" errors="1"/></testsuites>', 0, "failed", 1),
+    ('<testsuites><testsuite tests="82"/></testsuites>', 0, "passed", 0),
     (None, 1, "failed", 1),
 ])
 def test_postgres_gate_report_matches_exit_status(tmp_path, monkeypatch, xml, process_code,

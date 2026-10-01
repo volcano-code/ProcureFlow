@@ -29,6 +29,8 @@ def run(output: Path) -> int:
         start = time.monotonic()
         cmd = [sys.executable, str(ROOT / "scripts/test.py"), "tests/test_workflow.py", "tests/test_postgres.py",
                "tests/test_advice_runs.py",
+               "tests/test_advice_grounding.py::test_durable_api_uses_real_adapter_and_persists_source_read_receipt",
+               "tests/test_graph_runtime.py::test_durable_api_graph_receipts_are_safe_and_never_replayed",
                "-q", "--junitxml=" + str(output / "postgres.xml")]
         with (output / "postgres.log").open("w") as log:
             result = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log, stderr=log, timeout=360)
@@ -42,7 +44,7 @@ def run(output: Path) -> int:
                 for key in counts:
                     counts[key] += int(suite.get(key, "0"))
             report["junit"] = counts
-            if counts["tests"] < 79 or any(counts[k] for k in ("failures", "errors", "skipped")):
+            if counts["tests"] < 82 or any(counts[k] for k in ("failures", "errors", "skipped")):
                 code = 1
                 report.update(status="failed", reason="POSTGRES_TESTS_MISSING_OR_SKIPPED")
         return code

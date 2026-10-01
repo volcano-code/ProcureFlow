@@ -23,6 +23,8 @@ jobs:
           PF_REQUIRE_BROWSER: '1'
           PF_CRASH_REPORT_DIR: ${{ github.workspace }}/evals/reports/ci/crash
           PF_SCREENSHOT_DIR: ${{ github.workspace }}/evals/reports/ci/static-browser
+      - name: Exercise offline graph and durable model acceptance
+        run: python scripts/verify_model_acceptance.py --fixture --output evals/reports/ci/model-acceptance-fixture.json
       - run: node --test apps/web/tests/transport.test.mjs
       - run: python scripts/web_http_smoke.py --output evals/reports/ci/frontend-http.json
       - run: python scripts/smoke.py --output evals/reports/ci/http-smoke.json

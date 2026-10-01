@@ -11,3 +11,7 @@ The local workbench uses system fonts. No font files are distributed. Official f
 ## Optional PostgreSQL driver
 
 psycopg and psycopg-binary: LGPL-3.0-or-later. Dependency: psycopg[binary]==3.3.6. Retain package license metadata when distributing built images. See https://www.psycopg.org/psycopg3/ and https://pypi.org/project/psycopg/.
+
+## Read-only graph runtime
+
+LangGraph 1.2.12 and LangSmith SDK 0.14.2: MIT. Official sources: https://github.com/langchain-ai/langgraph and https://github.com/langchain-ai/langsmith-sdk. Both are installed from PyPI, not vendored. LangSmith SDK is used only to explicitly disable tracing around local graph execution; no hosted LangSmith service is enabled. The runtime dependency snapshot includes transitive packages with their own upstream licenses. This is not a comprehensive license/security audit.

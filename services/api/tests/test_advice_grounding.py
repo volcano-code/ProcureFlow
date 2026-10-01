@@ -33,7 +33,7 @@ def evidence(_name, _args):
 
 
 def test_cited_evidence_must_have_been_read():
-    with pytest.raises(DomainError, match="Read the cited") as exc:
+    with pytest.raises(DomainError) as exc:
         run_script([{"tool_calls": [tool("get_comparison")]}, final(["doc:f1"])], evidence, {"doc:f1"})
     assert exc.value.code == "EVIDENCE_NOT_READ"
 

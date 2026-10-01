@@ -6,3 +6,6 @@ httpx==0.28.1
 pypdf==5.9.0
 uvicorn==0.48.0
 python-multipart==0.0.29
+langgraph==1.2.12
+# Explicitly disable transitive tracing for private graph state.
+langsmith==0.14.2
