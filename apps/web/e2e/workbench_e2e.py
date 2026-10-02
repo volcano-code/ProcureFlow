@@ -307,11 +307,20 @@ def test_native_advice_mock_failure_interrupted_stale_and_recovery(page):
     mock.outcome='COMPLETED'
     page.get_by_test_id('new-advice').click()
     expect(page.get_by_test_id('advice-output')).to_contain_text('MOCK PROVIDER')
+    version=int(re.search(r'v(\d+)',page.get_by_test_id('request-meta').inner_text())[1])
     for runs in mock.runs.values():
         for run in runs:run['current']=False;run['stale_reason']='SOURCE_CHANGED'
     page.get_by_test_id('edit-request').click()
     page.get_by_test_id('request-form').locator('[name="quantity"]').fill('21')
     page.get_by_test_id('request-form').get_by_role('button',name='保存需求').click()
+    # A history refresh can expose the mock's stale flags on the old panel before
+    # save refreshes the request. Wait for the version-keyed remount and its history.
+    expect(page.get_by_test_id('request-form')).to_have_count(0)
+    expect(page.get_by_test_id('request-meta')).to_contain_text(re.compile(rf'\bv{version+1}$'))
+    expect(page.get_by_test_id('request-meta')).to_contain_text('21 EA')
+    expect(page.get_by_test_id('advice-panel')).to_contain_text(f'绑定需求 v{version+1}、')
+    expect(page.get_by_test_id('advice-panel')).to_have_attribute('aria-busy','false')
+    expect(page.get_by_test_id('advice-run')).to_have_count(3)
     expect(page.get_by_test_id('advice-stale').first).to_contain_text('SOURCE_CHANGED')
     expect(page.get_by_test_id('advice-current').first).to_have_text('历史结果，已失效')
     assert len(mock.process_calls)==3

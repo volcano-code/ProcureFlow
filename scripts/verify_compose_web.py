@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -36,6 +37,23 @@ EXPECTED = {
 }
 
 
+def source_identity() -> dict:
+    """Identify the checked-out source separately from the GitHub run's head SHA.
+
+    Pull-request jobs may test a synthetic merge commit. Keep both commit and
+    tree so the evidence consumer can establish exact source equivalence.
+    """
+    try:
+        result = subprocess.run(["git", "rev-parse", "HEAD", "HEAD^{tree}"], cwd=ROOT,
+                                capture_output=True, text=True, check=True, timeout=5)
+        commit, tree = result.stdout.strip().splitlines()
+        if all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (commit, tree)):
+            return {"source_commit": commit, "source_tree": tree}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return {"source_commit": None, "source_tree": None}
+
+
 def report_passed(path: Path) -> bool:
     try:
         root = ET.parse(path).getroot()
@@ -51,7 +69,7 @@ def report_passed(path: Path) -> bool:
 def run(base_url: str, output: Path, allow_mutations: bool) -> int:
     report = {"scope": "native Next container + same-origin proxy + PostgreSQL/mock API",
               "status": "blocked", "browser_verified": False, "fallback_to_static_demo": False,
-              "live_erp": False, "live_model": False}
+              "live_erp": False, "live_model": False, **source_identity()}
     output.mkdir(parents=True, exist_ok=True)
     code = 2
     try:

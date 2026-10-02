@@ -87,3 +87,16 @@ def test_sse_headers_prevent_proxy_buffering_without_relaxing_auth(system):
     assert streamed.headers["cache-control"] == "no-store, no-transform"
     assert streamed.headers["x-accel-buffering"] == "no"
     assert "data:" in streamed.text and "id:" in streamed.text
+
+
+def test_native_gate_records_checkout_commit_and_tree(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(gate.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        stdout="a" * 40 + "\n" + "b" * 40 + "\n"))
+    assert gate.source_identity() == {"source_commit": "a" * 40, "source_tree": "b" * 40}
+
+
+def test_native_gate_never_invents_missing_source_identity(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(gate.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="not-a-git-sha"))
+    assert gate.source_identity() == {"source_commit": None, "source_tree": None}
