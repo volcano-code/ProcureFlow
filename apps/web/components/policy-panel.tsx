@@ -11,6 +11,7 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
   const [policy,setPolicy]=useState<PolicyVersion|null>(null);
   const [versions,setVersions]=useState<PolicyVersion[]>([]);
   const [loading,setLoading]=useState(true);
+  const [readFailed,setReadFailed]=useState(false);
   const [working,setWorking]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -30,11 +31,11 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
         api<PolicyVersion[]>("/policy/versions",token,"GET",undefined,active.controller.signal),
       ]);
       if(scope.current!==active||!active.active||ticket!==epoch.current)return;
-      setPolicy(current);setVersions(history);setReadAt(new Date().toLocaleTimeString());onRead(current);
+      setPolicy(current);setVersions(history);setReadFailed(false);setReadAt(new Date().toLocaleTimeString());onRead(current);
       return current;
     } catch(e) {
       if(scope.current===active&&active.active&&ticket===epoch.current){
-        setError(`策略读取失败：${e instanceof Error?e.message:String(e)}。请刷新策略后再操作。`);onRead(null);
+        setReadFailed(true);setError(`策略读取失败：${e instanceof Error?e.message:String(e)}。请刷新策略后再操作。`);onRead(null);
       }
     } finally {if(scope.current===active&&active.active&&ticket===epoch.current)setLoading(false);}
   },[token,onRead]);
@@ -59,7 +60,7 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
   },[reload]);
   useEffect(()=>{if(form&&dialog.current&&!dialog.current.open)dialog.current.showModal();},[form]);
   const publish=async(event:FormEvent<HTMLFormElement>)=>{
-    event.preventDefault();if(!form||lock.current||workflowBusy||conflict)return;
+    event.preventDefault();if(!form||lock.current||workflowBusy||conflict||loading||readFailed)return;
     const values=new FormData(event.currentTarget),active=scope.current;
     if(!active?.active)return;
     const rawDate=String(values.get("effective_at")||"");
@@ -90,12 +91,14 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
       }
     } finally {lock.current=false;if(scope.current===active&&active.active)setWorking(false);}
   };
-  const openForm=()=>{if(!policy)return;setForm(policy);setScheduled(false);setConflict(false);setError("");setNotice("");};
-  const closeForm=()=>{setForm(null);setConflict(false);setError("");};
+  const openForm=()=>{if(!policy||readFailed)return;setForm(policy);setScheduled(false);setConflict(false);setError("");setNotice("");};
+  const closeForm=()=>{setForm(null);setConflict(false);if(!readFailed)setError("");};
   return <section className="panel quote-panel policy-panel" data-testid="policy-panel" aria-labelledby="policy-title" aria-busy={loading||working}>
     <div className="section-head"><div><h2 id="policy-title">租户采购策略</h2><p>只追加版本，已发布记录不可编辑或删除。预算和交期始终采用需求与策略中较严格的限制。</p></div>
       <div className="heading-actions"><button className="secondary" data-testid="refresh-policy" disabled={loading||working||workflowBusy} onClick={()=>void reload()}>刷新策略</button>
-        {approver&&<button className="primary" data-testid="new-policy" disabled={loading||working||workflowBusy||!policy||!!error} onClick={openForm}>发布新策略版本</button>}</div></div>
+        {/* A focus refresh must not disable this button between pointer-down and click.
+            Editing keeps the captured version; publication still waits for the read and uses CAS. */}
+        {approver&&<button className="primary" data-testid="new-policy" disabled={working||workflowBusy||!policy||readFailed||!!error} onClick={openForm}>发布新策略版本</button>}</div></div>
     <div className="decision-content">
       {!approver&&<p data-testid="policy-read-only">当前身份只读；只有独立审批人可发布新策略。</p>}
       {error&&<p role="alert" className="form-error" data-testid="policy-error">{error}</p>}
@@ -114,11 +117,12 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
         </article>)}
       </details>
     </div>
-    {form&&<dialog ref={dialog} aria-labelledby="policy-form-title" onCancel={event=>{event.preventDefault();if(!working)closeForm();}}>
+    {form&&<dialog ref={dialog} data-testid="policy-dialog" aria-labelledby="policy-form-title" onCancel={event=>{event.preventDefault();if(!working)closeForm();}}>
       <div className="modal-head"><h2 id="policy-form-title">发布策略 v{form.latest_version+1}</h2><button aria-label="关闭策略表单" disabled={working} onClick={closeForm}>×</button></div>
       <p>基于当前生效 v{form.version} 填写。新增版本保留全部历史；生效后旧评估、建议与审批将失效。尚未写入的 ERP 操作会再次检查策略；已完成或结果不确定的操作仅保留原快照并只读核对，不重放。</p>
+      {loading&&<p role="status">正在回读最新策略，完成前不可发布。已填写内容与所依据的版本不会自动改变。</p>}
       {error&&<p role="alert" className="form-error">{error}</p>}
-      {conflict&&<button className="secondary" data-testid="reload-policy-form" disabled={loading||working||!policy} onClick={openForm}>载入最新策略并重新填写</button>}
+      {conflict&&<button className="secondary" data-testid="reload-policy-form" disabled={loading||working||!policy||readFailed} onClick={openForm}>载入最新策略并重新填写</button>}
       <form key={`${form.latest_version}:${form.policy_hash}`} data-testid="policy-form" onSubmit={publish}>
         <fieldset disabled={working||conflict} className="policy-fields"><div className="form-grid">
           <label className="form-field">预算上限（CNY，可留空）<input name="budget_cap" inputMode="decimal" defaultValue={form.budget_cap??""}/></label>
@@ -128,7 +132,7 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
           {scheduled&&<label className="form-field full">生效时间（{Intl.DateTimeFormat().resolvedOptions().timeZone}）<input name="effective_at" type="datetime-local" required/><span>发布后仍使用当前生效版本，直到此时间到达。不能追溯生效。</span></label>}
           <label className="form-field full">变更原因<textarea name="reason" minLength={5} maxLength={500} required/></label>
         </div></fieldset>
-        <div className="form-actions"><button type="button" className="secondary" disabled={working} onClick={closeForm}>取消</button><button className="primary" data-testid="publish-policy" disabled={working||conflict||loading||workflowBusy}>{working?"发布中…":scheduled?"发布未来生效版本":"发布并立即生效"}</button></div>
+        <div className="form-actions"><button type="button" className="secondary" disabled={working} onClick={closeForm}>取消</button><button className="primary" data-testid="publish-policy" disabled={working||conflict||loading||readFailed||workflowBusy}>{working?"发布中…":scheduled?"发布未来生效版本":"发布并立即生效"}</button></div>
       </form>
     </dialog>}
   </section>;

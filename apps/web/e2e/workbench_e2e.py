@@ -12,14 +12,65 @@ if not URL or os.environ.get('PF_ALLOW_TEST_MUTATIONS')!='1':
     raise RuntimeError('Run scripts/verify_next.py with its disposable mock API')
 
 @pytest.fixture
-def page():
+def page(request):
     with sync_playwright() as pw:
         executable=os.getenv('PF_CHROMIUM_PATH') or shutil.which('chromium') or shutil.which('chromium-browser')
         browser=pw.chromium.launch(executable_path=executable,headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
         p=browser.new_page(viewport={'width':1440,'height':1100})
         errors=[];p.on('pageerror',lambda error:errors.append(str(error)))
+        trace_dir=os.getenv('PF_BROWSER_TRACE_DIR')
+        traced=bool(trace_dir and request.node.name.startswith('test_native_policy_'))
+        policy_reads=[]
+        if traced:
+            p.context.tracing.start(screenshots=True,snapshots=True,sources=True)
+            # Disposable synthetic policy cases only. Capture the event order and disabled
+            # state even when a browser click returns without invoking React's handler.
+            p.add_init_script('''(() => {
+                const events = window.__policyEvents = [];
+                const record = (type, target) => {
+                    const panel = document.querySelector('[data-testid="policy-panel"]');
+                    if (!panel) return;
+                    const trigger = panel.querySelector('[data-testid="new-policy"]');
+                    const dialog = panel.querySelector('dialog');
+                    events.push({at: Date.now(), type,
+                        target: target instanceof Element ? target.getAttribute('data-testid') ||
+                            target.getAttribute('aria-label') || target.tagName : 'window',
+                        busy: panel.getAttribute('aria-busy'), triggerDisabled: trigger?.disabled,
+                        dialogOpen: dialog?.open ?? false,
+                        formPresent: !!panel.querySelector('[data-testid="policy-form"]'),
+                        version: dialog?.querySelector('h2')?.textContent,
+                        error: panel.querySelector('[data-testid="policy-error"]')?.textContent});
+                    if (events.length > 500) events.shift();
+                };
+                for (const type of ['pointerdown', 'pointerup', 'click', 'focusin', 'cancel', 'close']) {
+                    document.addEventListener(type, event => record(type, event.target), true);
+                }
+                for (const type of ['focus', 'blur']) window.addEventListener(type, event => record(type, event.target));
+                new MutationObserver(records => {
+                    if (records.some(item => item.target instanceof Element &&
+                        item.target.closest('[data-testid="policy-panel"]'))) record('policy-render', null);
+                }).observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
+            })();''')
+            p.on('request',lambda value: policy_reads.append({'at':time.time()*1000,'event':'request',
+                'method':value.method,'url':value.url}) if '/api/v1/policy' in value.url else None)
+            p.on('response',lambda value: policy_reads.append({'at':time.time()*1000,'event':'response',
+                'status':value.status,'url':value.url}) if '/api/v1/policy' in value.url else None)
         try:yield p
-        finally:browser.close()
+        finally:
+            try:
+                if traced:
+                    target=Path(trace_dir);target.mkdir(parents=True,exist_ok=True)
+                    stem=target/request.node.name
+                    try:
+                        events=p.evaluate('window.__policyEvents || []')
+                        stem.with_suffix('.json').write_text(json.dumps({'events':events,'reads':policy_reads,
+                            'page_errors':errors},ensure_ascii=False,indent=2)+'\n')
+                        stem.with_suffix('.html').write_text(p.content())
+                        p.screenshot(path=str(stem.with_suffix('.png')),full_page=True,timeout=5000)
+                    except Exception as error:
+                        print(f'Policy diagnostic capture failed: {error}')
+                    p.context.tracing.stop(path=str(stem.with_suffix('.zip')))
+            finally:browser.close()
         assert errors==[],errors
 
 def prepare(p):
@@ -461,6 +512,13 @@ def publish_policy_api(page, base, **changes):
     return response.json()
 
 
+def policy_screenshot(page, name):
+    output=os.getenv('PF_SCREENSHOT_DIR')
+    if output:
+        Path(output).mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(Path(output)/name),full_page=True)
+
+
 def test_native_policy_role_history_stale_evaluation_and_strictest_limits(page):
     prepare(page)
     approve(page)
@@ -492,6 +550,7 @@ def test_native_policy_role_history_stale_evaluation_and_strictest_limits(page):
         page.get_by_test_id('policy-history').locator('summary').first.click()
         expect(page.get_by_test_id('policy-version').first).to_contain_text('Browser gate: stricter budget')
         assert page.get_by_test_id('policy-history').locator('input, textarea, button').count() == 0
+        policy_screenshot(page,'next-policy-history.png')
         page.get_by_label('切换演示身份').select_option('demo-buyer')
         expect(page.get_by_test_id('execute')).to_have_count(0)
         page.get_by_test_id('analyze').click()
@@ -519,6 +578,8 @@ def test_native_policy_conflict_requires_refresh_and_deliberate_reentry(page):
         expect(page.get_by_test_id('policy-error')).to_contain_text('已被其他审批人更新')
         expect(page.get_by_test_id('publish-policy')).to_be_disabled()
         expect(page.get_by_test_id('reload-policy-form')).to_be_enabled()
+        expect(page.get_by_test_id('policy-dialog')).to_be_visible()
+        policy_screenshot(page,'next-policy-conflict.png')
         latest=page.request.get(base+'/policy',headers={'Authorization':'Bearer demo-approver'}).json()
         assert latest['latest_version']==winner['version']
         page.get_by_test_id('reload-policy-form').click()
@@ -529,6 +590,94 @@ def test_native_policy_conflict_requires_refresh_and_deliberate_reentry(page):
         expect(page.get_by_test_id('policy-form').locator('[name="reason"]')).to_have_value('')
         page.get_by_role('button',name='取消',exact=True).click()
         expect(page.get_by_test_id('policy-form')).to_have_count(0)
+
+        # Force the focus/read lifecycle overlap rather than retrying a missed click:
+        # a focus-triggered GET starts after pointer-down and finishes after click.
+        # Cached policy permits opening; reads still block publication, and never
+        # replace the captured version or the user's draft. Exercise each dismissal.
+        pending=[]
+        hold=False
+        def policy_read(route):
+            if hold:pending.append(route)
+            else:route.continue_()
+        page.route(base+'/policy',policy_read)
+        try:
+            for dismissal in ('close','cancel','escape'):
+                panel=page.get_by_test_id('policy-panel')
+                trigger=page.get_by_test_id('new-policy')
+                expect(panel).to_have_attribute('aria-busy','false')
+                expect(trigger).to_be_enabled()
+                trigger.hover()
+                hold=True
+                page.mouse.down()
+                with page.expect_request(lambda value:value.method=='GET' and value.url==base+'/policy'):
+                    page.evaluate('window.dispatchEvent(new Event("focus"))')
+                expect(panel).to_have_attribute('aria-busy','true')
+                page.mouse.up()
+                form=page.get_by_test_id('policy-form')
+                expect(page.get_by_test_id('policy-dialog')).to_be_visible()
+                expect(form.locator('[name="reason"]')).to_have_value('')
+                expect(page.get_by_test_id('publish-policy')).to_be_disabled()
+                title=page.get_by_role('heading',name=re.compile('发布策略 v'))
+                expected_title=title.inner_text()
+                reason=f'Draft retained through focus refresh and {dismissal}'
+                form.locator('[name="reason"]').fill(reason)
+                assert pending, 'The focus read must be held while reopening the editor'
+                hold=False
+                for route in pending:route.continue_()
+                pending.clear()
+                expect(panel).to_have_attribute('aria-busy','false')
+                expect(page.get_by_test_id('publish-policy')).to_be_enabled()
+                expect(title).to_have_text(expected_title)
+                expect(form.locator('[name="reason"]')).to_have_value(reason)
+                if dismissal=='close':page.get_by_label('关闭策略表单').click()
+                elif dismissal=='cancel':page.get_by_role('button',name='取消',exact=True).click()
+                else:page.keyboard.press('Escape')
+                expect(form).to_have_count(0)
+        finally:
+            hold=False
+            page.mouse.up()
+            page.unroute(base+'/policy',policy_read)
+            for route in pending:route.continue_()
+
+        # A read failure remains fail-closed after closing the dialog and during
+        # a recovery read. Clearing a form error must not clear this safety state.
+        page.get_by_test_id('new-policy').click()
+        page.get_by_test_id('policy-form').locator('[name="reason"]').fill('Do not publish with an unreadable policy')
+        def fail_policy_read(route):
+            route.fulfill(status=503,content_type='application/json',
+                body=json.dumps({'error':{'code':'MOCK_POLICY_UNAVAILABLE','message':'Policy read unavailable'}}),
+                headers={'Access-Control-Allow-Origin':URL})
+        page.route(base+'/policy',fail_policy_read)
+        page.evaluate('window.dispatchEvent(new Event("focus"))')
+        expect(page.get_by_test_id('policy-error')).to_contain_text('策略读取失败')
+        expect(page.get_by_test_id('publish-policy')).to_be_disabled()
+        page.get_by_label('关闭策略表单').click()
+        expect(page.get_by_test_id('policy-error')).to_contain_text('策略读取失败')
+        expect(page.get_by_test_id('new-policy')).to_be_disabled()
+        page.unroute(base+'/policy',fail_policy_read)
+        hold=True
+        page.route(base+'/policy',policy_read)
+        try:
+            with page.expect_request(lambda value:value.method=='GET' and value.url==base+'/policy'):
+                page.get_by_test_id('refresh-policy').click()
+            expect(page.get_by_test_id('policy-panel')).to_have_attribute('aria-busy','true')
+            expect(page.get_by_test_id('new-policy')).to_be_disabled()
+            hold=False
+            assert pending, 'The recovery read must be held before checking the disabled trigger'
+            for route in pending:route.continue_()
+            pending.clear()
+            expect(page.get_by_test_id('new-policy')).to_be_enabled()
+            page.get_by_test_id('new-policy').click()
+            expect(page.get_by_test_id('policy-form').locator('[name="reason"]')).to_have_value('')
+            page.get_by_role('button',name='取消',exact=True).click()
+            expect(page.get_by_test_id('policy-form')).to_have_count(0)
+            latest=page.request.get(base+'/policy',headers={'Authorization':'Bearer demo-approver'}).json()
+            assert latest['latest_version']==winner['version'], 'Read, recovery and re-entry must never publish'
+        finally:
+            hold=False
+            page.unroute(base+'/policy',policy_read)
+            for route in pending:route.continue_()
     finally:
         publish_policy_api(page,base)
 
@@ -547,6 +696,12 @@ def test_native_policy_future_version_does_not_activate_early(page):
         form.locator('[name="effective_at"]').fill(date)
         form.locator('[name="budget_cap"]').fill('1.00')
         form.locator('[name="reason"]').fill('Browser gate future scheduled policy must not activate early')
+        expect(page.get_by_test_id('policy-dialog')).to_be_visible()
+        policy_screenshot(page,'next-policy-scheduled.png')
+        page.set_viewport_size({'width':390,'height':844})
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        policy_screenshot(page,'next-policy-mobile.png')
+        page.set_viewport_size({'width':1440,'height':1100})
         page.get_by_test_id('publish-policy').click()
         expect(form).to_have_count(0)
         expect(page.get_by_test_id('policy-notice')).to_contain_text('将在')

@@ -88,7 +88,8 @@ def run(base_url: str, output: Path, allow_mutations: bool) -> int:
                 report["reason"] = "NATIVE_DEMO_POSTGRES_TARGET_REQUIRED"
                 return code
         env = {**os.environ, "PF_NEXT_TEST_URL": base_url.rstrip("/"), "PF_ALLOW_TEST_MUTATIONS": "1",
-               "PF_SCREENSHOT_DIR": str(output.resolve()), "PF_REQUIRE_BROWSER": "1"}
+               "PF_SCREENSHOT_DIR": str(output.resolve()), "PF_REQUIRE_BROWSER": "1",
+               "PF_BROWSER_TRACE_DIR": str(output.resolve() / "traces")}
         for key in list(env):
             if key.startswith(("ERP_", "LLM_")) or key in {"PF_AUTH_TOKENS", "PF_DATABASE_URL"}:
                 env.pop(key, None)
