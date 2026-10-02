@@ -46,6 +46,10 @@ def test_aggregate_covers_every_schema_visible_route_and_preserves_auth(generate
               for method in operations if method in {"get", "put", "post", "delete", "patch", "head", "options", "trace"}}
     assert actual == expected
     assert ("/ready", "get") in actual
+    for route in (("/api/v1/policy/versions", "get"), ("/api/v1/policy/versions", "post"),
+                  ("/api/v1/requests/{request_id}/evaluations", "get"),
+                  ("/api/v1/requests/{request_id}/approvals", "get")):
+        assert route in actual
     assert ("/api/v1/operations/{operation_id}/verify", "post") in actual
     for path, method in actual:
         if path.startswith("/api/"):
@@ -66,7 +70,7 @@ def test_shared_request_and_quote_schemas_remain_strict(generated):
     assert schema["components"]["schemas"]["QuoteValues"]["properties"].keys() == quotation["properties"].keys()
     for model in schema["components"]["schemas"].values():
         if model.get("title") in {"RequestCreate", "RequestUpdate", "QuoteEdit", "QuoteValues",
-                                 "QuoteConfirm", "ApprovalCommand", "ExecuteCommand", "AnalyzeCommand"}:
+                                 "QuoteConfirm", "ApprovalCommand", "ExecuteCommand", "AnalyzeCommand", "PolicyVersionCreate"}:
             assert model["additionalProperties"] is False
     assert request["required"] == ["title", "sku", "quantity", "budget"]
     assert schema["components"]["schemas"]["ExecuteCommand"]["properties"]["snapshot_hash"]["pattern"] == r"^[a-f0-9]{64}$"

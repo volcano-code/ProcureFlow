@@ -209,6 +209,11 @@ def run_case(case, replay, *, mutation=None):
             ids_by_label = {label: ident for ident, label in labels.items()}
             quotes = {quote_aliases[q['id']]: {key: q[key] for key in ('values', 'issues', 'calculation')}
                       for q in analysis['quotes']}
+            # Development-v1's frozen oracle predates informational policy limits.
+            # Score its original calculation schema without mutating the oracle.
+            for quote in quotes.values():
+                quote['calculation'] = {key: value for key, value in quote['calculation'].items()
+                                        if key != 'effective_limits'}
             selected = quote_aliases[analysis['proposal']['quote_id']] if analysis['proposal'] else None
             def business_state():
                 with db.transaction() as session:

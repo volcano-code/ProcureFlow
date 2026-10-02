@@ -17,9 +17,8 @@ from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
 from .config import Settings
 from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
-    QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
-from .db import Database, audit
-from .domain import POLICY
+    PolicyVersionCreate, QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
+from .db import Database, uid
 from .erp import ERPNextClient, ERPRejected, ERPUnknown, MockERP
 from .errors import DomainError
 from .service import ProcurementService, require
@@ -183,7 +182,20 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.get("/api/v1/policy")
     def policy(principal=Depends(identity)):
-        return POLICY
+        return service.policy(principal)
+
+    @app.get("/api/v1/policy/versions")
+    def policy_history(principal=Depends(identity)):
+        return service.policy_history(principal)
+
+    @app.post("/api/v1/policy/versions", status_code=201)
+    def publish_policy(command: PolicyVersionCreate, principal=Depends(identity)):
+        return service.publish_policy(principal, command)
+
+    @app.get("/api/v1/requests/{request_id}/evaluations")
+    def evaluations(request_id: str, offset: int = Query(default=0, ge=0),
+                    limit: int = Query(default=100, ge=1, le=200), principal=Depends(identity)):
+        return service.evaluations(principal, request_id, offset=offset, limit=limit)
 
     @app.get("/api/v1/suppliers")
     def suppliers(principal=Depends(identity)):
@@ -199,35 +211,18 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.post("/api/v1/requests/{request_id}/advice")
     def advice(request_id: str, principal=Depends(identity)):
         require(principal, "buyer")
+        # Legacy synchronous route uses the same durable, immutable capture as runs.
         request = service.get_request(principal, request_id)
-        quotes = service.list_quotes(principal, request_id)
-        docs = {q["document_id"] for q in quotes}
-        ids = {e["fragment_id"] for q in quotes for e in q["evidence"].values() if e.get("fragment_id")}
-        def invoke(name, arguments):
-            if name == "get_comparison":
-                return {"request": request, "quotes": quotes}
-            if name == "search_policy":
-                return POLICY
-            if name == "get_evidence" and arguments["document_id"] in docs:
-                return service.evidence(principal, arguments["document_id"])
-            raise DomainError("TOOL_SCOPE_DENIED", "Document is outside this agent request scope", 403)
-        agent = ReadOnlyAgent.from_env()
-        try:
-            def observe(event):
-                with db.transaction(write=True) as session:
-                    audit(session, principal, request_id, "AGENT_" + event["type"].upper(), event)
-            output = agent.run(invoke, ids, observer=observe)
-        except DomainError as error:
-            with db.transaction(write=True) as session:
-                audit(session, principal, request_id, "AGENT_ADVICE_FAILED", {"error_code": error.code})
-            raise
-        finally:
-            agent.client.close()
-        with db.transaction(write=True) as session:
-            audit(session, principal, request_id, "AGENT_ADVICE_COMPLETED", {
-                "model_calls": output["model_calls"], "tool_calls": output["tool_calls"],
-                "advisory_only": True, "trace": output["trace"]})
-        return output
+        receipt = advice_service.reserve(principal, request_id, AdviceRunCommand(
+            expected_version=request["version"], idempotency_key=uid("legacy_")))
+        result = advice_service.process(principal, receipt["id"], ReadOnlyAgent.from_env)
+        if result["status"] != "COMPLETED" or not result["current"]:
+            code = result["error_code"] or "ADVICE_INPUT_CHANGED"
+            raise DomainError(code, "Advice did not complete against current bound inputs",
+                              503 if code == "MODEL_NOT_CONFIGURED" else 409)
+        return {**result["output"], "run_id": result["id"], "input_hash": result["input_hash"],
+                "policy_version": result["policy_version"], "policy_hash": result["policy_hash"],
+                "quote_collection_hash": result["quote_collection_hash"], "current": True}
 
     @app.post("/api/v1/requests/{request_id}/advice-runs", status_code=201)
     def reserve_advice(request_id: str, command: AdviceRunCommand, principal=Depends(identity)):
@@ -244,6 +239,11 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.post("/api/v1/advice-runs/{run_id}/process")
     def process_advice(run_id: str, principal=Depends(identity)):
         return advice_service.process(principal, run_id, ReadOnlyAgent.from_env)
+
+    @app.get("/api/v1/requests/{request_id}/approvals")
+    def approval_history(request_id: str, offset: int = Query(default=0, ge=0),
+                         limit: int = Query(default=100, ge=1, le=200), principal=Depends(identity)):
+        return service.approvals(principal, request_id, offset=offset, limit=limit)
 
     @app.post("/api/v1/requests/{request_id}/approval")
     def approve(request_id: str, command: ApprovalCommand, principal=Depends(identity)):

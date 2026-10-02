@@ -53,7 +53,7 @@ class EvidenceArgs(Contract):
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_comparison", "description": "Read the server-calculated quotes and violations. No mutation.", "parameters": EmptyArgs.model_json_schema()}},
-    {"type": "function", "function": {"name": "search_policy", "description": "Read the published synthetic policy for this demo. No mutation.", "parameters": EmptyArgs.model_json_schema()}},
+    {"type": "function", "function": {"name": "search_policy", "description": "Read the exact immutable tenant policy captured for this advice run. No mutation.", "parameters": EmptyArgs.model_json_schema()}},
     {"type": "function", "function": {"name": "get_evidence", "description": "Read source fragments from a document in this request only.", "parameters": EvidenceArgs.model_json_schema()}},
 ]
 SCHEMAS = {"get_comparison": EmptyArgs, "search_policy": EmptyArgs, "get_evidence": EvidenceArgs}

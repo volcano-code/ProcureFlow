@@ -27,7 +27,7 @@ jobs:
         run: python scripts/verify_model_acceptance.py --fixture --output evals/reports/ci/model-acceptance-fixture.json
       - name: Score the frozen 10-case procurement development suite (offline only)
         run: python scripts/evaluate_procurement.py --fixture --output evals/reports/ci/procurement-development.json
-      - run: node --test apps/web/tests/transport.test.mjs
+      - run: node --test apps/web/tests/transport.test.mjs apps/web/tests/policy.test.mjs
       - run: python scripts/web_http_smoke.py --output evals/reports/ci/frontend-http.json
       - run: python scripts/smoke.py --output evals/reports/ci/http-smoke.json
       - uses: actions/upload-artifact@v4

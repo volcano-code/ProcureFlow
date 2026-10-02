@@ -16,6 +16,9 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "test_native_policy_conflict_requires_refresh_and_deliberate_reentry",
+    "test_native_policy_future_version_does_not_activate_early",
+    "test_native_policy_role_history_stale_evaluation_and_strictest_limits",
     "test_native_success_evidence_and_persisted_request", "test_native_edit_request_invalidates_approval",
     "test_native_rejection_blocks_execution", "test_native_identity_change_clears_evidence_and_prior_tenant",
     "test_proxy_keeps_auth_and_scope_boundaries", "test_browser_uses_only_same_origin_business_api",

@@ -15,3 +15,12 @@ main, .content, .panel, .lower-grid > *, .request-panel > *, .event > div {
   .identity input { min-width: 0; max-width: 100%; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* Versioned procurement policy and immutable evaluation receipts. */
+.policy-summary{display:grid;grid-template-columns:1fr 1.2fr;gap:20px;margin:12px 0;padding:15px;background:var(--soft);border-radius:7px}
+.policy-summary p{margin-top:7px}.policy-version,.evaluation-version{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.policy-panel details,.evaluation-panel details{margin-top:15px}.policy-panel summary,.evaluation-panel summary{cursor:pointer;font-size:12px;color:var(--teal)}
+.policy-fields{border:0;padding:0;margin:18px 0;min-width:0}.policy-fields textarea{min-height:90px}
+.violation-list{margin:8px 0;padding-left:18px;white-space:normal;max-width:420px;font-size:11px;line-height:1.7;color:var(--red)}
+.binding-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;font-size:11px;line-height:1.7}.binding-grid dt{color:var(--muted)}.binding-grid dd{margin:0;overflow-wrap:anywhere}
+.stale-notice{background:#fff3df;border:1px solid #f0d9b2;border-radius:6px;padding:12px;margin:12px 0;color:#835815}
+@media(max-width:760px){.policy-summary{grid-template-columns:minmax(0,1fr)}.binding-grid{grid-template-columns:minmax(0,1fr)}.policy-panel dialog .heading-actions{flex-wrap:wrap}}

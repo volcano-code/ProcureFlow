@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
@@ -46,6 +47,29 @@ class RequestCreate(Contract):
 
 class RequestUpdate(RequestCreate):
     expected_version: int = Field(ge=1, strict=True)
+
+
+class PolicyVersionCreate(Contract):
+    expected_version: int = Field(ge=1, strict=True)
+    budget_cap: Money | None = None
+    max_delivery_days: int | None = Field(default=None, ge=1, le=365, strict=True)
+    minimum_valid_quotes: int = Field(ge=1, le=100, strict=True)
+    effective_at: datetime | None = None
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("effective_at", mode="before")
+    @classmethod
+    def timestamp_string(cls, value):
+        if value is not None and not isinstance(value, (str, datetime)):
+            raise ValueError("Effective time must be an ISO timestamp with a timezone")
+        return value
+
+    @field_validator("effective_at")
+    @classmethod
+    def timezone_required(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Effective time must include a timezone")
+        return value
 
 
 class QuoteValues(Contract):

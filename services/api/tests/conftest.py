@@ -118,3 +118,13 @@ def pg_database(tmp_path):
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin.dispose()
+
+
+def publish_policy(client, **overrides):
+    current = client.get("/api/v1/policy", headers=APPROVER).json()
+    body = {"expected_version": current["latest_version"], "budget_cap": current["budget_cap"],
+            "max_delivery_days": current["max_delivery_days"], "minimum_valid_quotes": current["minimum_valid_quotes"],
+            "reason": "Test tenant policy revision", **overrides}
+    response = client.post("/api/v1/policy/versions", headers=APPROVER, json=body)
+    assert response.status_code == 201, response.text
+    return response.json()

@@ -118,6 +118,7 @@ class MockAdviceRoutes:
         self.quote_sources={}
         self.request_url=None
         self.history_reads=0
+        self.policy=None
         page.route('**/api/v1/**',self.handle)
 
     def respond(self,route,value,status=200):
@@ -129,6 +130,10 @@ class MockAdviceRoutes:
         path=route.request.url.split('/api/v1',1)[1]
         if route.request.method=='OPTIONS' and (path=='/capabilities' or 'advice-runs' in path):
             self.respond(route,None,204)
+            return
+        if path=='/policy' and route.request.method=='GET':
+            self.policy=route.fetch().json()
+            self.respond(route,self.policy)
             return
         if path=='/capabilities':
             original=route.fetch().json()
@@ -155,6 +160,8 @@ class MockAdviceRoutes:
             assert re.fullmatch(r'[A-Za-z0-9_-]{8,80}',body['idempotency_key'])
             run={'id':f'mock-advice-{len(self.reservations)}','request_id':request_id,
                 'request_version':body['expected_version'],'status':'PENDING','input_hash':'mock-input-hash',
+                'policy_version':self.policy['version'],'policy_hash':self.policy['policy_hash'],
+                'quote_collection_hash':'mock-quote-collection-hash','input_snapshot':{'policy':self.policy},
                 'created_at':'2026-10-01T00:00:00Z','started_at':None,'completed_at':None,
                 'error_code':None,'output':None,'current':True,'stale_reason':None}
             self.runs.setdefault(request_id,[]).append(run)
@@ -426,3 +433,119 @@ def test_native_advice_mock_business_audit_event_refreshes_freshness(page):
     assert changed.status==200
     expect(page.get_by_test_id('advice-current')).to_have_text('历史结果，已失效')
     assert mock.history_reads>before and len(mock.process_calls)==1
+
+
+def policy_api(page):
+    # Resolve from the actual app request, never from an assumed port.
+    with page.expect_response(lambda response: response.request.method == 'GET' and response.url.endswith('/api/v1/policy')) as response:
+        page.get_by_test_id('refresh-policy').click()
+    return response.value.url.removesuffix('/policy')
+
+
+def publish_policy_api(page, base, **changes):
+    headers={'Authorization':'Bearer demo-approver'}
+    current=page.request.get(base+'/policy',headers=headers).json()
+    body={'expected_version':current['latest_version'],'budget_cap':None,'max_delivery_days':None,
+          'minimum_valid_quotes':1,'effective_at':None,'reason':'Disposable browser gate policy reset',**changes}
+    response=page.request.post(base+'/policy/versions',headers=headers,data=body)
+    assert response.status == 201, response.text()
+    return response.json()
+
+
+def test_native_policy_role_history_stale_evaluation_and_strictest_limits(page):
+    prepare(page)
+    approve(page)
+    base=policy_api(page)
+    before=page.request.get(base+'/policy',headers={'Authorization':'Bearer demo-buyer'}).json()
+    try:
+        expect(page.get_by_test_id('policy-read-only')).to_be_visible()
+        expect(page.get_by_test_id('new-policy')).to_have_count(0)
+        expect(page.get_by_test_id('evaluation-current').first).to_have_text('绑定仍有效')
+        page.get_by_label('切换演示身份').select_option('demo-approver')
+        expect(page.get_by_test_id('new-policy')).to_be_enabled()
+        page.get_by_test_id('new-policy').click()
+        form=page.get_by_test_id('policy-form')
+        form.locator('[name="budget_cap"]').fill('23000.00')
+        form.locator('[name="max_delivery_days"]').fill('7')
+        form.locator('[name="minimum_valid_quotes"]').fill('3')
+        form.locator('[name="reason"]').fill('Browser gate: stricter budget, delivery and supplier competition')
+        page.get_by_test_id('publish-policy').click()
+        expect(form).to_have_count(0)
+        expect(page.get_by_test_id('effective-policy')).to_contain_text(f'当前生效 v{before["latest_version"]+1}')
+        expect(page.get_by_test_id('effective-limits')).to_contain_text('实际预算 ≤ ¥23000.00')
+        expect(page.get_by_test_id('effective-limits')).to_contain_text('实际交期 ≤ 7 天')
+        expect(page.get_by_test_id('proposal-stale')).to_be_visible()
+        expect(page.get_by_test_id('approve')).to_be_disabled()
+        expect(page.get_by_test_id('evaluation-current').first).to_have_text('已失效，仅供历史查阅')
+        page.get_by_test_id('approval-history').locator('summary').first.click()
+        expect(page.get_by_test_id('approval-current').first).to_have_text('已失效，仅供审计')
+        expect(page.get_by_test_id('approval-receipt').first).to_contain_text('原快照哈希')
+        page.get_by_test_id('policy-history').locator('summary').first.click()
+        expect(page.get_by_test_id('policy-version').first).to_contain_text('Browser gate: stricter budget')
+        assert page.get_by_test_id('policy-history').locator('input, textarea, button').count() == 0
+        page.get_by_label('切换演示身份').select_option('demo-buyer')
+        expect(page.get_by_test_id('execute')).to_have_count(0)
+        page.get_by_test_id('analyze').click()
+        expect(page.get_by_test_id('evaluation-violations').first).to_contain_text('INSUFFICIENT_VALID_QUOTES')
+        expect(page.get_by_test_id('request-status')).to_have_text('规则未通过')
+        page.get_by_test_id('evaluation').first.locator('summary').first.click()
+        expect(page.get_by_test_id('evaluation').first).to_contain_text('BUDGET_EXCEEDED')
+        expect(page.get_by_test_id('evaluation').first).to_contain_text('DELIVERY_EXCEEDS_LIMIT')
+        page.set_viewport_size({'width':390,'height':844})
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    finally:
+        publish_policy_api(page,base)
+
+
+def test_native_policy_conflict_requires_refresh_and_deliberate_reentry(page):
+    prepare(page)
+    base=policy_api(page)
+    try:
+        page.get_by_label('切换演示身份').select_option('demo-approver')
+        page.get_by_test_id('new-policy').click()
+        page.get_by_test_id('policy-form').locator('[name="reason"]').fill('Browser gate stale editor must not overwrite a policy')
+        winner=publish_policy_api(page,base,reason='Concurrent approver publication wins')
+        # Keep the originally displayed form open; expected_version must not silently advance.
+        page.get_by_test_id('publish-policy').click()
+        expect(page.get_by_test_id('policy-error')).to_contain_text('已被其他审批人更新')
+        expect(page.get_by_test_id('publish-policy')).to_be_disabled()
+        expect(page.get_by_test_id('reload-policy-form')).to_be_enabled()
+        latest=page.request.get(base+'/policy',headers={'Authorization':'Bearer demo-approver'}).json()
+        assert latest['latest_version']==winner['version']
+        page.get_by_test_id('reload-policy-form').click()
+        expect(page.get_by_test_id('policy-form').locator('[name="reason"]')).to_have_value('')
+        page.get_by_label('关闭策略表单').click()
+        expect(page.get_by_test_id('policy-form')).to_have_count(0)
+        page.get_by_test_id('new-policy').click()
+        expect(page.get_by_test_id('policy-form').locator('[name="reason"]')).to_have_value('')
+        page.get_by_role('button',name='取消',exact=True).click()
+        expect(page.get_by_test_id('policy-form')).to_have_count(0)
+    finally:
+        publish_policy_api(page,base)
+
+
+def test_native_policy_future_version_does_not_activate_early(page):
+    prepare(page)
+    base=policy_api(page)
+    before=page.request.get(base+'/policy',headers={'Authorization':'Bearer demo-buyer'}).json()
+    try:
+        page.get_by_label('切换演示身份').select_option('demo-approver')
+        page.get_by_test_id('new-policy').click()
+        form=page.get_by_test_id('policy-form')
+        form.locator('[name="timing"]').select_option('scheduled')
+        # Browser fixture uses Chromium's configured local zone; derive the local form value there.
+        date=page.evaluate('new Date(Date.now()+3600000).toLocaleString("sv-SE").slice(0,16).replace(" ","T")')
+        form.locator('[name="effective_at"]').fill(date)
+        form.locator('[name="budget_cap"]').fill('1.00')
+        form.locator('[name="reason"]').fill('Browser gate future scheduled policy must not activate early')
+        page.get_by_test_id('publish-policy').click()
+        expect(form).to_have_count(0)
+        expect(page.get_by_test_id('policy-notice')).to_contain_text('将在')
+        expect(page.get_by_test_id('effective-policy')).to_contain_text(f'当前生效 v{before["version"]}')
+        page.get_by_test_id('policy-history').locator('summary').first.click()
+        expect(page.get_by_test_id('policy-version').first).to_contain_text('已发布，待生效')
+        expect(page.get_by_test_id('approve')).to_be_enabled()
+        expect(page.get_by_test_id('evaluation-current').first).to_have_text('绑定仍有效')
+    finally:
+        # A later effective revision supersedes the lower scheduled version monotonically.
+        publish_policy_api(page,base)

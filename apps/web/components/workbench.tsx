@@ -1,7 +1,10 @@
 "use client";
 import {useCallback, useEffect, useRef, useState, type FormEvent} from "react";
 import {API, api, loadDemo, watchAudit, type Identity, type Capabilities, type ProcurementRequest,
-  type Quote, type QuoteValues, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence} from "@/lib/api";
+  type Quote, type QuoteValues, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
+import PolicyPanel from "@/components/policy-panel";
+import EvaluationPanel from "@/components/evaluation-panel";
+import {bindingCurrent,staleExplanation,strictestBudget,violationExplanation} from "@/lib/policy.mjs";
 
 const names: Record<string,string> = {DRAFT:"待录入", NEEDS_CONFIRMATION:"待核对", READY_FOR_REVIEW:"待审批",
   APPROVED:"已批准", APPROVAL_STALE:"审批已失效", ERP_PENDING:"执行已预留", ERP_CREATED:"草稿已创建",
@@ -21,9 +24,9 @@ type AdviceContext = {active:boolean;controller:AbortController};
 
 /** This component is keyed by credential, request ID and version. Leaving its scope cancels
  * browser waits, never retries a provider call, and cannot publish a late result to a new scope. */
-function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent,beginEvidence,onEvidence}:{request:ProcurementRequest;token:string;
+function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent,policyHash,beginEvidence,onEvidence}:{request:ProcurementRequest;token:string;
   cap:Capabilities|null;buyer:boolean;workflowBusy:boolean;quotes:Quote[];beginEvidence:()=>number;
-  freshnessEvent:number;onEvidence:(evidence:EvidenceRef,ticket:number)=>void}) {
+  freshnessEvent:string;policyHash:string|null;onEvidence:(evidence:EvidenceRef,ticket:number)=>void}) {
   const [runs,setRuns] = useState<AdviceRun[]>([]);
   const [loading,setLoading] = useState(true);
   const [readError,setReadError] = useState("");
@@ -78,14 +81,14 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
   };
   const start = async(pending?:AdviceRun) => {
     const scope=context.current;
-    if (!scope || !scopeIsActive(scope) || mutationLock.current || !buyer || !cap?.advice_configured || workflowBusy) return;
+    if (!scope || !scopeIsActive(scope) || mutationLock.current || !buyer || !cap?.advice_configured || workflowBusy || !policyHash) return;
     mutationLock.current=true;setWorking(true);setRunError("");
     try {
       const run = pending || await api<AdviceRun>(`/requests/${request.id}/advice-runs`,token,"POST",
         {expected_version:request.version,idempotency_key:crypto.randomUUID()},scope.controller.signal);
       if (!scopeIsActive(scope)) return; // Never start paid work for an abandoned reservation response.
       retain(scope,run);
-      if (run.status === "PENDING" && run.current && run.request_version === request.version) {
+      if (run.status === "PENDING" && bindingCurrent(run,policyHash) && run.request_version === request.version) {
         setProcessingRunId(run.id);processingNetworkPending.current=true;
         const result = await api<AdviceRun>(`/advice-runs/${run.id}/process`,token,"POST",undefined,scope.controller.signal);
         retain(scope,result);
@@ -104,7 +107,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
       if (scopeIsActive(scope)) setWorking(false);
     }
   };
-  const isCurrent = (run:AdviceRun) => run.current && run.request_version === request.version;
+  const isCurrent = (run:AdviceRun) => !!policyHash && bindingCurrent(run,policyHash) && run.request_version === request.version;
   const activeRun = runs.some(run=>isCurrent(run) && ["PENDING","RUNNING"].includes(run.status));
   const citationDocument = (id:string) => quotes.find(quote=>id.startsWith(quote.document_id+":"));
   const openCitation = async(id:string) => {
@@ -124,10 +127,10 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
   };
   return <section className="panel quote-panel" data-testid="advice-panel" aria-labelledby="advice-title" aria-busy={loading||working}>
     <div className="section-head"><div><h2 id="advice-title">Agent 只读建议</h2>
-      <p>绑定需求 v{request.version} 与来源快照。建议不会审批、采购、生成 ERP 草稿或改变确定性规则结果。</p></div>
+      <p>绑定需求 v{request.version}、报价集合、生效策略与来源快照。建议不会审批、采购、生成 ERP 草稿或改变确定性规则结果。</p></div>
       <div className="heading-actions"><button className="secondary" data-testid="refresh-advice" disabled={loading||working}
         onClick={()=>{if (context.current) void reload(context.current);}}>回读建议状态</button>
-        {buyer && <button className="primary" data-testid="new-advice" disabled={workflowBusy||working||loading||!!readError||!cap?.advice_configured||activeRun}
+        {buyer && <button className="primary" data-testid="new-advice" disabled={workflowBusy||working||loading||!!readError||!policyHash||!cap?.advice_configured||activeRun}
           onClick={()=>void start()}>{working ? "正在生成只读建议…" : "新建只读建议"}</button>}</div>
     </div>
     <div className="decision-content">
@@ -147,7 +150,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
           <span className="badge">需求 v{run.request_version}</span>
           <span className={`badge ${isCurrent(run) ? "ok" : "warn"}`} data-testid="advice-current">{isCurrent(run) ? "当前版本及来源" : "历史结果，已失效"}</span></div>
         <p className="source-meta">运行 {run.id} · 创建于 {run.created_at}{run.completed_at ? ` · 结束于 ${run.completed_at}` : ""}</p>
-        {!isCurrent(run) && <p data-testid="advice-stale">需求版本或证据来源已变化或无法核验，不能将旧建议视为当前结论。{run.stale_reason||"REQUEST_VERSION_CHANGED"}</p>}
+        {!isCurrent(run) && <p data-testid="advice-stale">需求版本、报价集合、策略或证据来源已变化或无法核验，不能将旧建议视为当前结论。{staleExplanation(run.policy_hash && run.policy_hash!==policyHash?"POLICY_CHANGED":run.stale_reason)}（{run.stale_reason||"INPUT_BINDING_CHANGED"}）</p>}
         {run.error_code && <p className="form-error" data-testid="advice-failure">{run.error_code}。本次运行不会自动重试；修正来源或配置后显式新建运行。</p>}
         {run.status === "INTERRUPTED" && <p>调用结果不确定，可能已产生费用。此运行不能重放；如需再次调用，请新建运行。</p>}
         {run.status === "RUNNING" && <p>正在回读运行状态，页面刷新不会重放模型调用。</p>}
@@ -155,7 +158,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
           ? "回读结果前不能确认是否已经调用模型，可能产生费用。不会自动重试。"
           : "仅已预留，尚未执行。刷新或切换回来不会自动调用模型。"}</p>}
         {buyer && run.status === "PENDING" && isCurrent(run) && <button className="secondary" data-testid="process-advice"
-          disabled={workflowBusy||working||loading||!!readError||!cap?.advice_configured} onClick={()=>void start(run)}>
+          disabled={workflowBusy||working||loading||!!readError||!policyHash||!cap?.advice_configured} onClick={()=>void start(run)}>
           {processingRunId === run.id ? "重新提交此运行的处理请求" : "执行此已预留运行"}</button>}
         {run.output && <div data-testid="advice-output">
           <p style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",marginTop:12}}>{run.output.summary}</p>
@@ -171,7 +174,10 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
             semantic_factuality_verified:run.output.semantic_factuality_verified,
             usage:run.output.usage,usage_complete:run.output.usage_complete,trace:run.output.trace},null,2)}</pre></details>
         </div>}
-        <details><summary>查看输入快照标识</summary><div className="hash">{run.input_hash}</div></details>
+        <details><summary>查看输入快照与确切版本绑定</summary><dl className="binding-grid">
+          <dt>策略版本</dt><dd>{run.policy_version?`v${run.policy_version}`:"旧记录未报告"}</dd><dt>策略哈希</dt><dd>{run.policy_hash||"旧记录未报告"}</dd>
+          <dt>报价集合哈希</dt><dd>{run.quote_collection_hash||"旧记录未报告"}</dd><dt>输入哈希</dt><dd>{run.input_hash}</dd></dl>
+          {run.input_snapshot&&<pre>{JSON.stringify(run.input_snapshot,null,2)}</pre>}</details>
       </article>)}</div>
       {!!runs.length && <p style={{marginTop:14}}>最多显示最近 20 次持久化运行。失败、中断或失效均不会触发自动重试。</p>}
     </div>
@@ -195,6 +201,9 @@ export default function Workbench() {
   const [error,setError] = useState("");
   const [busy,setBusy] = useState(false);
   const [stream,setStream] = useState("idle");
+  const [policy,setPolicy] = useState<PolicyVersion|null>(null);
+  const [policyRefresh,setPolicyRefresh] = useState(0);
+  const onPolicyRead = useCallback((current:PolicyVersion|null)=>setPolicy(current),[]);
   const uploadRef = useRef<HTMLInputElement>(null);
   const mutationLock = useRef(false);
   const readEpoch = useRef(0);
@@ -202,6 +211,9 @@ export default function Workbench() {
   const evidenceReadEpoch = useRef(0);
   const buyer = me?.role === "buyer";
   const frozen = isFrozen(selected);
+  const proposalCurrent = !!policy && !!selected?.proposal && selected.proposal_current !== false && selected.proposal.policy_hash === policy.policy_hash;
+  const businessEvent = events.reduce((latest,event)=>["REQUEST_CHANGED","QUOTE_IMPORTED","QUOTE_CONFIRMED","QUOTE_VERSION_CREATED","POLICY_CHANGED","POLICY_CHECK_COMPLETED","PROPOSAL_PREPARED","ANALYSIS_BLOCKED","APPROVAL_APPROVED","APPROVAL_REJECTED"].includes(event.type) ? Math.max(latest,event.id) : latest,0);
+  const freshnessEvent = `${selected?.version}:${selected?.status}:${businessEvent}:${policy?.policy_hash||"unknown"}`;
 
   const act = useCallback(async(fn:()=>Promise<void>) => {
     if (mutationLock.current) return;
@@ -231,7 +243,7 @@ export default function Workbench() {
   },[token]);
   const login = async(credential:string) => {
     const epoch = ++readEpoch.current;
-    activeScope.current = ""; setToken(""); setMe(null); setCap(null); setRequests([]); clearContext();
+    activeScope.current = ""; setPolicy(null); setToken(""); setMe(null); setCap(null); setRequests([]); clearContext();
     const [identity,capabilities,list] = await Promise.all([
       api<Identity>("/me",credential), api<Capabilities>("/capabilities",credential), api<ProcurementRequest[]>("/requests",credential),
     ]);
@@ -254,6 +266,20 @@ export default function Workbench() {
     });
     return ()=>controller.abort();
   },[selected?.id,token]);
+
+  useEffect(()=>{
+    if(!policy||!selected?.id||!token)return;
+    const id=selected.id,credential=token,scope=activeScope.current,epoch=readEpoch.current;
+    const controller=new AbortController();
+    // Policy activation and source events refresh authoritative comparisons and stale proposal flags without writing anything.
+    void Promise.all([
+      api<ProcurementRequest>(`/requests/${id}`,credential,"GET",undefined,controller.signal),
+      api<Quote[]>(`/requests/${id}/quotes`,credential,"GET",undefined,controller.signal),
+    ]).then(([request,offers])=>{
+      if(!controller.signal.aborted&&activeScope.current===scope&&readEpoch.current===epoch){setSelected(request);setQuotes(offers);}
+    }).catch(e=>{if(!controller.signal.aborted&&activeScope.current===scope)setError(`策略绑定回读失败：${e instanceof Error?e.message:String(e)}`);});
+    return()=>controller.abort();
+  },[policy?.policy_hash,businessEvent,selected?.id,token]);
 
   const saveRequest = async(event:FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -291,12 +317,12 @@ export default function Workbench() {
     finally { if (created) await refresh(created); }
   });
   const approve = (decision:"approve"|"reject") => act(async()=>{
-    if (!selected?.proposal) return;
+    if (!selected?.proposal || !proposalCurrent) return;
     await api(`/requests/${selected.id}/approval`,token,"POST",{snapshot_hash:selected.proposal.snapshot_hash,decision});
     await refresh(selected.id);
   });
   const execute = () => act(async()=>{
-    if (!selected?.proposal) return;
+    if (!selected?.proposal || !proposalCurrent) return;
     const op = await api<Operation>(`/requests/${selected.id}/execute`,token,"POST",{snapshot_hash:selected.proposal.snapshot_hash});
     setOperation(op);
     try { await api(`/operations/${op.id}/process`,token,"POST"); }
@@ -331,6 +357,8 @@ export default function Workbench() {
         </div>
         <div className="notice">本地 Alpha：金额由确定性规则计算，不是 LLM 推理。当前 ERP：{cap?.erp_mode||"尚未认证"}。正式提交始终不在本工作台权限内。</div>
         {error && <div role="alert" className="form-error">{error}</div>}
+        {me && <PolicyPanel key={token} token={token} approver={me.role==="approver"} workflowBusy={busy}
+          refreshEvent={policyRefresh+events.filter(event=>event.type==="POLICY_CHANGED").length} onRead={onPolicyRead}/>}
         <div className="metrics">{[["采购需求",requests.length],["报价版本",quotes.length],["已确认",quotes.filter(q=>q.confirmed_by).length],["审计记录",events.length]].map(([label,count])=>
           <div className="metric" key={label}><label>{label}</label><strong>{count}</strong></div>)}</div>
         {!selected ? <section className="empty panel"><h2>{me ? "创建或选择一项采购需求" : "登录后开始采购核对"}</h2>
@@ -338,9 +366,10 @@ export default function Workbench() {
           {!me && <button data-testid="login-demo-buyer" className="primary" disabled={busy} onClick={()=>void act(()=>login("demo-buyer"))}>以演示采购员登录</button>}
         </section> : <>
           <section className="panel request-panel"><div><div className="eyebrow">{selected.id}</div><h2>{selected.title}</h2>
-            <p data-testid="request-meta">{selected.sku} · {selected.quantity} {selected.uom} · 预算 ¥{selected.budget} · ≤ {selected.max_delivery_days} 天 · v{selected.version}</p></div>
-            <div className="heading-actions"><span className="badge" data-testid="request-status">{names[selected.status]||selected.status}</span>
-              <button className="secondary" disabled={busy} onClick={()=>void act(()=>refresh(selected.id))}>刷新状态</button>
+            <p data-testid="request-meta">{selected.sku} · {selected.quantity} {selected.uom} · 预算 ¥{selected.budget} · ≤ {selected.max_delivery_days} 天 · v{selected.version}</p>
+            {policy&&<p data-testid="effective-limits">当前策略 v{policy.version} · 实际预算 ≤ ¥{strictestBudget(selected.budget,policy.budget_cap)} · 实际交期 ≤ {Math.min(selected.max_delivery_days,policy.max_delivery_days??selected.max_delivery_days)} 天 · 至少 {policy.minimum_valid_quotes} 家合规供应商</p>}</div>
+            <div className="heading-actions"><span className="badge" data-testid="request-status">{!frozen&&selected.proposal&&!proposalCurrent&&selected.status==="APPROVED"?"审批已失效":names[selected.status]||selected.status}</span>
+              <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{setPolicyRefresh(value=>value+1);await refresh(selected.id);})}>刷新状态</button>
               <button className="secondary" data-testid="edit-request" disabled={!buyer||frozen||busy} onClick={()=>setRequestForm(selected)}>修改需求</button>
             </div>
           </section>
@@ -349,13 +378,16 @@ export default function Workbench() {
               const file=e.target.files?.[0]; e.target.value="";
               if (file) void act(async()=>{const form=new FormData();form.append("file",file);await api(`/requests/${selected.id}/documents`,token,"POST",form);await refresh(selected.id);});
             }}/><button className="secondary" disabled={!buyer||frozen||busy} onClick={()=>uploadRef.current?.click()}>上传报价</button>
-              <button className="primary" data-testid="analyze" disabled={!buyer||frozen||busy} onClick={()=>void act(async()=>{await api(`/requests/${selected.id}/analyze`,token,"POST",{});await refresh(selected.id);})}>校验并生成方案</button>
+              <button className="primary" data-testid="analyze" disabled={!buyer||frozen||busy||!policy} onClick={()=>void act(async()=>{await api(`/requests/${selected.id}/analyze`,token,"POST",{});await refresh(selected.id);})}>校验并生成方案</button>
             </div></div>
             <div className="table-scroll"><table><thead><tr><th>供应商</th><th>单价</th><th>税价</th><th>运费</th><th>统一总价</th><th>核对状态</th><th>操作</th></tr></thead>
               <tbody data-testid="quote-body">{quotes.map(q=><tr key={q.id} data-testid="quote-row"><td><strong>{q.values.supplier_id||"未知供应商"}</strong><small>{q.filename} · v{q.version}</small></td>
                 {(["unit_price","tax_mode","shipping_cost"] as const).map(key=><td key={key}><button className="field-link" data-testid={`field-${key}`} onClick={()=>{++evidenceReadEpoch.current;setEvidence(q.evidence[key]||{kind:"unknown"});}}>{q.values[key]??"未知"}</button></td>)}
                 <td><strong>{q.calculation.total??"未知"}</strong></td><td><span className="badge">{q.confirmed_by?"已确认":"待核对"}</span>
-                  <small>{q.calculation.violations.join(" / ")}</small></td><td><div className="row-actions">
+                  <details><summary className="table-action">{q.calculation.violations.length?`${q.calculation.violations.length} 项未通过`:"查看版本与限制"}</summary>
+                    <div className="source-meta">报价 {q.id} · 版本 ID {q.version_id}</div>
+                    {q.calculation.effective_limits&&<p>预算 ≤ ¥{q.calculation.effective_limits.budget} · 交期 ≤ {q.calculation.effective_limits.max_delivery_days} 天</p>}
+                    <ul className="violation-list">{q.calculation.violations.map(code=><li key={code}>{violationExplanation(code)}（{code}）</li>)}</ul></details></td><td><div className="row-actions">
                     <button className="secondary" disabled={!buyer||frozen||busy} onClick={()=>setEditing(q)}>修正字段</button>
                     <button className="secondary" data-testid="confirm-quote" disabled={!buyer||frozen||busy||!!q.confirmed_by} onClick={()=>setConfirming(q)}>确认字段</button>
                   </div></td></tr>)}</tbody></table></div>
@@ -369,10 +401,14 @@ export default function Workbench() {
             {selected.proposal ? <><div className="decision-label">{selected.proposal.quote_values.supplier_id}</div><div className="decision-amount">¥ {selected.proposal.total}</div>
               <p>报价版本 v{selected.proposal.quote_version} · 数量 {selected.proposal.quote_values.quantity} · {selected.proposal.quote_values.uom}</p>
               <div className="hash">{selected.proposal.snapshot_hash}</div>
+              <p data-testid="proposal-policy-binding">策略 v{selected.proposal.policy_version} · 报价 {selected.proposal.quote_id} v{selected.proposal.quote_version}</p>
+              <details><summary>查看方案完整绑定</summary><dl className="binding-grid"><dt>策略哈希</dt><dd>{selected.proposal.policy_hash}</dd><dt>报价集合哈希</dt><dd>{selected.proposal.quote_collection_hash}</dd></dl><pre>{JSON.stringify({policy:selected.proposal.policy,quote_collection:selected.proposal.quote_collection},null,2)}</pre></details>
+              {!proposalCurrent&&!frozen&&<p className="stale-notice" data-testid="proposal-stale">方案和审批绑定已失效或无法核验。{staleExplanation(selected.proposal.policy_hash!==policy?.policy_hash?"POLICY_CHANGED":selected.proposal_stale_reason)}；不能审批或创建新 ERP 草稿。</p>}
+              {frozen&&!proposalCurrent&&<p data-testid="reserved-policy-binding">当前策略已变化或尚未核验。尚未写入的操作会再次检查策略；已完成或结果不确定的操作仅按原快照只读核对，不重放。</p>}
               {me?.role === "approver" && !frozen && <div className="heading-actions">
-                <button className="primary" data-testid="approve" disabled={busy} onClick={()=>void approve("approve")}>批准展示的快照</button>
-                <button className="secondary" data-testid="reject" disabled={busy} onClick={()=>void approve("reject")}>拒绝此方案</button></div>}
-              {buyer && selected.status === "APPROVED" && <button className="primary" data-testid="execute" disabled={busy||!cap?.erp_draft_writes_enabled} onClick={()=>void execute()}>
+                <button className="primary" data-testid="approve" disabled={busy||!proposalCurrent} onClick={()=>void approve("approve")}>批准展示的快照</button>
+                <button className="secondary" data-testid="reject" disabled={busy||!proposalCurrent} onClick={()=>void approve("reject")}>拒绝此方案</button></div>}
+              {buyer && selected.status === "APPROVED" && proposalCurrent && <button className="primary" data-testid="execute" disabled={busy||!cap?.erp_draft_writes_enabled} onClick={()=>void execute()}>
                 {cap?.erp_mode === "mock" ? "创建模拟 ERP 草稿" : "创建已批准的 ERPNext 草稿"}</button>}
               {operation && <><button className="secondary" data-testid="verify-erp" disabled={busy} onClick={()=>void act(async()=>{
                 const scope = activeScope.current;
@@ -386,10 +422,11 @@ export default function Workbench() {
                 {buyer && operation.status !== "COMPLETED" && <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{
                   await api(`/operations/${operation.id}/process`,token,"POST"); await refresh(selected.id);
                 })}>处理 / 只读核对</button>}</>}
-            </> : <p className="subtle-empty">核对报价后生成方案；需求或报价变化后需要重新生成和审批。</p>}
+            </> : <p className="subtle-empty">核对报价后生成方案；需求、报价或策略变化后需要重新生成和审批。</p>}
           </div></section></div>
+          <EvaluationPanel key={token+"\n"+selected.id} token={token} requestId={selected.id} policyHash={policy?.policy_hash||null} refreshEvent={freshnessEvent}/>
           <AdvicePanel key={token+"\n"+selected.id+"\n"+selected.version} request={selected} token={token} cap={cap} buyer={buyer} workflowBusy={busy}
-            quotes={quotes} freshnessEvent={events.reduce((latest,event)=>["REQUEST_CHANGED","QUOTE_IMPORTED","QUOTE_CONFIRMED","QUOTE_VERSION_CREATED"].includes(event.type) ? Math.max(latest,event.id) : latest,0)}
+            quotes={quotes} freshnessEvent={freshnessEvent} policyHash={policy?.policy_hash||null}
             beginEvidence={()=>{setEvidence(null);return ++evidenceReadEpoch.current;}} onEvidence={(source,ticket)=>{
               if (ticket !== evidenceReadEpoch.current) return;
               setEvidence(source);document.getElementById("evidence-body")?.scrollIntoView({block:"center",behavior:"smooth"});

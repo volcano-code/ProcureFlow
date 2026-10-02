@@ -10,7 +10,7 @@
 
 - 单 SKU、CNY、EA；TXT/CSV/文本 PDF/XLSX 固定键值布局。没有通用商业文档识别、OCR 或任意单位/币种换算
 - 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
-- 版本化需求、快照哈希、独立审批、失效/撤权检查、工作区隔离
+- 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
 - ERPNext Supplier Quotation 草稿和独立读回。支持范围与税/运费/折扣合同以 [费用映射边界](docs/erp-cost-mapping.md) 和 [ERP 说明](integrations/erpnext/README.md) 为准；没有 Submit、Purchase Order、删除或支付功能
 - 原生 Next.js 工作台，以及 FastAPI 提供的轻量静态演示页；锁定 npm 安装、类型检查、生产构建、浏览器与容器验收入口
@@ -81,7 +81,7 @@ npm run build
 npm run dev
 ```
 
-保持后端运行；开发前端默认连接 `http://127.0.0.1:8000`。可通过 `NEXT_PUBLIC_API_BASE_URL` 指定地址；服务端 `PF_WEB_ORIGINS` 限制浏览器 origin，不替代身份验证。包含需求、证据、确认/修正、审批/拒绝、执行、独立 ERP 回读、持久化建议和审计。
+保持后端运行；开发前端默认连接 `http://127.0.0.1:8000`。可通过 `NEXT_PUBLIC_API_BASE_URL` 指定地址；服务端 `PF_WEB_ORIGINS` 限制浏览器 origin，不替代身份验证。包含需求、证据、确认/修正、租户政策/变更历史、历史评估与失效提示、审批/拒绝、执行、独立 ERP 回读、持久化建议和审计。
 
 ## 回归与验收
 
@@ -89,7 +89,7 @@ npm run dev
 python -m pip install -r services/api/requirements-dev.txt
 python scripts/test.py -q -m 'not postgres and not browser'
 python scripts/export_contracts.py --check
-node --test apps/web/tests/transport.test.mjs
+node --test apps/web/tests/transport.test.mjs apps/web/tests/policy.test.mjs
 python scripts/smoke.py
 python scripts/web_http_smoke.py
 python scripts/verify_model_acceptance.py --fixture
@@ -125,7 +125,7 @@ cd services/api
 PYTHONPATH=. python -m alembic upgrade head
 ```
 
-对已有实例先停止相关进程、备份并在副本验证迁移。当前 advice_runs 迁移头为 `5ce3ab9b84a2`；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
+对已有实例先停止相关进程、备份并在副本验证迁移。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
 
 Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。私有令牌模式不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
 

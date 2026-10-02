@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from procureflow.contracts import Principal
 from procureflow.db import ApprovalRow, Database, OperationRow, OutboxRow
-from procureflow.domain import POLICY
+from conftest import publish_policy
 from procureflow.erp import MockERP, ERPUnknown
 from procureflow.service import ProcurementService
 from conftest import BUYER, APPROVER, AUDITOR, OTHER, approved, enqueue, ready, request, upload
@@ -113,7 +113,7 @@ def test_approver_revoked(system):
 
 def test_policy_change_invalidates_snapshot(system,monkeypatch):
     c,_,erp=system;r,q,p=approved(c)
-    monkeypatch.setitem(POLICY,"version","2")
+    publish_policy(c)
     response=c.post(f"/api/v1/requests/{r['id']}/execute",headers=BUYER,json={"snapshot_hash":p["snapshot_hash"]})
     assert response.json()["error"]["code"]=="APPROVAL_STALE" and erp.count()==0
 

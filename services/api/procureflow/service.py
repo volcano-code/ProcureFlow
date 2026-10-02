@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -8,8 +9,9 @@ from sqlalchemy import select
 from .config import Settings
 from .contracts import Principal, QuoteValues
 from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, OutboxRow,
-                 QuoteRow, QuoteVersionRow, RequestRow, audit, now, uid)
-from .domain import POLICY, digest, offer_check
+                 QuoteRow, QuoteVersionRow, RequestRow, EvaluationRow, TenantPolicyRow, audit, now, uid)
+from .domain import digest, offer_check
+from .policies import bootstrap, effective_policy, lock_tenant, policy_versions, publish
 from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
 from .errors import DomainError
 from .parsers import parse_document
@@ -38,13 +40,62 @@ class ProcurementService:
         self.db, self.settings, self.erp = db, settings, erp
         self.document_dir = settings.data_dir / "documents"
         self.document_dir.mkdir(exist_ok=True)
+        with self.db.transaction(write=True) as session:
+            for tenant in sorted({p["tenant_id"] for p in settings.auth_tokens.values()}):
+                bootstrap(session, tenant)
 
     def _request(self, session, principal, request_id, lock=False):
+        if lock:
+            lock_tenant(session, principal.tenant_id)
         query = select(RequestRow).where(RequestRow.id == request_id, RequestRow.tenant_id == principal.tenant_id)
-        row = session.scalar(query.with_for_update() if lock else query)
+        row = session.scalar(query.with_for_update().execution_options(populate_existing=True) if lock else query)
         if row is None:
             raise DomainError("NOT_FOUND", "Request not found in this workspace", 404)
         return row
+
+    def policy(self, principal):
+        with self.db.transaction() as session:
+            current = effective_policy(session, principal.tenant_id)
+            return {**current, "latest_version": session.get(TenantPolicyRow, principal.tenant_id).latest_version,
+                    "status": "effective"}
+
+    def policy_history(self, principal):
+        with self.db.transaction() as session:
+            return policy_versions(session, principal.tenant_id)
+
+    def publish_policy(self, principal, command):
+        require(principal, "approver")
+        with self.db.transaction(write=True) as session:
+            row = publish(session, principal, command)
+            active = effective_policy(session, principal.tenant_id)
+            if active["version"] == row.version:
+                # Future revisions are invalidated lazily at every current-state gate.
+                for request in session.scalars(select(RequestRow).where(RequestRow.tenant_id == principal.tenant_id)
+                                                .order_by(RequestRow.id).with_for_update()):
+                    if request.proposal and request.proposal.get("policy_hash") != active["policy_hash"]:
+                        for approval in session.scalars(select(ApprovalRow).where(
+                                ApprovalRow.request_id == request.id, ApprovalRow.status == "APPROVED")):
+                            approval.status = "STALE"
+                        if request.status not in FROZEN:
+                            request.status = "APPROVAL_STALE"
+                        audit(session, principal, request.id, "POLICY_CHANGED", {
+                            "policy_version": row.version, "policy_hash": row.policy_hash,
+                            "previous_policy_version": request.proposal.get("policy_version")})
+            return next(item for item in policy_versions(session, principal.tenant_id) if item["id"] == row.id)
+
+    def _request_dto(self, session, principal, row):
+        result = req_dto(row)
+        current, reason = False, None
+        if row.proposal:
+            try:
+                current = self._current_snapshot(session, principal, row)["snapshot_hash"] == row.proposal["snapshot_hash"]
+                reason = None if current else "PROPOSAL_INPUT_CHANGED"
+            except DomainError as error:
+                reason = error.code
+            if not current and row.status in {"APPROVED", "READY_FOR_REVIEW", "REJECTED"}:
+                result["status"] = "APPROVAL_STALE"
+        result.update(proposal_current=current, proposal_stale_reason=reason)
+        return result
 
     def _quote(self, session, principal, quote_id, refresh=False):
         row = session.scalar(select(QuoteRow).where(QuoteRow.id == quote_id, QuoteRow.tenant_id == principal.tenant_id)
@@ -79,21 +130,22 @@ class ProcurementService:
     def create_request(self, principal, command):
         require(principal, "buyer")
         with self.db.transaction(write=True) as session:
+            lock_tenant(session, principal.tenant_id)
             row = RequestRow(id=uid("req_"), tenant_id=principal.tenant_id, owner_id=principal.user_id,
                              data=command.model_dump(mode="json"), version=1, status="DRAFT")
             session.add(row)
             session.flush()
             audit(session, principal, row.id, "REQUEST_CREATED", {"version": 1})
-            return req_dto(row)
+            return self._request_dto(session, principal, row)
 
     def list_requests(self, principal):
         with self.db.transaction() as session:
-            return [req_dto(row) for row in session.scalars(select(RequestRow).where(
+            return [self._request_dto(session, principal, row) for row in session.scalars(select(RequestRow).where(
                 RequestRow.tenant_id == principal.tenant_id).order_by(RequestRow.created_at.desc()).limit(200))]
 
     def get_request(self, principal, request_id):
         with self.db.transaction() as session:
-            return req_dto(self._request(session, principal, request_id))
+            return self._request_dto(session, principal, self._request(session, principal, request_id))
 
     def update_request(self, principal, request_id, command):
         require(principal, "buyer")
@@ -105,7 +157,7 @@ class ProcurementService:
             row.data = command.model_dump(mode="json", exclude={"expected_version"})
             self._invalidate(session, row)
             audit(session, principal, row.id, "REQUEST_CHANGED", {"version": row.version, "status": row.status})
-            return req_dto(row)
+            return self._request_dto(session, principal, row)
 
     def import_quote(self, principal, request_id, filename, data):
         require(principal, "buyer")
@@ -149,13 +201,14 @@ class ProcurementService:
                 path.unlink(missing_ok=True)
             raise
 
-    def _quote_view(self, session, quote, version, request):
+    def _quote_view(self, session, quote, version, request, policy=None):
         document = session.get(DocumentRow, version.document_id)
         return {"id": quote.id, "request_id": quote.request_id, "version_id": version.id, "version": version.version,
                 "values": version.values, "evidence": version.evidence, "issues": version.issues,
                 "confirmed_by": version.confirmed_by, "filename": document.filename, "document_id": document.id,
                 "document_sha256": document.sha256,
-                "calculation": offer_check(request.data, version.values, bool(version.confirmed_by))}
+                "calculation": offer_check(request.data, version.values, bool(version.confirmed_by),
+                                           policy or effective_policy(session, request.tenant_id))}
 
     def list_quotes(self, principal, request_id):
         with self.db.transaction() as session:
@@ -226,18 +279,40 @@ class ProcurementService:
             return {"id": document.id, "filename": document.filename, "sha256": document.sha256,
                     "trust": "untrusted_source_content", "fragments": document.fragments}
 
-    def _snapshot(self, session, request, quote, version):
+    def _binding(self, session, request, policy=None):
+        """Bind the complete sorted collection, including ineligible/unconfirmed offers."""
+        policy = policy or effective_policy(session, request.tenant_id)
+        quotes = []
+        for quote in session.scalars(select(QuoteRow).where(QuoteRow.request_id == request.id,
+                QuoteRow.tenant_id == request.tenant_id).order_by(QuoteRow.id)):
+            version = session.scalar(select(QuoteVersionRow).where(QuoteVersionRow.quote_id == quote.id,
+                                                        QuoteVersionRow.version == quote.current_version))
+            document = session.get(DocumentRow, version.document_id)
+            self._verify_document(document)
+            quotes.append(self._quote_view(session, quote, version, request, policy))
+        return {"request_id": request.id, "request_version": request.version, "request": deepcopy(request.data),
+                "policy": policy, "quote_collection": quotes, "quote_collection_hash": digest(quotes)}
+
+    def _valid_quote_count(self, binding):
+        # Multiple files or revisions from one supplier are not independent competition.
+        return len({q["values"]["supplier_id"] for q in binding["quote_collection"] if q["calculation"]["eligible"]})
+
+    def _snapshot(self, session, request, quote, version, binding=None):
+        binding = binding or self._binding(session, request)
+        policy = binding["policy"]
         document = session.get(DocumentRow, version.document_id)
-        self._verify_document(document)
-        checked = offer_check(request.data, version.values, bool(version.confirmed_by))
-        if not checked["eligible"]:
-            raise DomainError("PROPOSAL_BLOCKED", "Selected quote no longer satisfies all deterministic rules")
-        body = {"contract_version": "single-sku-v1", "tenant_id": request.tenant_id, "request_id": request.id,
-                "request_version": request.version, "request": request.data, "quote_id": quote.id,
-                "quote_version_id": version.id, "quote_version": version.version, "quote_values": version.values,
+        checked = offer_check(request.data, version.values, bool(version.confirmed_by), policy)
+        if not checked["eligible"] or self._valid_quote_count(binding) < policy["minimum_valid_quotes"]:
+            raise DomainError("PROPOSAL_BLOCKED", "Selected quote or valid supplier count no longer satisfies policy")
+        body = {"contract_version": "single-sku-v2", "tenant_id": request.tenant_id, "request_id": request.id,
+                "request_version": request.version, "request": deepcopy(request.data), "quote_id": quote.id,
+                "quote_version_id": version.id, "quote_version": version.version, "quote_values": deepcopy(version.values),
                 "confirmed_by": version.confirmed_by, "evidence_hash": digest(version.evidence),
                 "document_sha256": document.sha256, "total": checked["total"],
-                "policy_id": POLICY["id"], "policy_version": POLICY["version"], "policy_hash": digest(POLICY),
+                "policy_id": policy["id"], "policy_version": policy["version"], "policy_hash": policy["policy_hash"],
+                "policy": policy, "quote_collection": binding["quote_collection"],
+                "quote_collection_hash": binding["quote_collection_hash"], "input_hash": digest(binding),
+                "valid_quote_count": self._valid_quote_count(binding),
                 "erp_mode": self.erp.mode, "erp_company": self.settings.erp_company,
                 "erp_cost_mapping_version": COST_MAPPING_VERSION,
                 "erp_cost_accounts": {"tax": self.settings.erp_tax_account, "freight": self.settings.erp_freight_account},
@@ -245,49 +320,92 @@ class ProcurementService:
                 "transaction_date": request.created_at[:10]}
         return {**body, "snapshot_hash": digest(body)}
 
+    def _evaluation_dto(self, row, binding=None, reason=None):
+        current = binding is not None and digest(binding) == row.input_hash
+        return {"id": row.id, "request_id": row.request_id, "request_version": row.request_version,
+                "created_at": row.created_at, "created_by": row.actor_id, "policy_version": row.input_snapshot["policy"]["version"],
+                "policy_hash": row.input_snapshot["policy"]["policy_hash"],
+                "quote_collection_hash": row.input_snapshot["quote_collection_hash"], "input_hash": row.input_hash,
+                "input_snapshot": row.input_snapshot, "result": row.result,
+                "current": current, "stale_reason": None if current else reason or "EVALUATION_INPUT_CHANGED"}
+
+    def evaluations(self, principal, request_id, offset=0, limit=100):
+        with self.db.transaction(write=True) as session:
+            request = self._request(session, principal, request_id, lock=True)
+            try:
+                binding, reason = self._binding(session, request), None
+            except DomainError as error:
+                binding, reason = None, error.code
+            return [self._evaluation_dto(row, binding, reason) for row in session.scalars(select(EvaluationRow).where(
+                EvaluationRow.request_id == request_id, EvaluationRow.tenant_id == principal.tenant_id)
+                .order_by(EvaluationRow.created_at.desc(), EvaluationRow.id).offset(offset).limit(limit))]
+
     def analyze(self, principal, request_id, preferred_quote_id=None):
         require(principal, "buyer")
         with self.db.transaction(write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             self._mutable(request)
-            candidates = []
-            comparisons = []
-            audit(session, principal, request.id, "ANALYSIS_STARTED", {"runtime": "deterministic-baseline", "llm_used": False})
-            for quote in session.scalars(select(QuoteRow).where(QuoteRow.request_id == request_id)):
-                _, version = self._quote(session, principal, quote.id)
-                view = self._quote_view(session, quote, version, request)
-                comparisons.append(view)
-                if view["calculation"]["eligible"] and (not preferred_quote_id or preferred_quote_id == quote.id):
-                    candidates.append((Decimal(view["calculation"]["total"]), quote.id, quote, version))
-            audit(session, principal, request.id, "POLICY_CHECK_COMPLETED", {"policy_id": POLICY["id"], "policy_hash": digest(POLICY)})
+            binding = self._binding(session, request)
+            policy, comparisons = binding["policy"], binding["quote_collection"]
+            valid_count = self._valid_quote_count(binding)
+            candidates = [view for view in comparisons if view["calculation"]["eligible"]
+                          and (not preferred_quote_id or preferred_quote_id == view["id"])]
+            violations = []
+            if valid_count < policy["minimum_valid_quotes"]:
+                violations.append("INSUFFICIENT_VALID_QUOTES")
             if not candidates:
-                for approval in session.scalars(select(ApprovalRow).where(ApprovalRow.request_id == request.id, ApprovalRow.status == "APPROVED")):
+                violations.append("NO_ELIGIBLE_QUOTE")
+            audit(session, principal, request.id, "ANALYSIS_STARTED", {"runtime": "deterministic-baseline", "llm_used": False})
+            audit(session, principal, request.id, "POLICY_CHECK_COMPLETED", {"policy_id": policy["id"],
+                "policy_version": policy["version"], "policy_hash": policy["policy_hash"],
+                "valid_quote_count": valid_count, "minimum_valid_quotes": policy["minimum_valid_quotes"], "violations": violations})
+            snapshot = None
+            if violations:
+                for approval in session.scalars(select(ApprovalRow).where(ApprovalRow.request_id == request.id,
+                                                                          ApprovalRow.status == "APPROVED")):
                     approval.status = "STALE"
                 request.proposal = None
                 request.status = "NEEDS_CONFIRMATION" if any(not v["confirmed_by"] for v in comparisons) else "BLOCKED"
-                audit(session, principal, request.id, "ANALYSIS_BLOCKED", {"quote_count": len(comparisons)})
-                return {"request": req_dto(request), "quotes": comparisons, "proposal": None,
-                        "runtime": "deterministic-baseline", "llm_used": False}
-            _, _, quote, version = sorted(candidates, key=lambda x: (x[0], x[1]))[0]
-            snapshot = self._snapshot(session, request, quote, version)
-            old_hash = (request.proposal or {}).get("snapshot_hash")
-            if old_hash != snapshot["snapshot_hash"]:
-                for approval in session.scalars(select(ApprovalRow).where(ApprovalRow.request_id == request.id, ApprovalRow.status == "APPROVED")):
-                    approval.status = "STALE"
-                request.status = "READY_FOR_REVIEW"
-            elif request.status not in {"APPROVED", "READY_FOR_REVIEW"}:
-                request.status = "READY_FOR_REVIEW"
-            request.proposal = snapshot
-            audit(session, principal, request.id, "PROPOSAL_PREPARED", {"snapshot_hash": snapshot["snapshot_hash"],
-                "selected_quote_id": quote.id, "total": snapshot["total"], "runtime": "deterministic-baseline"})
-            return {"request": req_dto(request), "quotes": comparisons, "proposal": snapshot,
+                audit(session, principal, request.id, "ANALYSIS_BLOCKED", {"quote_count": len(comparisons), "violations": violations})
+            else:
+                selected = min(candidates, key=lambda view: (Decimal(view["calculation"]["total"]), view["id"]))
+                quote, version = self._quote(session, principal, selected["id"])
+                snapshot = self._snapshot(session, request, quote, version, binding)
+                if (request.proposal or {}).get("snapshot_hash") != snapshot["snapshot_hash"]:
+                    for approval in session.scalars(select(ApprovalRow).where(ApprovalRow.request_id == request.id,
+                                                                              ApprovalRow.status == "APPROVED")):
+                        approval.status = "STALE"
+                    request.status = "READY_FOR_REVIEW"
+                elif request.status not in {"APPROVED", "READY_FOR_REVIEW"}:
+                    request.status = "READY_FOR_REVIEW"
+                request.proposal = snapshot
+                audit(session, principal, request.id, "PROPOSAL_PREPARED", {"snapshot_hash": snapshot["snapshot_hash"],
+                    "selected_quote_id": quote.id, "total": snapshot["total"], "runtime": "deterministic-baseline"})
+            result = {"quotes": comparisons, "proposal": snapshot, "violations": violations,
+                      "valid_quote_count": valid_count, "minimum_valid_quotes": policy["minimum_valid_quotes"]}
+            receipt = EvaluationRow(id=uid("eval_"), tenant_id=principal.tenant_id, request_id=request_id,
+                actor_id=principal.user_id, request_version=request.version, input_hash=digest(binding),
+                input_snapshot=binding, result=deepcopy(result))
+            session.add(receipt)
+            session.flush()
+            return {"request": self._request_dto(session, principal, request), **result, "policy": policy,
+                    "evaluation": self._evaluation_dto(receipt, binding),
                     "runtime": "deterministic-baseline", "llm_used": False}
 
     def _current_snapshot(self, session, principal, request):
         if not request.proposal:
             raise DomainError("APPROVAL_STALE", "Prepare and approve a current proposal first")
+        binding = self._binding(session, request)
+        if request.proposal.get("input_hash") != digest(binding):
+            raise DomainError("APPROVAL_STALE", "The complete quote collection, request or effective policy has changed")
         quote, version = self._quote(session, principal, request.proposal["quote_id"])
-        return self._snapshot(session, request, quote, version)
+        snapshot = self._snapshot(session, request, quote, version, binding)
+        self._assert_policy_current(session, request, snapshot["policy_hash"])
+        return snapshot
+
+    def _assert_policy_current(self, session, request, policy_hash):
+        if effective_policy(session, request.tenant_id)["policy_hash"] != policy_hash:
+            raise DomainError("APPROVAL_STALE", "A new policy became effective during validation")
 
     def approve(self, principal, request_id, command):
         require(principal, "approver")
@@ -303,7 +421,7 @@ class ProcurementService:
                 previous.status = "SUPERSEDED"
             status = "APPROVED" if command.decision == "approve" else "REJECTED"
             approval = ApprovalRow(id=uid("ap_"), request_id=request.id, tenant_id=principal.tenant_id,
-                approver_id=principal.user_id, snapshot_hash=command.snapshot_hash, status=status, note=command.note,
+                approver_id=principal.user_id, snapshot_hash=command.snapshot_hash, snapshot=deepcopy(current), status=status, note=command.note,
                 expires_at=(datetime.now(timezone.utc) + timedelta(seconds=self.settings.approval_ttl_seconds)).isoformat())
             session.add(approval)
             session.flush()
@@ -311,12 +429,35 @@ class ProcurementService:
             audit(session, principal, request.id, "APPROVAL_" + status, {"approval_id": approval.id,
                 "snapshot_hash": command.snapshot_hash, "expires_at": approval.expires_at})
             return {"id": approval.id, "status": approval.status, "snapshot_hash": approval.snapshot_hash,
-                    "expires_at": approval.expires_at, "request": req_dto(request)}
+                    "expires_at": approval.expires_at, "snapshot": approval.snapshot,
+                    "request": self._request_dto(session, principal, request)}
+
+    def approvals(self, principal, request_id, offset=0, limit=100):
+        with self.db.transaction(write=True) as session:
+            request = self._request(session, principal, request_id, lock=True)
+            try:
+                current, reason = self._current_snapshot(session, principal, request), None
+            except DomainError as error:
+                current, reason = None, error.code
+            results = []
+            for row in session.scalars(select(ApprovalRow).where(ApprovalRow.request_id == request_id,
+                    ApprovalRow.tenant_id == principal.tenant_id).order_by(ApprovalRow.created_at.desc(), ApprovalRow.id)
+                    .offset(offset).limit(limit)):
+                matches = bool(row.snapshot and current and row.snapshot_hash == current["snapshot_hash"])
+                results.append({"id": row.id, "request_id": request_id, "approver_id": row.approver_id,
+                    "snapshot_hash": row.snapshot_hash, "snapshot": row.snapshot,
+                    "status": "STALE" if row.status == "APPROVED" and not matches else row.status,
+                    "stored_status": row.status, "note": row.note, "created_at": row.created_at,
+                    "expires_at": row.expires_at, "current": matches,
+                    "stale_reason": None if matches else reason or "APPROVAL_STALE"})
+            return results
 
     def _validate_approval(self, session, principal, request, approval=None):
         if approval is None:
             approval = session.scalar(select(ApprovalRow).where(ApprovalRow.request_id == request.id,
                 ApprovalRow.status == "APPROVED").order_by(ApprovalRow.created_at.desc()))
+        if approval and approval.status == "STALE":
+            raise DomainError("APPROVAL_STALE", "This approval is bound to obsolete inputs")
         if not approval or approval.status != "APPROVED":
             raise DomainError("APPROVAL_REQUIRED", "A valid approval is required")
         if approval.expires_at <= now():
@@ -328,6 +469,13 @@ class ProcurementService:
         current = self._current_snapshot(session, principal, request)
         if approval.snapshot_hash != current["snapshot_hash"] or request.proposal["snapshot_hash"] != current["snapshot_hash"]:
             raise DomainError("APPROVAL_STALE", "The approved snapshot differs from the current business state")
+        # Snapshot/source validation may be slow; expiry and revocation must be
+        # checked again at authorization, not only at validation entry.
+        if approval.expires_at <= now():
+            raise DomainError("APPROVAL_EXPIRED", "The approval expired during validation")
+        if not any(identity["user_id"] == approval.approver_id and identity["tenant_id"] == principal.tenant_id
+                   and identity["role"] == "approver" for identity in self.settings.auth_tokens.values()):
+            raise DomainError("APPROVER_REVOKED", "The approving user no longer has approval permission", 403)
         return approval, current
 
     def enqueue(self, principal, request_id, snapshot_hash):
@@ -339,6 +487,8 @@ class ProcurementService:
                 if existing.snapshot_hash != snapshot_hash:
                     raise DomainError("IDEMPOTENCY_PAYLOAD_CONFLICT", "This request already has an operation for a different snapshot")
                 return op_dto(existing)
+            if request.status == "APPROVAL_STALE":
+                raise DomainError("APPROVAL_STALE", "Re-analyze and approve the effective policy first")
             if request.status != "APPROVED":
                 raise DomainError("APPROVAL_REQUIRED", "Approve this unchanged proposal before execution")
             approval, current = self._validate_approval(session, principal, request)
@@ -459,7 +609,11 @@ class ProcurementService:
                     if operation.lease_until != lease:
                         return op_dto(operation)
                     self._validate_approval(session, principal, request, session.get(ApprovalRow, operation.approval_id))
-                remote = self.erp.create_draft(operation_id, payload)
+                    # Keep both locks through the external write. A concurrent policy
+                    # publisher cannot commit between validation and dispatch. Future
+                    # activation is evaluated immediately before this linearization point.
+                    self._assert_policy_current(session, request, payload["policy_hash"])
+                    remote = self.erp.create_draft(operation_id, payload)
             if remote is None:
                 error = "REMOTE_ABSENCE_NOT_PROOF_OF_NO_COMMIT"
             elif remote_matches(remote, payload, operation_id):

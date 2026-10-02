@@ -77,6 +77,7 @@ class ApprovalRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     approver_id: Mapped[str] = mapped_column(String(80))
     snapshot_hash: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(24))
     note: Mapped[str] = mapped_column(Text, default="")
     expires_at: Mapped[str] = mapped_column(String(40))
@@ -131,6 +132,7 @@ class AdviceRunRow(Base):
     idempotency_key: Mapped[str] = mapped_column(String(80))
     request_version: Mapped[int] = mapped_column(Integer)
     input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="PENDING")
     output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -138,6 +140,50 @@ class AdviceRunRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
     started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class TenantPolicyRow(Base):
+    """Tenant serialization anchor. Lock before any request aggregate lock."""
+    __tablename__ = "tenant_policies"
+    tenant_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PolicyVersionRow(Base):
+    __tablename__ = "policy_versions"
+    __table_args__ = (UniqueConstraint("tenant_id", "version", name="uq_tenant_policy_version"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenant_policies.tenant_id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    policy_hash: Mapped[str] = mapped_column(String(64))
+    effective_at: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    created_by: Mapped[str] = mapped_column(String(80))
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class EvaluationRow(Base):
+    """Append-only comparison receipt including inputs and the prepared proposal."""
+    __tablename__ = "evaluations"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+def _immutable_receipt(*_):
+    raise ValueError("IMMUTABLE_HISTORY")
+
+
+for _model in (PolicyVersionRow, EvaluationRow):
+    event.listen(_model, "before_update", _immutable_receipt)
+    event.listen(_model, "before_delete", _immutable_receipt)
 
 
 class Database:

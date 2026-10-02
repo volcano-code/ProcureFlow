@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from .contracts import AdviceRunCommand
 from .db import AdviceRunRow, DocumentRow, QuoteRow, audit, now, uid
-from .domain import POLICY, digest
+from .domain import digest
+from .policies import effective_policy
 from .errors import DomainError
 from .service import require
 
@@ -45,6 +46,7 @@ class AdviceService:
 
     def _capture(self, session, principal, request):
         quotes, documents = [], {}
+        policy = effective_policy(session, principal.tenant_id)
         rows = list(session.scalars(select(QuoteRow).where(QuoteRow.request_id == request.id,
                      QuoteRow.tenant_id == principal.tenant_id).order_by(QuoteRow.id).limit(21)))
         if len(rows) > 20:
@@ -56,28 +58,41 @@ class AdviceService:
                 self.procurement._verify_document(document)
             except OSError as error:
                 raise DomainError("SOURCE_INTEGRITY_FAILED", "Advice source is unavailable") from error
-            quotes.append(self.procurement._quote_view(session, quote, version, request))
+            quotes.append(self.procurement._quote_view(session, quote, version, request, policy))
             documents[document.id] = {"id": document.id, "filename": document.filename,
                 "sha256": document.sha256, "trust": "untrusted_source_content", "fragments": document.fragments}
         result = {"request": {"id": request.id, "version": request.version, **request.data},
-                  "quotes": quotes, "documents": documents, "policy": POLICY}
+                  "quotes": quotes, "documents": documents, "policy": policy,
+                  "quote_collection_hash": digest(quotes)}
         if len(json.dumps(result, ensure_ascii=False)) > 200000:
             raise DomainError("ADVICE_CONTEXT_LIMIT", "Advice source context exceeds its limit", 422)
         return deepcopy(result)
 
     def _freshness(self, session, principal, request, row):
+        if row.input_snapshot is None:
+            return False, "LEGACY_INPUT_UNBOUND"
+        if digest(row.input_snapshot) != row.input_hash:
+            return False, "ADVICE_INPUT_CORRUPTED"
         if request.version != row.request_version:
             return False, "ADVICE_INPUT_CHANGED"
         try:
             snapshot = self._capture(session, principal, request)
-            return (True, None) if digest(snapshot) == row.input_hash else (False, "ADVICE_INPUT_CHANGED")
+            same_policy = snapshot["policy"]["policy_hash"] == effective_policy(session, principal.tenant_id)["policy_hash"]
+            return (True, None) if same_policy and digest(snapshot) == row.input_hash else (False, "ADVICE_INPUT_CHANGED")
         except DomainError as error:
             return False, error.code if error.code in SAFE_ERRORS else "ADVICE_INPUT_CHANGED"
 
     def _dto(self, row, current, stale_reason):
         interrupted = expired(row)
+        if row.input_snapshot is None:
+            current, stale_reason = False, "LEGACY_INPUT_UNBOUND"
+        elif digest(row.input_snapshot) != row.input_hash:
+            current, stale_reason = False, "ADVICE_INPUT_CORRUPTED"
         return {"id": row.id, "request_id": row.request_id, "request_version": row.request_version,
-                "input_hash": row.input_hash, "status": "INTERRUPTED" if interrupted else row.status,
+                "input_hash": row.input_hash, "input_snapshot": row.input_snapshot,
+                "policy_version": (row.input_snapshot or {}).get("policy", {}).get("version"),
+                "policy_hash": (row.input_snapshot or {}).get("policy", {}).get("policy_hash"),
+                "quote_collection_hash": (row.input_snapshot or {}).get("quote_collection_hash"), "status": "INTERRUPTED" if interrupted else row.status,
                 "created_at": row.created_at, "started_at": row.started_at, "completed_at": row.completed_at,
                 "error_code": "ADVICE_INTERRUPTED" if interrupted else row.error_code,
                 "output": row.output, "current": current, "stale_reason": stale_reason}
@@ -97,7 +112,7 @@ class AdviceService:
             snapshot = self._capture(session, principal, request)
             row = AdviceRunRow(id=uid("adv_"), tenant_id=principal.tenant_id, request_id=request_id,
                 actor_id=principal.user_id, idempotency_key=command.idempotency_key,
-                request_version=request.version, input_hash=digest(snapshot), status="PENDING")
+                request_version=request.version, input_hash=digest(snapshot), input_snapshot=snapshot, status="PENDING")
             session.add(row)
             session.flush()
             audit(session, principal, request_id, "ADVICE_RESERVED", {"run_id": row.id,
@@ -105,19 +120,22 @@ class AdviceService:
             return self._dto(row, True, None)
 
     def get(self, principal, run_id):
-        with self.db.transaction() as session:
+        with self.db.transaction(write=True) as session:
             row = self._run(session, principal, run_id)
-            request = self.procurement._request(session, principal, row.request_id)
+            request = self.procurement._request(session, principal, row.request_id, lock=True)
             return self._dto(row, *self._freshness(session, principal, request, row))
 
     def list(self, principal, request_id):
-        with self.db.transaction() as session:
-            request = self.procurement._request(session, principal, request_id)
+        with self.db.transaction(write=True) as session:
+            request = self.procurement._request(session, principal, request_id, lock=True)
             rows = list(session.scalars(select(AdviceRunRow).where(AdviceRunRow.tenant_id == principal.tenant_id,
                 AdviceRunRow.request_id == request_id).order_by(AdviceRunRow.created_at.desc(), AdviceRunRow.id).limit(20)))
             # Capture once for the complete response, not once per historical run.
             try:
-                input_hash, reason = digest(self._capture(session, principal, request)), None
+                captured = self._capture(session, principal, request)
+                input_hash, reason = digest(captured), None
+                if captured["policy"]["policy_hash"] != effective_policy(session, principal.tenant_id)["policy_hash"]:
+                    input_hash, reason = None, "ADVICE_INPUT_CHANGED"
             except DomainError as error:
                 input_hash, reason = None, error.code if error.code in SAFE_ERRORS else "ADVICE_INPUT_CHANGED"
             return [self._dto(row, row.input_hash == input_hash,
@@ -125,7 +143,7 @@ class AdviceService:
 
     def process(self, principal, run_id, factory):
         require(principal, "buyer")
-        # Lock order is always request then run, matching reservation and edits.
+        # Lock order is tenant, request, then run, matching policy publication and edits.
         with self.db.transaction() as session:
             request_id = self._run(session, principal, run_id).request_id
         with self.db.transaction(write=True) as session:
@@ -139,7 +157,7 @@ class AdviceService:
             if not current:
                 self._finish(session, principal, row, "STALE", reason)
                 return self._dto(row, False, reason)
-            snapshot = self._capture(session, principal, request)
+            snapshot = deepcopy(row.input_snapshot)
             row.status, row.started_at = "RUNNING", now()
             row.lease_until = (datetime.now(timezone.utc) + timedelta(seconds=LEASE_SECONDS)).isoformat()
             audit(session, principal, request_id, "ADVICE_STARTED", {"run_id": run_id, "advisory_only": True})
@@ -185,6 +203,7 @@ class AdviceService:
                 self._finish(session, principal, row, "INTERRUPTED", "ADVICE_INTERRUPTED")
             elif row.status == "RUNNING":
                 if not current:
+                    row.output = output
                     self._finish(session, principal, row, "STALE", reason)
                 elif error_code:
                     self._finish(session, principal, row, "FAILED", error_code)

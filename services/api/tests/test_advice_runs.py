@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import APPROVER, AUDITOR, BUYER, OTHER, approved, ready, request, upload
+from conftest import APPROVER, AUDITOR, BUYER, OTHER, approved, ready, request, upload, publish_policy
 from procureflow.agent import ReadOnlyAgent
 from procureflow.app import create_app
 from procureflow.db import Base, Database
@@ -298,7 +298,6 @@ def test_concurrent_processing_claims_once_and_reads_running(system, agent):
 
 @pytest.mark.parametrize("mutation", ["request", "quote_edit", "quote_confirm", "upload", "policy"])
 def test_changed_inputs_before_processing_fail_closed_without_model(system, agent, monkeypatch, mutation):
-    from procureflow.domain import POLICY
     client, _, _ = system
     if mutation == "quote_confirm":
         req = request(client)
@@ -322,7 +321,7 @@ def test_changed_inputs_before_processing_fail_closed_without_model(system, agen
     elif mutation == "upload":
         upload(client, req["id"], "supplier-b.csv")
     else:
-        monkeypatch.setitem(POLICY, "version", str(POLICY["version"]) + "-changed")
+        publish_policy(client)
     result = process(client, pending["id"])
     assert result["status"] == "STALE"
     assert result["current"] is False and result["stale_reason"]
@@ -360,7 +359,6 @@ def test_completed_history_becomes_noncurrent_after_edit_without_replaying(syste
 
 @pytest.mark.parametrize("mutation", ["request", "source", "policy"])
 def test_change_during_model_call_cannot_publish_current_result(system, agent, monkeypatch, mutation):
-    from procureflow.domain import POLICY
     client, service, _ = system
     req, _, _ = ready(client)
     pending = create_run(client, req["id"])
@@ -370,7 +368,7 @@ def test_change_during_model_call_cannot_publish_current_result(system, agent, m
     elif mutation == "source":
         agent.effect = lambda: next(service.document_dir.iterdir()).write_text("changed during provider call")
     else:
-        agent.effect = lambda: monkeypatch.setitem(POLICY, "version", str(POLICY["version"]) + "-changed")
+        agent.effect = lambda: publish_policy(client)
     result = process(client, pending["id"])
     assert result["status"] == "STALE"
     assert result["current"] is False and result["stale_reason"]
@@ -562,12 +560,11 @@ def test_provider_private_reasoning_not_in_durable_output_or_audit(system, monke
 
 def test_claimed_policy_payload_stays_frozen_even_if_live_policy_changes(system, agent, monkeypatch):
     from copy import deepcopy
-    from procureflow.domain import POLICY
     client, _, _ = system
     req, _, _ = ready(client)
     pending = create_run(client, req["id"])
-    original_policy = deepcopy(POLICY)
-    agent.before_tools = lambda: monkeypatch.setitem(POLICY, "version", str(POLICY["version"]) + "-changed")
+    original_policy = deepcopy(pending["input_snapshot"]["policy"])
+    agent.before_tools = lambda: publish_policy(client)
     result = process(client, pending["id"])
     assert agent.policies == [original_policy], "Every tool must read the claimed immutable snapshot"
     assert result["status"] == "STALE" and result["current"] is False
