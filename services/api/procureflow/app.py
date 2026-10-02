@@ -6,18 +6,19 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from . import __version__
-from .agent import ReadOnlyAgent
+from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
+from .advice import AdviceService
 from .config import Settings
-from .contracts import (AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
-    QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
-from .db import Database, audit
-from .domain import POLICY
+from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
+    PolicyVersionCreate, QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
+from .db import Database, uid
 from .erp import ERPNextClient, ERPRejected, ERPUnknown, MockERP
 from .errors import DomainError
 from .service import ProcurementService, require
@@ -27,11 +28,14 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def create_app(settings: Settings | None = None, database: Database | None = None, erp=None) -> FastAPI:
     settings = settings or Settings()
-    db = database or Database(settings.database_url, create_schema=settings.mode == "demo")
+    db = database or Database(settings.database_url,
+        create_schema=settings.mode == "demo" and settings.database_url.startswith("sqlite"))
     if erp is None:
         erp = MockERP(settings.data_dir / "mock-erp.sqlite3") if settings.erp_mode == "mock" else ERPNextClient(
-            settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes)
+            settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes,
+            tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
     service = ProcurementService(db, settings, erp)
+    advice_service = AdviceService(service)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -74,7 +78,9 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cache-Control"] = "no-store"
+        # Streaming audit events must not be buffered by a proxy compressor.
+        is_event_stream = response.headers.get("content-type", "").startswith("text/event-stream")
+        response.headers["Cache-Control"] = "no-store, no-transform" if is_event_stream else "no-store"
         if request.url.path == "/":
             response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
         return response
@@ -85,10 +91,21 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 "analysis_default": "deterministic-baseline", "llm_live_verified": False,
                 "database": "sqlite" if db.sqlite else "postgresql", "public_production_ready": False}
 
+    @app.get("/ready")
+    def readiness():
+        try:
+            return db.check_ready(require_migrations=not (db.sqlite and settings.mode == "demo"))
+        except (SQLAlchemyError, RuntimeError):
+            # No raw DSN, SQL, credentials or exception details in unauthenticated output.
+            return JSONResponse(status_code=503, content={"status": "not_ready",
+                "error": "DATABASE_NOT_READY"})
+
     @app.get("/api/v1/capabilities")
     def capabilities(principal=Depends(identity)):
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
+                "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
+                "advice_runtime": RUNTIME, "advice_runtime_version": LANGGRAPH_VERSION,
                 "erp_draft_writes_enabled": erp.mode == "mock" or settings.erp_allow_draft_writes,
                 "approval_authority": "business-database", "production_ready": False}
 
@@ -165,7 +182,20 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.get("/api/v1/policy")
     def policy(principal=Depends(identity)):
-        return POLICY
+        return service.policy(principal)
+
+    @app.get("/api/v1/policy/versions")
+    def policy_history(principal=Depends(identity)):
+        return service.policy_history(principal)
+
+    @app.post("/api/v1/policy/versions", status_code=201)
+    def publish_policy(command: PolicyVersionCreate, principal=Depends(identity)):
+        return service.publish_policy(principal, command)
+
+    @app.get("/api/v1/requests/{request_id}/evaluations")
+    def evaluations(request_id: str, offset: int = Query(default=0, ge=0),
+                    limit: int = Query(default=100, ge=1, le=200), principal=Depends(identity)):
+        return service.evaluations(principal, request_id, offset=offset, limit=limit)
 
     @app.get("/api/v1/suppliers")
     def suppliers(principal=Depends(identity)):
@@ -181,35 +211,39 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.post("/api/v1/requests/{request_id}/advice")
     def advice(request_id: str, principal=Depends(identity)):
         require(principal, "buyer")
+        # Legacy synchronous route uses the same durable, immutable capture as runs.
         request = service.get_request(principal, request_id)
-        quotes = service.list_quotes(principal, request_id)
-        docs = {q["document_id"] for q in quotes}
-        ids = {e["fragment_id"] for q in quotes for e in q["evidence"].values() if e.get("fragment_id")}
-        def invoke(name, arguments):
-            if name == "get_comparison":
-                return {"request": request, "quotes": quotes}
-            if name == "search_policy":
-                return POLICY
-            if name == "get_evidence" and arguments["document_id"] in docs:
-                return service.evidence(principal, arguments["document_id"])
-            raise DomainError("TOOL_SCOPE_DENIED", "Document is outside this agent request scope", 403)
-        agent = ReadOnlyAgent.from_env()
-        try:
-            def observe(event):
-                with db.transaction(write=True) as session:
-                    audit(session, principal, request_id, "AGENT_" + event["type"].upper(), event)
-            output = agent.run(invoke, ids, observer=observe)
-        except DomainError as error:
-            with db.transaction(write=True) as session:
-                audit(session, principal, request_id, "AGENT_ADVICE_FAILED", {"error_code": error.code})
-            raise
-        finally:
-            agent.client.close()
-        with db.transaction(write=True) as session:
-            audit(session, principal, request_id, "AGENT_ADVICE_COMPLETED", {
-                "model_calls": output["model_calls"], "tool_calls": output["tool_calls"],
-                "advisory_only": True, "trace": output["trace"]})
-        return output
+        receipt = advice_service.reserve(principal, request_id, AdviceRunCommand(
+            expected_version=request["version"], idempotency_key=uid("legacy_")))
+        result = advice_service.process(principal, receipt["id"], ReadOnlyAgent.from_env)
+        if result["status"] != "COMPLETED" or not result["current"]:
+            code = result["error_code"] or "ADVICE_INPUT_CHANGED"
+            raise DomainError(code, "Advice did not complete against current bound inputs",
+                              503 if code == "MODEL_NOT_CONFIGURED" else 409)
+        return {**result["output"], "run_id": result["id"], "input_hash": result["input_hash"],
+                "policy_version": result["policy_version"], "policy_hash": result["policy_hash"],
+                "quote_collection_hash": result["quote_collection_hash"], "current": True}
+
+    @app.post("/api/v1/requests/{request_id}/advice-runs", status_code=201)
+    def reserve_advice(request_id: str, command: AdviceRunCommand, principal=Depends(identity)):
+        return advice_service.reserve(principal, request_id, command)
+
+    @app.get("/api/v1/requests/{request_id}/advice-runs")
+    def list_advice(request_id: str, principal=Depends(identity)):
+        return advice_service.list(principal, request_id)
+
+    @app.get("/api/v1/advice-runs/{run_id}")
+    def get_advice(run_id: str, principal=Depends(identity)):
+        return advice_service.get(principal, run_id)
+
+    @app.post("/api/v1/advice-runs/{run_id}/process")
+    def process_advice(run_id: str, principal=Depends(identity)):
+        return advice_service.process(principal, run_id, ReadOnlyAgent.from_env)
+
+    @app.get("/api/v1/requests/{request_id}/approvals")
+    def approval_history(request_id: str, offset: int = Query(default=0, ge=0),
+                         limit: int = Query(default=100, ge=1, le=200), principal=Depends(identity)):
+        return service.approvals(principal, request_id, offset=offset, limit=limit)
 
     @app.post("/api/v1/requests/{request_id}/approval")
     def approve(request_id: str, command: ApprovalCommand, principal=Depends(identity)):
@@ -222,6 +256,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.get("/api/v1/operations/{operation_id}")
     def operation(operation_id: str, principal=Depends(identity)):
         return service.get_operation(principal, operation_id)
+
+    @app.post("/api/v1/operations/{operation_id}/verify")
+    def verify_operation(operation_id: str, principal=Depends(identity)):
+        return service.verify_operation(principal, operation_id)
 
     @app.post("/api/v1/operations/{operation_id}/process")
     def process(operation_id: str, principal=Depends(identity)):

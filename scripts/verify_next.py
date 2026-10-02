@@ -32,6 +32,7 @@ def run(output:Path)->int:
                  'PF_DATA_DIR':tmp,'PF_DATABASE_URL':f'sqlite:///{tmp}/next.sqlite3','PF_MODE':'demo','PF_ERP_MODE':'mock',
                  'ERP_ALLOW_DRAFT_WRITES':'false','PF_REQUIRE_BROWSER':'1','PF_ALLOW_TEST_MUTATIONS':'1',
                  'PF_NEXT_TEST_URL':web_url,'PF_SCREENSHOT_DIR':str(output),
+                 'PF_BROWSER_TRACE_DIR':str(output/'traces'),
                  'PF_WEB_ORIGINS':web_url}
             env.pop('PF_AUTH_TOKENS',None)
             for key in ('ERP_API_KEY','ERP_API_SECRET','LLM_API_KEY'):env.pop(key,None)

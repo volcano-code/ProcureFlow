@@ -50,3 +50,33 @@ test('native frontend transport: authenticated real SSE can be read and cancelle
   finally{clearTimeout(timer);}
   assert.ok(received.length>0);assert.equal(received[0].type,'REQUEST_CREATED');
 });
+
+test('native frontend transport: tenant policy publication invalidates bound approval and preserves history',async()=>{
+  const p=await prepare(),body={snapshot_hash:p.snapshot_hash};
+  await call('demo-approver',`/requests/${p.id}/approval`,'POST',body);
+  const original=await call('demo-buyer','/policy');
+  const other=await call('demo-other-tenant','/policy');
+  const command={expected_version:original.latest_version,budget_cap:'24000.00',max_delivery_days:14,
+    minimum_valid_quotes:2,effective_at:null,reason:'Disposable HTTP policy regression'};
+  await assert.rejects(()=>call('demo-buyer','/policy/versions','POST',command),e=>e.status===403);
+  const created=await call('demo-approver','/policy/versions','POST',command);
+  assert.equal(created.version,original.latest_version+1);
+  assert.equal(created.status,'effective');
+  await assert.rejects(()=>call('demo-approver','/policy/versions','POST',command),e=>e.status===409);
+  assert.deepEqual(await call('demo-other-tenant','/policy'),other);
+  const current=await call('demo-buyer',`/requests/${p.id}`);
+  assert.equal(current.status,'APPROVAL_STALE');assert.equal(current.proposal_current,false);
+  await assert.rejects(()=>call('demo-buyer',`/requests/${p.id}/execute`,'POST',body),e=>e.status===409);
+  const approvals=await call('demo-auditor',`/requests/${p.id}/approvals`);
+  assert.equal(approvals[0].snapshot_hash,p.snapshot_hash);assert.equal(approvals[0].status,'STALE');
+  const history=await call('demo-auditor',`/requests/${p.id}/evaluations`);
+  assert.equal(history[0].policy_hash,original.policy_hash);assert.equal(history[0].current,false);
+  assert.equal(history[0].result.proposal.snapshot_hash,p.snapshot_hash);
+  const blocked=await call('demo-buyer',`/requests/${p.id}/analyze`,'POST',{});
+  assert.equal(blocked.proposal,null);assert.ok(blocked.violations.includes('INSUFFICIENT_VALID_QUOTES'));
+  assert.equal(blocked.policy.policy_hash,created.policy_hash);
+  assert.ok(blocked.quotes.some(q=>q.calculation.violations.includes('BUDGET_EXCEEDED')));
+  const versions=await call('demo-auditor','/policy/versions');
+  assert.equal(versions[0].id,created.id);assert.equal(versions[1].policy_hash,original.policy_hash);
+  await assert.rejects(()=>call('demo-other-tenant',`/requests/${p.id}/evaluations`),e=>e.status===404);
+});

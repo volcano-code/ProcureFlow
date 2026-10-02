@@ -3,6 +3,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
+from pathlib import Path
+from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
+from .database_config import normalize_database_url
 from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -73,6 +77,7 @@ class ApprovalRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     approver_id: Mapped[str] = mapped_column(String(80))
     snapshot_hash: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(24))
     note: Mapped[str] = mapped_column(Text, default="")
     expires_at: Mapped[str] = mapped_column(String(40))
@@ -115,10 +120,80 @@ class EventRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+class AdviceRunRow(Base):
+    """A durable advisory receipt, never an approval or an execution command."""
+    __tablename__ = "advice_runs"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key",
+                                      name="uq_advice_request_key"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    idempotency_key: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_until: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class TenantPolicyRow(Base):
+    """Tenant serialization anchor. Lock before any request aggregate lock."""
+    __tablename__ = "tenant_policies"
+    tenant_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PolicyVersionRow(Base):
+    __tablename__ = "policy_versions"
+    __table_args__ = (UniqueConstraint("tenant_id", "version", name="uq_tenant_policy_version"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenant_policies.tenant_id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    policy_hash: Mapped[str] = mapped_column(String(64))
+    effective_at: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    created_by: Mapped[str] = mapped_column(String(80))
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class EvaluationRow(Base):
+    """Append-only comparison receipt including inputs and the prepared proposal."""
+    __tablename__ = "evaluations"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+def _immutable_receipt(*_):
+    raise ValueError("IMMUTABLE_HISTORY")
+
+
+for _model in (PolicyVersionRow, EvaluationRow):
+    event.listen(_model, "before_update", _immutable_receipt)
+    event.listen(_model, "before_delete", _immutable_receipt)
+
+
 class Database:
     def __init__(self, url: str, create_schema: bool = False):
-        self.sqlite = url.startswith("sqlite")
-        self.engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 20} if self.sqlite else {}, pool_pre_ping=True)
+        url = normalize_database_url(url)
+        self.sqlite = make_url(url).get_backend_name() == "sqlite"
+        options = {"check_same_thread": False, "timeout": 20} if self.sqlite else {"connect_timeout": 10}
+        engine_options = {} if self.sqlite else {"isolation_level": "READ COMMITTED"}
+        self.engine = create_engine(url, connect_args=options, pool_pre_ping=True,
+                                    hide_parameters=True, **engine_options)
         if self.sqlite:
             @event.listens_for(self.engine, "connect")
             def sqlite_settings(connection, _):
@@ -127,7 +202,25 @@ class Database:
                 connection.execute("PRAGMA busy_timeout=20000")
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
         if create_schema:
+            if not self.sqlite:
+                raise ValueError("POSTGRES_REQUIRES_ALEMBIC_MIGRATIONS")
             Base.metadata.create_all(self.engine)
+
+    def check_ready(self, require_migrations: bool = True) -> dict:
+        """Read-only connection + table + migration check; never performs DDL."""
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        with self.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            if not set(Base.metadata.tables) <= set(inspect(connection).get_table_names()):
+                raise RuntimeError("DATABASE_SCHEMA_MISSING")
+            if require_migrations:
+                current = set(MigrationContext.configure(connection).get_current_heads())
+                scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                if current != set(scripts.get_heads()):
+                    raise RuntimeError("DATABASE_MIGRATION_REQUIRED")
+        return {"status": "ok", "database": "sqlite" if self.sqlite else "postgresql",
+                "schema": "current" if require_migrations else "local-demo"}
 
     @contextmanager
     def transaction(self, write=False):
@@ -136,6 +229,10 @@ class Database:
                 if write and self.sqlite:
                     # Serializes local demo writes, including concurrent approvals/dispatch.
                     session.execute(text("BEGIN IMMEDIATE"))
+                if not self.sqlite:
+                    # Bound SQL waiting; do not retry business writes automatically.
+                    session.execute(text("SELECT set_config('lock_timeout', '10s', true)"))
+                    session.execute(text("SELECT set_config('statement_timeout', '30s', true)"))
                 yield session
                 session.commit()
             except Exception:

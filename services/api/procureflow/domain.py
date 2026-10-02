@@ -5,7 +5,7 @@ import json
 from decimal import Decimal, ROUND_HALF_UP
 from .contracts import QuoteValues
 
-POLICY = {
+DEMO_POLICY = {
     "id": "demo-procurement-policy",
     "version": "1",
     "published": True,
@@ -18,6 +18,9 @@ POLICY = {
     ],
 }
 
+
+# Legacy fixture export only; runtime policy is persisted per tenant.
+POLICY = DEMO_POLICY
 
 def canonical(value) -> str:
     """Domain-normalized decimal strings; no float serialization in monetary calculations."""
@@ -70,7 +73,10 @@ def calculate(values: QuoteValues) -> dict:
     }
 
 
-def offer_check(request: dict, quote: dict, confirmed: bool) -> dict:
+def offer_check(request: dict, quote: dict, confirmed: bool, policy: dict | None = None) -> dict:
+    policy = policy or {}
+    budget_limit = min(Decimal(request["budget"]), Decimal(policy["budget_cap"])) if policy.get("budget_cap") is not None else Decimal(request["budget"])
+    delivery_limit = min(request["max_delivery_days"], policy["max_delivery_days"]) if policy.get("max_delivery_days") is not None else request["max_delivery_days"]
     values = QuoteValues.model_validate(quote)
     result = calculate(values)
     violations = list(result["errors"])
@@ -85,10 +91,11 @@ def offer_check(request: dict, quote: dict, confirmed: bool) -> dict:
         violations.append("UOM_MISMATCH")
     if values.quantity != Decimal(request["quantity"]):
         violations.append("QUANTITY_MISMATCH")
-    if values.delivery_days is not None and values.delivery_days > request["max_delivery_days"]:
+    if values.delivery_days is not None and values.delivery_days > delivery_limit:
         violations.append("DELIVERY_EXCEEDS_LIMIT")
-    if result["total"] is not None and Decimal(result["total"]) > Decimal(request["budget"]):
+    if result["total"] is not None and Decimal(result["total"]) > budget_limit:
         violations.append("BUDGET_EXCEEDED")
     if result["missing"]:
         violations.extend("UNKNOWN_" + key.upper() for key in result["missing"])
-    return {**result, "violations": sorted(set(violations)), "eligible": result["comparable"] and not violations}
+    return {**result, "violations": sorted(set(violations)), "eligible": result["comparable"] and not violations,
+            "effective_limits": {"budget": money(budget_limit), "max_delivery_days": delivery_limit}}

@@ -5,9 +5,11 @@ import sqlite3
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 import httpx
-from .domain import canonical, digest
+from .domain import canonical, digest, calculate
+from .contracts import QuoteValues
+from .outbound import validate_endpoint, request_json, ResponseLimitError, ResponseDeadlineError
 
 
 class ERPUnknown(Exception):
@@ -22,7 +24,7 @@ class ERPPort(Protocol):
     mode: str
     def suppliers(self) -> list[dict]: ...
     def find(self, operation_key: str) -> dict | None: ...
-    def create_draft(self, operation_key: str, payload: dict) -> dict: ...
+    def create_draft(self, operation_key, payload: dict) -> dict: ...
 
 
 class MockERP:
@@ -61,8 +63,10 @@ class MockERP:
             raise ERPRejected("UNKNOWN_SUPPLIER")
         record = {"name": "MOCK-SQ-" + operation_key[:12].upper(), "docstatus": 0,
                   "snapshot_hash": payload["snapshot_hash"], "operation_key": operation_key, "supplier_id": v["supplier_id"],
-                  "sku": v["sku"], "quantity": v["quantity"], "total": payload["total"],
-                  "currency": v["currency"], "uom": v["uom"], "company": payload["erp_company"], "simulated": True}
+                  "sku": v["sku"], "quantity": v["quantity"], "unit_price": v["unit_price"],
+                  "transaction_date": payload["transaction_date"], "total": payload["total"],
+                  "currency": v["currency"], "uom": v["uom"], "company": payload["erp_company"], "simulated": True,
+                  "cost_values": {key: v.get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}}
         payload_hash = digest(payload)
         with self._connect() as connection:
             connection.execute("INSERT OR IGNORE INTO drafts(operation_key,payload_hash,data) VALUES (?,?,?)",
@@ -76,47 +80,200 @@ class MockERP:
         return json.loads(row[1])
 
 
+COST_MAPPING_VERSION = "single-line-costs-v1"
+MAX_ERP_AMOUNT = Decimal("1000000.00")
+TAX_DESCRIPTION = "ProcureFlow goods tax"
+FREIGHT_DESCRIPTION = "ProcureFlow gross freight"
+
+
+def optional_text(value):
+    """ERP nullable text is blank; other falsy JSON types are malformed."""
+    return "" if value is None or value == "" else value
+
+
+def cost_mapping(payload: dict) -> tuple[dict, dict]:
+    """Explicit CNY/EA commercial totals, not a statutory/accounting tax engine.
+
+    ERPNext v16.36.0: inclusive goods tax is On Net Total/included_in_print_rate;
+    Actual freight is excluded from Grand Total discount distribution. Reject
+    inclusive-discount penny redistribution we cannot represent exactly.
+    """
+    try:
+        v = QuoteValues.model_validate(payload["quote_values"])
+        calculated = calculate(v)
+        if (not calculated["comparable"] or v.tax_rate is None or v.uom != "EA"
+                or not v.supplier_id or not v.sku):
+            raise ERPRejected("ERP_COST_MAPPING_UNSUPPORTED")
+        if (v.quantity != v.quantity.to_integral_value()
+                or any(Decimal(calculated[key]) > MAX_ERP_AMOUNT for key in ('goods', 'total'))
+                or any(amount > MAX_ERP_AMOUNT for amount in (v.unit_price, v.shipping_cost, v.discount))):
+            raise ERPRejected("ERP_COST_MAPPING_BOUNDS_EXCEEDED")
+        if Decimal(str(payload["total"])) != Decimal(calculated["total"]):
+            raise ERPRejected("ERP_PAYLOAD_TOTAL_MISMATCH")
+        accounts = payload.get("erp_cost_accounts", {})
+        tax_account, freight_account = accounts.get("tax", ""), accounts.get("freight", "")
+        for needed, account in ((v.tax_rate > 0, tax_account), (v.shipping_cost > 0, freight_account)):
+            if needed and (not isinstance(account, str) or not account.strip() or len(account) > 140):
+                raise ERPRejected("ERP_COST_ACCOUNT_REQUIRED")
+        if v.tax_rate > 0 and v.shipping_cost > 0 and tax_account == freight_account:
+            raise ERPRejected("ERP_COST_ACCOUNTS_MUST_DIFFER")
+        cents = lambda n: n.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        goods = Decimal(calculated["goods"])
+        discounted = goods - v.discount
+        inclusive = v.tax_mode == "included"
+        net = goods
+        if inclusive and v.tax_rate:
+            net = cents(goods / (1 + v.tax_rate))
+            before_tax = cents(goods / (1 + v.tax_rate) * v.tax_rate)
+            if net + before_tax != goods:
+                raise ERPRejected("ERP_INCLUSIVE_ROUNDING_UNSUPPORTED")
+            if v.discount:
+                net = cents(net * discounted / goods)
+                after_tax = cents(net * v.tax_rate)
+            else:
+                after_tax = before_tax
+            # Do not silently use ERP's inclusive rounding adjustment as proof.
+            if net + after_tax != discounted:
+                raise ERPRejected("ERP_INCLUSIVE_ROUNDING_UNSUPPORTED")
+        else:
+            net = discounted
+            before_tax = after_tax = cents(net * v.tax_rate)
+        rows = []
+        def row(account, description, charge_type, rate, amount, included):
+            return {"category": "Total", "add_deduct_tax": "Add", "charge_type": charge_type,
+                    "account_head": account, "description": description, "rate": str(rate),
+                    "tax_amount": str(amount), "included_in_print_rate": included,
+                    "row_id": "", "dont_recompute_tax": 0}
+        if v.tax_rate:
+            rows.append(row(tax_account, TAX_DESCRIPTION, "On Net Total", v.tax_rate * 100, 0, int(inclusive)))
+        if v.shipping_cost:
+            rows.append(row(freight_account, FREIGHT_DESCRIPTION, "Actual", 0, v.shipping_cost, 0))
+        body = {"taxes": rows, "apply_discount_on": "Grand Total" if inclusive else "Net Total",
+                "discount_amount": str(v.discount), "additional_discount_percentage": "0",
+                "disable_rounded_total": 1, "conversion_rate": "1",
+                "taxes_and_charges": "", "shipping_rule": "", "tax_category": ""}
+        expected_rows = []
+        for entry in rows:
+            tax = entry["description"] == TAX_DESCRIPTION
+            expected_rows.append({**entry, "tax_amount": str(before_tax if tax else v.shipping_cost),
+                "tax_amount_after_discount_amount": str(after_tax if tax else v.shipping_cost),
+                "total": str(net + after_tax + (0 if tax else v.shipping_cost))})
+        proof = {"mapping_version": COST_MAPPING_VERSION, "taxes": expected_rows,
+            "apply_discount_on": body["apply_discount_on"], "discount_amount": str(v.discount),
+            "additional_discount_percentage": "0", "net_total": str(net),
+            "total_taxes_and_charges": str(after_tax + v.shipping_cost),
+            "taxes_and_charges": "", "shipping_rule": "", "tax_category": "", "item_tax_template": "",
+            "pricing_rules": "", "item_pricing_rules": "",
+            "item_discount_amount": "0", "item_discount_percentage": "0", "price_list_rate": str(v.unit_price),
+            "item_net_rate": str(cents(net / v.quantity)),
+            "goods_total": str(goods), "item_goods_total": str(goods), "item_net_total": str(net), "conversion_rate": "1", "disable_rounded_total": 1}
+        return body, proof
+    except ERPRejected:
+        raise
+    except (ValueError, TypeError, ArithmeticError, KeyError, AttributeError) as error:
+        raise ERPRejected("ERP_PAYLOAD_INVALID") from error
+
+
+def cost_proof_matches(observed, expected):
+    """Compare every persisted component, not merely a compensating grand total."""
+    if not isinstance(observed, dict) or set(observed) != set(expected):
+        return False
+    try:
+        for key, wanted in expected.items():
+            actual = observed[key]
+            if key == "taxes":
+                if not isinstance(actual, list) or len(actual) != len(wanted):
+                    return False
+                for a, w in zip(actual, wanted, strict=True):
+                    if not cost_proof_matches(a, w):
+                        return False
+            elif key in {"rate", "tax_amount", "tax_amount_after_discount_amount", "discount_amount",
+                         "additional_discount_percentage", "net_total", "total_taxes_and_charges",
+                         "goods_total", "item_goods_total", "item_net_total", "total", "conversion_rate",
+                         "item_discount_amount", "item_discount_percentage", "price_list_rate", "item_net_rate"}:
+                if isinstance(actual, bool) or Decimal(str(actual)) != Decimal(str(wanted)):
+                    return False
+            elif type(actual) is not type(wanted) or actual != wanted:
+                return False
+        return True
+    except (ValueError, TypeError, ArithmeticError):
+        return False
+
+
+def erp_numeric_json(body: dict) -> bytes:
+    """Encode only the adapter's explicit ERP numeric fields as JSON numbers.
+
+    Our API/snapshot decimal strings stay unchanged. Frappe validates header
+    arithmetic before universal coercion; a string "0" is truthy there. Format
+    Decimal tokens directly instead of converting money through binary floats.
+    """
+    numeric = {"qty", "rate", "price_list_rate", "discount_amount",
+               "discount_percentage", "additional_discount_percentage", "conversion_rate", "tax_amount"}
+
+    def encode(value, key=None):
+        if key in numeric:
+            if isinstance(value, bool) or not isinstance(value, (str, Decimal, int)):
+                raise ERPRejected("ERP_NUMERIC_WIRE_INVALID")
+            try:
+                number = Decimal(value)
+                if not number.is_finite():
+                    raise ValueError("nonfinite numeric field")
+                return format(number, "f")
+            except (ValueError, ArithmeticError) as error:
+                raise ERPRejected("ERP_NUMERIC_WIRE_INVALID") from error
+        if isinstance(value, dict):
+            return "{" + ",".join(json.dumps(k) + ":" + encode(v, k) for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(encode(v) for v in value) + "]"
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+
+    return encode(body).encode("utf-8")
+
+
 class ERPNextClient:
     """REST adapter; live deployment must be separately tested.
 
-    No submit/delete/payment tool exists. Alpha mapping accepts only explicit
-    zero-tax, zero-freight, zero-discount single-line Supplier Quotations.
-    Every other mapping fails closed rather than silently altering totals.
+    No submit/delete/payment tool exists. Bounded single-line CNY/EA cost mapping
+    requires explicit rates and accounts, checked against independent readback.
     """
     mode = "erpnext"
     key_field = "custom_procureflow_operation_key"
     hash_field = "custom_procureflow_snapshot_hash"
 
     def __init__(self, base_url: str, api_key: str, api_secret: str, company: str,
-                 allow_writes=False, transport: httpx.BaseTransport | None = None):
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
-            raise ValueError("ERP_BASE_URL must be a trusted http(s) endpoint without credentials/query")
+                 allow_writes=False, transport: httpx.BaseTransport | None = None, *,
+                 tax_account="", freight_account=""):
+        endpoint = validate_endpoint(base_url)
         if not api_key or not api_secret or not company:
             raise ValueError("ERP API credentials and company are required")
         self.company, self.allow_writes = company, allow_writes
-        self.client = httpx.Client(base_url=base_url.rstrip("/") + "/", timeout=10,
+        self.cost_accounts = {"tax": tax_account, "freight": freight_account}
+        self.client = httpx.Client(base_url=endpoint, timeout=10, trust_env=False,
             follow_redirects=False, transport=transport,
             headers={"Authorization": f"token {api_key}:{api_secret}", "Accept": "application/json"})
 
-    def _call(self, method, path, **kwargs):
+    def _call(self, method, path, *, envelope="data", **kwargs):
+        # The read-only preflight cannot be converted to a write via another method.
+        if method != "GET" and not self.allow_writes:
+            raise ERPRejected("ERP_DRAFT_WRITES_DISABLED")
+        if method not in {"GET", "POST"} or (method == "POST" and path != "api/resource/Supplier Quotation"):
+            raise ERPRejected("ERP_METHOD_NOT_ALLOWED")
         try:
-            response = self.client.request(method, path, **kwargs)
-        except httpx.TransportError as error:
-            raise ERPUnknown("ERP_TRANSPORT_UNCERTAIN") from error
-        if response.status_code >= 500 or response.status_code in {408, 429}:
-            raise ERPUnknown("ERP_RESPONSE_UNCERTAIN")
-        if response.status_code >= 300:
-            raise ERPRejected(f"ERP_HTTP_{response.status_code}")
-        try:
-            if len(response.content) > 2 * 1024 * 1024:
-                raise ERPUnknown("ERP_RESPONSE_LIMIT")
-            # Preserve decimal JSON numbers before binary-float conversion.
-            decoded = json.loads(response.content, parse_float=Decimal)
-            if not isinstance(decoded, dict) or "data" not in decoded:
+            import time
+            status, decoded = request_json(self.client, method, path, limit=2 * 1024 * 1024,
+                deadline=time.monotonic() + 20, parse_float=Decimal, **kwargs)
+            if status >= 500 or status in {408, 429}:
+                raise ERPUnknown("ERP_RESPONSE_UNCERTAIN")
+            if status >= 300:
+                raise ERPRejected(f"ERP_HTTP_{status}")
+            if not isinstance(decoded, dict) or envelope not in decoded:
                 raise ERPUnknown("ERP_MALFORMED_RESPONSE")
-            return decoded["data"]
-        except (ValueError, KeyError, TypeError) as error:
+            return decoded[envelope]
+        except ResponseLimitError as error:
+            raise ERPUnknown("ERP_RESPONSE_LIMIT") from error
+        except (httpx.HTTPError, ResponseDeadlineError) as error:
+            raise ERPUnknown("ERP_TRANSPORT_UNCERTAIN") from error
+        except (ValueError, KeyError, TypeError, RecursionError) as error:
             raise ERPUnknown("ERP_MALFORMED_RESPONSE") from error
 
     def suppliers(self):
@@ -148,9 +305,35 @@ class ERPNextClient:
                 "supplier_id": record.get("supplier"),
                 "sku": items[0].get("item_code"), "quantity": str(items[0].get("qty")),
                 "total": str(record.get("grand_total")), "currency": record.get("currency"),
-                "company": record.get("company"), "uom": items[0].get("uom"), "simulated": False}
+                "company": record.get("company"), "uom": items[0].get("uom"), "simulated": False,
+                "cost_proof": self._cost_proof(record)}
+
+    @staticmethod
+    def _cost_proof(record):
+        rows = record.get("taxes")
+        if not isinstance(rows, list) or len(rows) > 2 or any(not isinstance(r, dict) for r in rows):
+            raise ERPRejected("ERP_COST_ROWS_MISMATCH")
+        return {"mapping_version": COST_MAPPING_VERSION,
+            "taxes": [{key: ("0" if key == "rate" and row.get("charge_type") == "Actual" and row.get(key) is None
+                else optional_text(row.get(key)) if key == "row_id" else row.get(key)) for key in ("category", "add_deduct_tax", "charge_type",
+                "account_head", "description", "rate", "tax_amount", "included_in_print_rate",
+                "tax_amount_after_discount_amount", "total", "row_id", "dont_recompute_tax")} for row in rows],
+            **{key: optional_text(record.get(key)) for key in ("taxes_and_charges", "shipping_rule", "tax_category")},
+            "pricing_rules": "" if record.get("pricing_rules") in (None, [], "") else record.get("pricing_rules"),
+            "item_pricing_rules": optional_text(record["items"][0].get("pricing_rules")),
+            "item_tax_template": optional_text(record["items"][0].get("item_tax_template")),
+            "item_discount_amount": record["items"][0].get("discount_amount"),
+            "item_discount_percentage": record["items"][0].get("discount_percentage"),
+            "price_list_rate": record["items"][0].get("price_list_rate"),
+            "item_net_rate": record["items"][0].get("net_rate"),
+            "goods_total": record.get("total"), "item_goods_total": record["items"][0].get("amount"),
+            "item_net_total": record["items"][0].get("net_amount"),
+            **{key: record.get(key) for key in ("apply_discount_on", "discount_amount",
+                "additional_discount_percentage", "net_total", "total_taxes_and_charges", "conversion_rate",
+                "disable_rounded_total")}}
 
     def find(self, operation_key):
+        self._check_company_currency()
         rows = self._call("GET", "api/resource/Supplier Quotation", params={
             "filters": json.dumps([[self.key_field, "=", operation_key]]),
             "fields": json.dumps(["name"]), "limit_page_length": 2})
@@ -178,24 +361,37 @@ class ERPNextClient:
                 or fields[0].get("fieldname") != self.hash_field or fields[0].get("fieldtype") != "Data"):
             raise ERPRejected("ERP_SNAPSHOT_FIELD_NOT_VERIFIED")
 
-    def preflight(self):
-        """Read-only capability probe; metadata is NOT proof of a working remote DB unique index."""
-        self._check_unique_field()
-        self._check_snapshot_field()
+    def _check_company_currency(self):
         company = self._call("GET", "api/resource/Company/" + quote(self.company, safe=""))
         if not isinstance(company, dict) or company.get("name") != self.company:
             raise ERPRejected("ERP_COMPANY_NOT_VERIFIED")
+        if company.get("default_currency") != "CNY":
+            raise ERPRejected("ERP_COMPANY_CURRENCY_NOT_SUPPORTED")
+
+    def preflight(self, expected_user: str | None = None):
+        """Read-only capability probe; metadata is NOT proof of a working remote DB unique index."""
+        if expected_user is not None:
+            if not expected_user.strip() or expected_user.casefold() in {"administrator", "guest"}:
+                raise ERPRejected("ERP_DEDICATED_IDENTITY_REQUIRED")
+            logged_user = self._call("GET", "api/method/frappe.auth.get_logged_user", envelope="message")
+            if logged_user != expected_user:
+                raise ERPRejected("ERP_INTEGRATION_IDENTITY_MISMATCH")
+        self._check_unique_field()
+        self._check_snapshot_field()
+        self._check_company_currency()
         suppliers = self.suppliers()
         if not isinstance(suppliers, list) or any(not isinstance(s, dict) or not isinstance(s.get("name"), str) for s in suppliers):
             raise ERPUnknown("ERP_MALFORMED_SUPPLIERS")
-        return {"status": "read_only_checks_passed", "company_verified": True,
+        return {"status": "read_only_checks_passed", "company_verified": True, "company_currency_verified": True,
+                "integration_identity_verified": expected_user is not None,
+                "least_privilege_verified": False,
                 "unique_field_metadata_verified": True, "snapshot_field_verified": True,
                 "supplier_count_first_page": len(suppliers), "supplier_directory_complete": False, "returned_page_may_be_truncated": len(suppliers) >= 100,
                 "draft_writes_enabled": self.allow_writes, "write_probe_performed": False,
                 "remote_database_uniqueness_tested": False, "live_draft_roundtrip_verified": False}
 
     def _checked_result(self, remote, operation_key, payload):
-        if (remote.get("operation_key") != operation_key or not remote_matches(remote, payload)
+        if (remote.get("operation_key") != operation_key or not remote_matches(remote, payload, operation_key)
                 or Decimal(remote["unit_price"]) != Decimal(payload["quote_values"]["unit_price"])
                 or remote.get("transaction_date") != payload["transaction_date"]):
             raise ERPRejected("ERP_READBACK_PAYLOAD_MISMATCH")
@@ -207,26 +403,22 @@ class ERPNextClient:
         if payload.get("erp_company") != self.company:
             raise ERPRejected("ERP_COMPANY_SNAPSHOT_MISMATCH")
         values = payload["quote_values"]
-        try:
-            if (values.get("tax_rate") is None or values.get("tax_mode") not in {"included", "excluded"}
-                    or any(Decimal(str(values[key])) != 0 for key in ("tax_rate", "shipping_cost", "discount"))):
-                raise ERPRejected("ERP_COMPLEX_TAX_FREIGHT_MAPPING_NOT_IMPLEMENTED")
-            rate, quantity, total = (Decimal(str(value)) for value in (values["unit_price"], values["quantity"], payload["total"]))
-            if not all(v.is_finite() for v in (rate, quantity, total)) or rate < 0 or quantity <= 0 or total < 0:
-                raise ERPRejected("ERP_PAYLOAD_INVALID")
-            if (rate * quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) != total:
-                raise ERPRejected("ERP_PAYLOAD_TOTAL_MISMATCH")
-        except (ValueError, TypeError, ArithmeticError, KeyError) as error:
-            raise ERPRejected("ERP_PAYLOAD_INVALID") from error
+        accounts = payload.get("erp_cost_accounts", {"tax": "", "freight": ""})
+        if accounts != self.cost_accounts:
+            raise ERPRejected("ERP_COST_ACCOUNT_SNAPSHOT_MISMATCH")
+        costs, _ = cost_mapping(payload)
+        self._check_company_currency()
         self._check_unique_field()
         self._check_snapshot_field()
         body = {"doctype": "Supplier Quotation", "docstatus": 0, "company": self.company,
                 "supplier": values["supplier_id"], "transaction_date": payload["transaction_date"],
                 "currency": values["currency"], self.key_field: operation_key,
                 self.hash_field: payload["snapshot_hash"], "items": [{"item_code": values["sku"],
-                "qty": values["quantity"], "uom": values["uom"], "rate": values["unit_price"]}]}
+                "qty": values["quantity"], "uom": values["uom"], "rate": values["unit_price"], "price_list_rate": values["unit_price"],
+                "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}], **costs}
         try:
-            record = self._call("POST", "api/resource/Supplier Quotation", json=body)
+            record = self._call("POST", "api/resource/Supplier Quotation", content=erp_numeric_json(body),
+                headers={"Content-Type": "application/json"})
         except ERPRejected:
             # A conflicting unique insert can be somebody else's identical delivery.
             found = self.find(operation_key)
@@ -240,16 +432,28 @@ class ERPNextClient:
         return self._checked_result(self._normalize(persisted, expected_key=operation_key), operation_key, payload)
 
 
-def remote_matches(remote: dict, payload: dict) -> bool:
+def remote_matches(remote: dict, payload: dict, operation_key: str | None = None) -> bool:
     """Never treat an arbitrary object returned by a search as successful execution."""
     values = payload["quote_values"]
+    if not isinstance(remote, dict) or type(remote.get("simulated")) is not bool:
+        return False
     try:
-        return (bool(remote.get("name")) and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
+        if remote.get("simulated") is False:
+            _, expected_costs = cost_mapping(payload)
+            if not cost_proof_matches(remote.get("cost_proof"), expected_costs):
+                return False
+        elif remote.get("simulated") is True:
+            if remote.get("cost_values") != {key: values.get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}:
+                return False
+        return ((operation_key is None or remote.get("operation_key") == operation_key)
+                and isinstance(remote.get("name"), str) and bool(remote.get("name")) and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
                 and remote.get("snapshot_hash") == payload["snapshot_hash"]
                 and remote.get("supplier_id") == values["supplier_id"]
                 and remote.get("sku") == values["sku"] and remote.get("currency") == values["currency"]
                 and remote.get("uom") == values["uom"] and remote.get("company") == payload["erp_company"]
                 and Decimal(remote["quantity"]) == Decimal(values["quantity"])
-                and Decimal(remote["total"]) == Decimal(payload["total"]))
-    except (ValueError, TypeError, KeyError, ArithmeticError):
+                and Decimal(remote["total"]) == Decimal(payload["total"])
+                and Decimal(remote["unit_price"]) == Decimal(values["unit_price"])
+                and remote.get("transaction_date") == payload["transaction_date"])
+    except (ValueError, TypeError, KeyError, ArithmeticError, ERPRejected):
         return False

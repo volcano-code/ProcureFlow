@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
@@ -48,6 +49,29 @@ class RequestUpdate(RequestCreate):
     expected_version: int = Field(ge=1, strict=True)
 
 
+class PolicyVersionCreate(Contract):
+    expected_version: int = Field(ge=1, strict=True)
+    budget_cap: Money | None = None
+    max_delivery_days: int | None = Field(default=None, ge=1, le=365, strict=True)
+    minimum_valid_quotes: int = Field(ge=1, le=100, strict=True)
+    effective_at: datetime | None = None
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("effective_at", mode="before")
+    @classmethod
+    def timestamp_string(cls, value):
+        if value is not None and not isinstance(value, (str, datetime)):
+            raise ValueError("Effective time must be an ISO timestamp with a timezone")
+        return value
+
+    @field_validator("effective_at")
+    @classmethod
+    def timezone_required(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Effective time must include a timezone")
+        return value
+
+
 class QuoteValues(Contract):
     supplier_id: str | None = Field(default=None, min_length=1, max_length=80)
     sku: str | None = Field(default=None, min_length=1, max_length=80)
@@ -61,9 +85,11 @@ class QuoteValues(Contract):
     delivery_days: int | None = Field(default=None, ge=1, le=365, strict=True)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
-    @field_validator("supplier_id", "sku", "uom", "currency")
+    # ERP document names are opaque identifiers, not case-insensitive codes.
+    # Preserve supplier_id and sku through extraction, approval and readback.
+    @field_validator("uom", "currency")
     @classmethod
-    def clean_codes(cls, value):
+    def clean_units_and_currency(cls, value):
         return value.upper() if value is not None else value
 
 
@@ -80,6 +106,12 @@ class QuoteConfirm(Contract):
 
 class AnalyzeCommand(Contract):
     preferred_quote_id: str | None = None
+
+
+class AdviceRunCommand(Contract):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    expected_version: int = Field(ge=1, strict=True)
+    idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$", strict=True)
 
 
 class ApprovalCommand(Contract):
