@@ -24,3 +24,17 @@ main, .content, .panel, .lower-grid > *, .request-panel > *, .event > div {
 .binding-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;font-size:11px;line-height:1.7}.binding-grid dt{color:var(--muted)}.binding-grid dd{margin:0;overflow-wrap:anywhere}
 .stale-notice{background:#fff3df;border:1px solid #f0d9b2;border-radius:6px;padding:12px;margin:12px 0;color:#835815}
 @media(max-width:760px){.policy-summary{grid-template-columns:minmax(0,1fr)}.binding-grid{grid-template-columns:minmax(0,1fr)}.policy-panel dialog .heading-actions{flex-wrap:wrap}}
+/* Explicit one-row table import; long source cells remain inside the dialog. */
+.table-import-dialog{width:min(1100px,94vw)}
+.table-import-dialog p{font-size:12px}.table-import-dialog h3{font-size:14px;margin:20px 0 10px}
+.table-import-dialog .modal-head>div{min-width:0}.table-import-dialog .modal-head button{flex-shrink:0}
+.table-import-source{padding:12px;background:var(--soft);border-radius:6px;margin:15px 0}
+.table-import-actions{margin:14px 0}.table-import-selectors{grid-template-columns:repeat(3,minmax(0,1fr))}
+.table-mapping-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px}.table-mapping-grid select{min-width:0}
+.table-import-raw summary{cursor:pointer;color:var(--teal);font-size:12px;margin-bottom:10px}
+.table-import-raw .table-scroll{max-height:290px}.table-import-dialog td{max-width:280px;min-width:100px;white-space:normal;overflow-wrap:anywhere}
+.table-import-dialog td small{max-width:none}.table-import-dialog td .unknown{display:block;margin-top:5px}
+.table-import-dialog .selected-import-row>*{background:#e9f5f3}.table-import-dialog .import-header-row>*{background:#f1f4f7;font-weight:600}
+.table-import-result{border-top:1px solid var(--line);margin-top:18px;padding-top:8px}
+.table-import-result td:nth-child(2){min-width:90px}.table-import-result td:nth-child(3){min-width:180px}
+@media(max-width:760px){.table-import-dialog{padding:18px;max-height:92vh}.table-import-selectors,.table-mapping-grid{grid-template-columns:minmax(0,1fr)}.table-import-dialog .form-actions{flex-wrap:wrap}}

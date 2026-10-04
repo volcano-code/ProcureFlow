@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {requestJSON,loadDemo,watchAudit} from '../lib/transport.mjs';
+import {previewBody,selectionForSheet} from '../lib/table-import.mjs';
 const base=process.env.PF_TEST_API_URL;
 if(!base || !['127.0.0.1','localhost'].includes(new URL(base).hostname) || process.env.PF_ALLOW_TEST_MUTATIONS!=='1')
   throw new Error('Use scripts/web_http_smoke.py; requires an explicitly disposable local mock API');
@@ -49,6 +50,31 @@ test('native frontend transport: authenticated real SSE can be read and cancelle
   try{await watchAudit(base,'demo-buyer',p.id,{signal:abort.signal,onEvent:e=>{received.push(e);abort.abort();}});}
   finally{clearTimeout(timer);}
   assert.ok(received.length>0);assert.equal(received[0].type,'REQUEST_CREATED');
+});
+
+test('native frontend transport: ordinary CSV preview -> explicit map -> unconfirmed quote -> approved draft',async()=>{
+  const r=await call('demo-buyer','/requests','POST',{title:'Synthetic table HTTP flow',sku:'STAND-01',quantity:'20',budget:'30000.00',max_delivery_days:14});
+  const form=new FormData();form.append('file',new Blob(['supplier_id,sku,quantity,uom,unit_price,tax_mode,tax_rate,shipping_cost,discount,delivery_days,currency\nSUP-A,STAND-01,20,EA,1200.00,included,0.13,800.00,0.00,7,CNY\n'],{type:'text/csv'}),'synthetic-table.csv');
+  const draft=await call('demo-buyer',`/requests/${r.id}/table-imports`,'POST',form);
+  assert.equal(draft.status,'OPEN');assert.equal(draft.values,null);
+  assert.deepEqual(await call('demo-buyer',`/requests/${r.id}/quotes`),[]);
+  const selection=selectionForSheet(draft.sheets[0]);
+  const mapped=await call('demo-buyer',`/table-imports/${draft.id}/preview`,'POST',previewBody(draft.revision,selection));
+  assert.equal(mapped.evidence.unit_price.cell_range,'E2');assert.equal(mapped.evidence.unit_price.document_sha256,draft.document_sha256);
+  const command={expected_revision:mapped.revision,acknowledge:true};
+  const q=await call('demo-buyer',`/table-imports/${draft.id}/confirm`,'POST',command);
+  assert.equal(q.confirmed_by,null);assert.equal(q.calculation.eligible,false);
+  const replay=await call('demo-buyer',`/table-imports/${draft.id}/confirm`,'POST',command);
+  assert.equal(replay.id,q.id);assert.equal((await call('demo-buyer',`/requests/${r.id}/quotes`)).length,1);
+  await call('demo-buyer',`/quotes/${q.id}/confirm`,'POST',{expected_version:q.version,acknowledge:true});
+  const analysis=await call('demo-buyer',`/requests/${r.id}/analyze`,'POST',{});
+  assert.equal(analysis.proposal.total,'24800.00');
+  const body={snapshot_hash:analysis.proposal.snapshot_hash};
+  await call('demo-approver',`/requests/${r.id}/approval`,'POST',body);
+  const op=await call('demo-buyer',`/requests/${r.id}/execute`,'POST',body);
+  const done=await call('demo-buyer',`/operations/${op.id}/process`,'POST');
+  assert.equal(done.status,'COMPLETED');assert.ok(done.remote_id.startsWith('MOCK-SQ-'));
+  const receipt=await call('demo-buyer',`/table-imports/${draft.id}`);assert.equal(receipt.status,'IMPORTED');assert.equal(receipt.quote_id,q.id);
 });
 
 test('native frontend transport: tenant policy publication invalidates bound approval and preserves history',async()=>{

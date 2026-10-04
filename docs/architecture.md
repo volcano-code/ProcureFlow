@@ -99,3 +99,16 @@ PostgreSQL 使用 aggregate row locking，并有真实 PostgreSQL 并发/迁移/
 业务表与审批/Outbox 授权源不变。新增 capabilities、合成样例 API、严格模型消息 Schema、要求读取比较工具后才允许解释、逐工具审计事件、ERPNext Custom Field/持久化回读核对。真实 ERP 目标仅 private 模式可用；CORS origin 由显式配置限定。
 
 原生 Next 共用 `transport.mjs` 可由 Node 对真实 HTTP 检验，但这不替代 React/Next 浏览器验收。严格 native UI gate 当前因依赖缺失阻断。真实 SIGKILL 两例仍只针对模拟 ERP；详细边界与结果见 `stage2-review.md`。
+
+
+## 普通表格导入（阶段十二）
+
+新的 `table_imports` 是租户/需求/源文件哈希唯一的持久预览，不是报价，更不是审批。
+普通 CSV/XLSX 先上传，返回真实工作表/单元格和保守的表头建议；用户明确选择工作表、表头行、报价行及列映射。
+`POST /table-imports/{id}/preview` 使用 revision CAS，并将映射结果绑定当前 request version。
+`POST /table-imports/{id}/confirm` 只在该映射仍有效、源文件哈希未变且需求可编辑时创建一份未确认报价。
+同一 revision 的重复确认只读回已有报价；不会重新创建或使过期审批重新有效。
+后续人工纠错仍走带 reason 的不可变报价版本，明确核对后再确认；原有政策、建议、评估、审批和 ERP 快照门禁完全复用。
+原文每个值包含文件 SHA-256、sheet、row、column/cell；未映射、公式、歧义值保持未知，禁止多商品或混币种合并。
+30 分钟预览到期后需重新上传/映射；进程重启不丢预览。同租户最多保留 100 份尚未导入的预览，包括已过期预览；需要运维清理策略，不伪称自动保留管理。
+详见 [导入协议与安全边界](stage12-tabular-import.md)。

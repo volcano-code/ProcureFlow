@@ -48,6 +48,27 @@ class DocumentRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+class TableImportRow(Base):
+    """Durable bounded upload preview. It is not a quote or confirmation."""
+    __tablename__ = "table_imports"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "sha256", name="uq_table_import_request_hash"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(160))
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_key: Mapped[str] = mapped_column(String(100))
+    table: Mapped[dict] = mapped_column(JSON)
+    selection: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    parsed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    request_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="OPEN")
+    quote_id: Mapped[str | None] = mapped_column(ForeignKey("quotes.id"), nullable=True)
+    expires_at: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
 class QuoteRow(Base):
     __tablename__ = "quotes"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)

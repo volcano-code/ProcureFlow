@@ -14,7 +14,8 @@ from .domain import digest, offer_check
 from .policies import bootstrap, effective_policy, lock_tenant, policy_versions, publish
 from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
 from .errors import DomainError
-from .parsers import parse_document
+from .tabular import isolated_parse_document as parse_document
+from .table_imports import TableImportServiceMixin
 
 FROZEN = {"ERP_PENDING", "RECONCILING", "NEEDS_HUMAN", "ERP_CREATED"}
 
@@ -35,7 +36,7 @@ def op_dto(row):
             "created_at": row.created_at}
 
 
-class ProcurementService:
+class ProcurementService(TableImportServiceMixin):
     def __init__(self, db: Database, settings: Settings, erp: ERPPort):
         self.db, self.settings, self.erp = db, settings, erp
         self.document_dir = settings.data_dir / "documents"

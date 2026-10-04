@@ -37,7 +37,7 @@ def run(output: Path|None=None)->dict:
                 if output:
                     output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
                 if result.returncode: raise RuntimeError('Frontend HTTP smoke failed')
-                assert drafts==1
+                assert drafts==2
                 return report
             finally:
                 process.terminate()

@@ -17,6 +17,10 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "test_native_table_csv_maps_source_unknown_freight_and_never_auto_confirms",
+    "test_native_table_xlsx_sheet_header_row_formula_and_cancel_navigation",
+    "test_native_table_cancelled_upload_ignores_late_result",
+    "test_native_table_revision_conflict_and_lost_confirmation_require_readback",
     "test_native_policy_conflict_requires_refresh_and_deliberate_reentry",
     "test_native_policy_future_version_does_not_activate_early",
     "test_native_policy_role_history_stale_evaluation_and_strictest_limits",

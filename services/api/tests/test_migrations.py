@@ -17,7 +17,7 @@ def test_alembic_upgrade_downgrade_upgrade(tmp_path):
     run('upgrade', 'head')
     with sqlite3.connect(path) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {'procurement_requests', 'documents', 'quotes', 'quote_versions', 'approvals', 'external_operations', 'outbox', 'audit_events'} <= tables
+    assert {'procurement_requests', 'documents', 'quotes', 'quote_versions', 'approvals', 'external_operations', 'outbox', 'audit_events', 'table_imports'} <= tables
     run('downgrade', 'base')
     with sqlite3.connect(path) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -41,7 +41,7 @@ def test_advice_migration_preserves_existing_procurement_data(tmp_path):
         assert db.execute("SELECT version, status, data FROM procurement_requests").fetchone() == (
             7, 'APPROVED', '{"title":"Preserve"}')
         assert db.execute("SELECT count(*) FROM advice_runs").fetchone() == (0,)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('a82d71f09c36',)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('b9134d27c80f',)
     run('downgrade', '426d852ce82c')
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT id FROM procurement_requests").fetchone() == ('req_existing',)

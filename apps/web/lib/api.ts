@@ -35,3 +35,11 @@ import {requestJSON} from "./transport.mjs";
 export function api<T>(path:string,token:string,method="GET",body?:unknown,signal?:AbortSignal):Promise<T> {
   return requestJSON<T>(API,token,path,{method,body,signal});
 }
+
+export interface TableImportCell {column:string;cell:string;value:string|null;formula?:boolean}
+export interface TableImportSheet {name:string;rows:{row:number;cells:TableImportCell[]}[];suggested_header_row:number|null;suggested_mapping:Partial<Record<keyof QuoteValues,string>>}
+export interface TableImportSelection {sheet:string;header_row:number;row:number;mapping:Partial<Record<keyof QuoteValues,string>>}
+export interface TableImportPreview {id:string;request_id:string;revision:number;status:"OPEN"|"IMPORTED";expires_at:string;
+  filename:string;document_sha256:string;sheets:TableImportSheet[];selection:TableImportSelection|null;
+  suggested_mapping:Partial<Record<keyof QuoteValues,string>>;values:QuoteValues|null;evidence:Record<string,EvidenceRef>|null;
+  issues:string[];can_confirm:boolean;quote_id:string|null}

@@ -12,18 +12,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from starlette.formparsers import MultiPartException
 from . import __version__
 from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
 from .config import Settings
 from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
-    PolicyVersionCreate, QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate)
+    PolicyVersionCreate, QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate, TableImportPreview, TableImportConfirm)
 from .db import Database, uid
 from .erp import ERPNextClient, ERPRejected, ERPUnknown, MockERP
 from .errors import DomainError
 from .service import ProcurementService, require
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+class BoundedRequestBody:
+    """Enforce a streaming byte budget before multipart parsing/spooling.
+
+    This bounds bytes delivered to the application; upstream server/proxy buffering,
+    connection counts and slow uploads still require deployment-level controls.
+    """
+    def __init__(self, app, limit):
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        received, exceeded = 0, False
+
+        async def bounded_receive():
+            nonlocal received, exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.limit:
+                    exceeded = True
+                    # Starlette closes partial spooled files on this exception.
+                    raise MultiPartException("Request body too large")
+            return message
+
+        async def bounded_send(message):
+            if exceeded:
+                if message["type"] == "http.response.start":
+                    # Form/JSON decoders translate parse failures to 400; retain a
+                    # stable 413 contract without leaking parser implementation.
+                    await JSONResponse(status_code=413, content={"error": {
+                        "code": "BODY_LIMIT", "message": "Request body too large"}})(scope, receive, send)
+                return
+            await send(message)
+
+        return await self.app(scope, bounded_receive, bounded_send)
 
 
 def create_app(settings: Settings | None = None, database: Database | None = None, erp=None) -> FastAPI:
@@ -47,6 +86,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     app = FastAPI(title="ProcureFlow", version=__version__, lifespan=lifespan,
         description="Evidence-first procurement local alpha. Mock ERP and deterministic baseline by default; no live ordering.")
     app.state.service, app.state.settings = service, settings
+    app.add_middleware(BoundedRequestBody, limit=settings.max_upload_bytes + 65536)
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.web_origins),
                        allow_credentials=False, allow_methods=["GET", "POST", "PUT"],
                        allow_headers=["Authorization", "Content-Type", "Last-Event-ID"])
@@ -154,11 +194,30 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.post("/api/v1/requests/{request_id}/documents", status_code=201)
     async def upload(request_id: str, file: UploadFile = File(...), principal=Depends(identity)):
-        # Upload byte cap also applies without Content-Length. Parser sandboxing is not implemented.
+        # Streaming ingress cap precedes multipart parsing; decoding runs in a bounded subprocess.
         require(principal, "buyer")
         data = await file.read(settings.max_upload_bytes + 1)
         await file.close()
         return await asyncio.to_thread(service.import_quote, principal, request_id, file.filename or "upload.txt", data)
+
+    @app.post("/api/v1/requests/{request_id}/table-imports", status_code=201)
+    async def upload_table(request_id: str, file: UploadFile = File(...), principal=Depends(identity)):
+        require(principal, "buyer")
+        data = await file.read(settings.max_upload_bytes + 1)
+        await file.close()
+        return await asyncio.to_thread(service.upload_table_import, principal, request_id, file.filename or "upload.csv", data)
+
+    @app.get("/api/v1/table-imports/{import_id}")
+    def get_table_import(import_id: str, principal=Depends(identity)):
+        return service.get_table_import(principal, import_id)
+
+    @app.post("/api/v1/table-imports/{import_id}/preview")
+    def preview_table_import(import_id: str, command: TableImportPreview, principal=Depends(identity)):
+        return service.preview_table_import(principal, import_id, command)
+
+    @app.post("/api/v1/table-imports/{import_id}/confirm")
+    def confirm_table_import(import_id: str, command: TableImportConfirm, principal=Depends(identity)):
+        return service.confirm_table_import(principal, import_id, command)
 
     @app.get("/api/v1/requests/{request_id}/quotes")
     def quotes(request_id: str, principal=Depends(identity)):

@@ -2,13 +2,13 @@
 
 **开发 Alpha，FastAPI + 原生 Next.js + 独立 Python Worker。不是生产采购系统。**
 
-从固定布局报价中提取字段和来源证据，用确定性 Decimal 规则比较成本，让独立审批人批准具体快照，再通过持久化操作账本创建并独立核对 ERP 草稿。可选只读 Agent 通过真实 LangGraph 图执行，只能解释与读取证据，不能审批、下单或支付。
+从固定键值报价或显式映射的普通表格中提取字段和来源证据，用确定性 Decimal 规则比较成本，让独立审批人批准具体快照，再通过持久化操作账本创建并独立核对 ERP 草稿。可选只读 Agent 通过真实 LangGraph 图执行，只能解释与读取证据，不能审批、下单或支付。
 
 默认不调用真实模型、不连接真实 ERP。无需密钥即可运行完整 mock 演示。仓库保留早期 a1/a2 报告作为历史快照；其测试数字、环境限制和“未实现”说明不能代表当前代码。
 
 ## 当前能力与边界
 
-- 单 SKU、CNY、EA；TXT/CSV/文本 PDF/XLSX 固定键值布局。没有通用商业文档识别、OCR 或任意单位/币种换算
+- 单 SKU、CNY、EA；保留 TXT/CSV/文本 PDF/XLSX 固定键值布局，并支持普通 CSV/XLSX 的工作表/报价行选择、显式列映射和持久预览（见 [阶段十二](docs/stage12-tabular-import.md)）。没有 OCR、多商品合并或任意单位/币种换算
 - 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
@@ -38,6 +38,8 @@ source .venv/bin/activate
 python -m pip install -r services/api/requirements.txt
 python scripts/start.py
 ```
+
+解析上传需要 POSIX 资源限制支持（例如 Linux）；不支持这些限制的系统会安全拒绝解析，不会回退到无隔离执行。
 
 打开 `http://127.0.0.1:8000`；API 文档为 `/docs`。默认绑定回环地址，数据保存在 `.data/`。可指定 `--port 8010 --data-dir ./my-local-data`。`.env.example` 是配置说明，启动脚本不会自动加载它。
 
@@ -69,7 +71,7 @@ delivery_days: 7
 currency: CNY
 ```
 
-供应商/物料 ID 大小写原样保留；只规范化币种和 UOM。CSV 两列键/值，XLSX A/B 列；不执行公式。字段冲突或非法数值保留未知。上传最多 2 MiB，文本 PDF 最多 10 页；解析器仍不是公开不可信上传的隔离沙箱。
+供应商/物料 ID 大小写原样保留；只规范化币种和 UOM。原“上传报价”入口保留 CSV 两列键/值与 XLSX A/B 列；原生 Next 新增“导入普通表格”，要求明确选择工作表、表头行、报价行与列映射，先预览，再创建未确认报价。字段冲突、公式、缺失运费或不明确税价不会被补成零。上传最多 2 MiB，文本 PDF 最多 10 页；解析进程限制和实际保证见 [安全边界](docs/stage12-tabular-import.md#安全边界)，仍不宣称适合公开不可信上传。
 
 ## 原生 Next.js 工作台
 
@@ -89,7 +91,7 @@ npm run dev
 python -m pip install -r services/api/requirements-dev.txt
 python scripts/test.py -q -m 'not postgres and not browser'
 python scripts/export_contracts.py --check
-node --test apps/web/tests/transport.test.mjs apps/web/tests/policy.test.mjs
+node --test apps/web/tests/transport.test.mjs apps/web/tests/policy.test.mjs apps/web/tests/table-import.test.mjs
 python scripts/smoke.py
 python scripts/web_http_smoke.py
 python scripts/verify_model_acceptance.py --fixture

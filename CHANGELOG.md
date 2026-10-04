@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — ordinary table import
+
+CSV/XLSX worksheet/row selection, bilingual header suggestions, explicit mapping previews, source cell provenance, durable expiring import receipts, tenant-scoped deduplication and revision-bound confirmation. Existing correction reasons, quote confirmation and stale approval/ERP guards retained. Bounded decoder subprocess and streaming ingress byte limits added; not a production sandbox. Verification and limits: `docs/stage12-tabular-import.md`.
+
 ## 0.1.0a2 — 2026-09-22
 
 ### Implemented

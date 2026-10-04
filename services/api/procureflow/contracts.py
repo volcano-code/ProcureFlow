@@ -127,3 +127,26 @@ class ExecuteCommand(Contract):
 class Narrative(Contract):
     summary: str = Field(min_length=1, max_length=3000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=30)
+
+
+class TableImportPreview(Contract):
+    expected_revision: int = Field(ge=1, strict=True)
+    sheet: str = Field(min_length=1, max_length=120)
+    header_row: int = Field(ge=1, le=10000, strict=True)
+    row: int = Field(ge=1, le=10000, strict=True)
+    mapping: dict[str, str] = Field(min_length=1, max_length=12)
+
+    @field_validator("mapping")
+    @classmethod
+    def bounded_mapping(cls, value):
+        import re
+        if any(key not in QuoteValues.model_fields or not re.fullmatch(r"[A-Z]{1,3}", col) for key, col in value.items()):
+            raise ValueError("Only supported quote fields and canonical spreadsheet columns are accepted")
+        if len(set(value.values())) != len(value):
+            raise ValueError("Each source column may map to only one field")
+        return value
+
+
+class TableImportConfirm(Contract):
+    expected_revision: int = Field(ge=1, strict=True)
+    acknowledge: Literal[True]

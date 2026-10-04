@@ -4,6 +4,7 @@ import {API, api, loadDemo, watchAudit, type Identity, type Capabilities, type P
   type Quote, type QuoteValues, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
+import TableImportButton from "@/components/table-import-dialog";
 import {bindingCurrent,staleExplanation,strictestBudget,violationExplanation} from "@/lib/policy.mjs";
 
 const names: Record<string,string> = {DRAFT:"待录入", NEEDS_CONFIRMATION:"待核对", READY_FOR_REVIEW:"待审批",
@@ -378,6 +379,9 @@ export default function Workbench() {
               const file=e.target.files?.[0]; e.target.value="";
               if (file) void act(async()=>{const form=new FormData();form.append("file",file);await api(`/requests/${selected.id}/documents`,token,"POST",form);await refresh(selected.id);});
             }}/><button className="secondary" disabled={!buyer||frozen||busy} onClick={()=>uploadRef.current?.click()}>上传报价</button>
+              <TableImportButton key={token+"\n"+selected.id} token={token} requestId={selected.id} requestVersion={selected.version} disabled={!buyer||frozen} workflowBusy={busy} onImported={()=>{
+                const scope=token+"\n"+selected.id;if(activeScope.current===scope)void act(()=>refresh(selected.id));
+              }}/>
               <button className="primary" data-testid="analyze" disabled={!buyer||frozen||busy||!policy} onClick={()=>void act(async()=>{await api(`/requests/${selected.id}/analyze`,token,"POST",{});await refresh(selected.id);})}>校验并生成方案</button>
             </div></div>
             <div className="table-scroll"><table><thead><tr><th>供应商</th><th>单价</th><th>税价</th><th>运费</th><th>统一总价</th><th>核对状态</th><th>操作</th></tr></thead>

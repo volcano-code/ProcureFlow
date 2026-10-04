@@ -713,3 +713,211 @@ def test_native_policy_future_version_does_not_activate_early(page):
     finally:
         # A later effective revision supersedes the lower scheduled version monotonically.
         publish_policy_api(page,base)
+
+
+# Ordinary table import is a separate, explicit mapping step; never a quote confirmation.
+def prepare_table_import(page):
+    page.goto(URL)
+    page.get_by_test_id('login-demo-buyer').click()
+    expect(page.get_by_test_id('load-demo')).to_be_enabled()
+    page.get_by_role('button', name='＋ 新建采购需求').click()
+    form=page.get_by_test_id('request-form')
+    form.locator('[name="title"]').fill('普通表格浏览器验收')
+    form.get_by_role('button', name='保存需求').click()
+    expect(page.get_by_test_id('request-form')).to_have_count(0)
+    expect(page.get_by_test_id('open-table-import')).to_be_enabled()
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+
+
+def upload_table(page, name, contents):
+    page.get_by_test_id('open-table-import').click()
+    page.get_by_test_id('table-import-file').set_input_files({'name':name,
+        'mimeType':'text/csv' if name.endswith('.csv') else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'buffer':contents})
+    page.get_by_test_id('upload-table-preview').click()
+    expect(page.get_by_test_id('table-sheet')).to_be_visible()
+
+
+def table_csv():
+    return ('Supplier ID,SKU,Quantity,Unit,Unit Price,Tax Mode,Tax Rate,Freight,Discount,Delivery Days,Currency\n'
+            'SUP-TABLE,STAND-01,20,EA,1100.25,included,0.13,,0,7,CNY\n'
+            'SUP-FORMULA,STAND-01,20,EA,=1000+10,,,0,0,9,CNY\n').encode()
+
+
+def test_native_table_csv_maps_source_unknown_freight_and_never_auto_confirms(page):
+    prepare_table_import(page)
+    upload_table(page,'ordinary-supplier.csv',table_csv())
+    expect(page.get_by_test_id('table-map-supplier_id')).to_have_value('A')
+    expect(page.get_by_test_id('table-map-unit_price')).to_have_value('E')
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    expect(page.get_by_test_id('confirm-table-import')).to_have_count(0)
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-result-supplier_id')).to_contain_text('SUP-TABLE')
+    expect(page.get_by_test_id('table-result-unit_price')).to_contain_text('1100.25')
+    expect(page.get_by_test_id('table-result-unit_price')).to_contain_text('E2')
+    expect(page.get_by_test_id('table-result-shipping_cost')).to_contain_text('未知')
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    page.get_by_test_id('table-import-ack').check()
+    page.get_by_test_id('table-map-discount').select_option('')
+    expect(page.get_by_test_id('table-preview-dirty')).to_be_visible()
+    expect(page.get_by_test_id('table-import-ack')).not_to_be_checked()
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    page.get_by_test_id('table-map-discount').select_option('I')
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-preview-dirty')).to_have_count(0)
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    output=os.getenv('PF_SCREENSHOT_DIR')
+    if output:page.screenshot(path=str(Path(output)/'next-table-import-mobile.png'),full_page=True)
+    page.set_viewport_size({'width':1440,'height':1100})
+    page.get_by_test_id('table-import-ack').check()
+    calls=[]
+    page.on('request',lambda request:calls.append(request.url) if request.method=='POST' and '/table-imports/' in request.url and request.url.endswith('/confirm') else None)
+    page.get_by_test_id('confirm-table-import').evaluate('(button)=>{button.click();button.click();}')
+    expect(page.get_by_test_id('table-import-success')).to_contain_text('本次导入操作只创建待核对报价')
+    page.get_by_test_id('finish-table-import').click()
+    expect(page.get_by_test_id('quote-row')).to_have_count(1)
+    expect(page.get_by_test_id('quote-row')).to_contain_text('待核对')
+    expect(page.get_by_test_id('confirm-quote')).to_be_enabled()
+    assert len(calls)==1
+    page.get_by_test_id('field-unit_price').click()
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('E2')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('1100.25')
+    page.get_by_test_id('open-table-import').click()
+    page.get_by_test_id('table-import-file').set_input_files({'name':'ordinary-supplier.csv','mimeType':'text/csv','buffer':table_csv()})
+    page.get_by_test_id('upload-table-preview').click()
+    expect(page.get_by_test_id('table-import-success')).to_be_visible()
+    page.get_by_test_id('finish-table-import').click()
+    expect(page.get_by_test_id('quote-row')).to_have_count(1)
+    assert len(calls)==1
+
+
+def table_xlsx():
+    """Minimal OOXML fixture using only stdlib, matching the server's dependency contract."""
+    from io import BytesIO
+    from zipfile import ZipFile, ZIP_DEFLATED
+    from xml.sax.saxutils import escape
+    ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+    rel='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    sheets=[('说明',[['合成验收，非生产报价']]),('供应商报价',[
+        ['供应商报价单'],
+        ['供应商编码','型号','数量','单位','单价','税价模式','税率','运费','折扣金额','交期天数','币种'],
+        ['SUP-XLSX','STAND-01','20','EA','1080.50','含税','13%','600','0','7','CNY'],
+        ['SUP-XLSX-FORMULA','STAND-01','20','EA','=1080+5','','','','0','7','CNY']])]
+    output=BytesIO()
+    with ZipFile(output,'w',ZIP_DEFLATED) as archive:
+        archive.writestr('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        archive.writestr('xl/workbook.xml',f'<workbook xmlns="{ns}" xmlns:r="{rel}"><sheets>'+''.join(
+            f'<sheet name="{name}" sheetId="{index}" r:id="r{index}"/>' for index,(name,_) in enumerate(sheets,1))+'</sheets></workbook>')
+        archive.writestr('xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+''.join(
+            f'<Relationship Id="r{index}" Target="worksheets/sheet{index}.xml" Type="{rel}/worksheet"/>' for index in (1,2))+'</Relationships>')
+        for index,(_,rows) in enumerate(sheets,1):
+            xml=f'<worksheet xmlns="{ns}"><sheetData>'
+            for number,values in enumerate(rows,1):
+                xml+=f'<row r="{number}">'
+                for column,value in enumerate(values,1):
+                    address=f'{chr(64+column)}{number}'
+                    xml+=(f'<c r="{address}"><f>1080+5</f><v>1085</v></c>' if value.startswith('=') else
+                          f'<c r="{address}" t="inlineStr"><is><t>{escape(value)}</t></is></c>')
+                xml+='</row>'
+            archive.writestr(f'xl/worksheets/sheet{index}.xml',xml+'</sheetData></worksheet>')
+    return output.getvalue()
+
+
+def test_native_table_xlsx_sheet_header_row_formula_and_cancel_navigation(page):
+    prepare_table_import(page)
+    upload_table(page,'ordinary-supplier.xlsx',table_xlsx())
+    page.get_by_test_id('table-sheet').select_option('供应商报价')
+    expect(page.get_by_test_id('table-header-row')).to_have_value('2')
+    expect(page.get_by_test_id('table-map-unit_price')).to_have_value('E')
+    page.get_by_test_id('table-data-row').select_option('4')
+    expect(page.get_by_test_id('table-raw-grid')).to_contain_text('公式，不执行')
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-result-unit_price')).to_contain_text('未知')
+    expect(page.get_by_test_id('table-import-issues')).to_contain_text('FORMULA:unit_price')
+    expect(page.get_by_test_id('table-result-tax_mode')).to_contain_text('未知')
+    expect(page.get_by_test_id('table-result-shipping_cost')).to_contain_text('未知')
+    page.get_by_test_id('table-data-row').select_option('3')
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-result-unit_price')).to_contain_text('1080.50')
+    expect(page.get_by_test_id('table-result-unit_price')).to_contain_text('供应商报价!E3')
+    expect(page.get_by_test_id('table-result-tax_mode')).to_contain_text('included')
+    page.get_by_role('button',name='取消',exact=True).click()
+    expect(page.get_by_test_id('table-import-dialog')).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    page.get_by_test_id('open-table-import').click()
+    expect(page.get_by_test_id('table-import-file')).to_be_visible()
+    page.keyboard.press('Escape')
+    expect(page.get_by_test_id('table-import-dialog')).to_have_count(0)
+    page.evaluate('history.pushState({}, "", "#table-import-navigation")')
+    page.get_by_test_id('open-table-import').click()
+    page.go_back()
+    expect(page.get_by_test_id('table-import-dialog')).to_have_count(0)
+    page.go_forward()
+    expect(page.get_by_test_id('table-import-dialog')).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+
+
+def test_native_table_cancelled_upload_ignores_late_result(page):
+    prepare_table_import(page)
+    pending=[]
+    def delay(route):
+        response=route.fetch()
+        pending.append((route,response))
+    page.route('**/api/v1/requests/*/table-imports',delay)
+    page.get_by_test_id('open-table-import').click()
+    page.get_by_test_id('table-import-file').set_input_files({'name':'cancelled.csv','mimeType':'text/csv','buffer':table_csv()})
+    page.get_by_test_id('upload-table-preview').click()
+    expect(page.get_by_test_id('table-import-working')).to_be_visible()
+    wait_for_mock(page,lambda:len(pending)==1)
+    page.get_by_label('关闭表格导入').click()
+    page.get_by_test_id('open-table-import').click()
+    route,response=pending.pop()
+    try:route.fulfill(response=response)
+    except Exception:pass  # Browser may have already disposed the aborted request.
+    expect(page.get_by_test_id('table-import-file')).to_be_visible()
+    expect(page.get_by_test_id('table-sheet')).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    page.keyboard.press('Escape')
+
+
+def test_native_table_revision_conflict_and_lost_confirmation_require_readback(page):
+    prepare_table_import(page)
+    upload_table(page,'recoverable.csv',table_csv())
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-mapped-preview')).to_be_visible()
+    pending=[]
+    def conflict(route):
+        pending.append(route.request.post_data_json)
+        route.fulfill(status=409,content_type='application/json',body=json.dumps({'error':{
+            'code':'VERSION_CONFLICT','message':'Synthetic stale revision'}}),
+            headers={'Access-Control-Allow-Origin':URL})
+    page.route('**/api/v1/table-imports/*/preview',conflict)
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-import-error')).to_contain_text('VERSION_CONFLICT')
+    expect(page.get_by_test_id('preview-table-mapping')).to_be_disabled()
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    assert len(pending)==1
+    page.unroute('**/api/v1/table-imports/*/preview',conflict)
+    page.get_by_test_id('read-table-import').click()
+    expect(page.get_by_test_id('preview-table-mapping')).to_be_enabled()
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-import-ack')).to_be_enabled()
+    page.get_by_test_id('table-import-ack').check()
+    confirmed=[]
+    def lose_confirm(route):
+        response=route.fetch();assert response.status==200
+        confirmed.append(response.json()['id']);route.abort('failed')
+    page.route('**/api/v1/table-imports/*/confirm',lose_confirm)
+    page.get_by_test_id('confirm-table-import').click()
+    expect(page.get_by_test_id('table-import-error')).to_contain_text('导入结果尚未核验')
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    assert len(confirmed)==1
+    page.get_by_test_id('read-table-import').click()
+    expect(page.get_by_test_id('table-import-success')).to_contain_text(confirmed[0])
+    page.get_by_test_id('finish-table-import').click()
+    expect(page.get_by_test_id('quote-row')).to_have_count(1)
+    expect(page.get_by_test_id('confirm-quote')).to_be_enabled()
+    assert len(confirmed)==1
