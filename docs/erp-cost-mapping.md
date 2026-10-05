@@ -26,18 +26,20 @@ The sandbox seeds two clearly synthetic Asset/Tax leaf accounts solely to exerci
 
 Historical frozen snapshots missing the new mapping-version or account fields are blocked by execution/verification target checks. They are not rewritten or silently certified under the new mapping. A new compatible proposal and approval are required; completed historical operation status remains history.
 
-## Independent checks and four real-CI scenarios
+## Independent checks and eight real-CI scenarios
 
 The adapter always GETs the persisted document after POST, checks operation key, snapshot hash, draft status, identity, item quantity/rate/amount/net amount/net rate, discount fields, account names, tax semantics, original and after-discount tax, cumulative row totals, freight, and exact total. Lost responses reconcile with read-only lookup. A different cost row with the same grand total fails.
 
-The disposable CI gate now requires exactly four unique draft operations and exactly four POST attempts:
+The original four TXT cost scenarios are retained:
 
 1. Normal A: 20 × 1,200.00 inclusive at 13%, freight 800.00, no discount → 24,800.00 (net 21,238.94; tax 2,761.06)
 2. C with lost-receipt recovery: 20 × 1,180.00 inclusive at 13%, freight 600.00, no discount → 24,200.00 (net 20,884.96; tax 2,715.04)
 3. Excluded-tax discount: 20 × 100.00, discount 100.00, 13% goods tax, gross freight 80.00 → 2,227.00 (net 1,900.00; tax 247.00)
 4. Included-tax discount: 20 × 113.00 inclusive at 13%, discount 113.00, gross freight 80.00 → 2,227.00 (net 1,900.00; original tax 260.00; discounted tax 247.00)
 
-Each case runs approval, Worker execution, independent GET verification, and replay. A separate in-container database audit uses fixed expected values without importing the adapter. It checks all item/charge components and totals, zero POs/submissions, unique-key enforcement, and unchanged restricted permissions. Both SQLite and PostgreSQL business-database matrix legs must pass the updated evidence checker; historical two-draft artifacts deliberately fail it.
+Four ordinary table cases now repeat the excluded-discount and included-discount contracts through CSV and XLSX upload, explicit worksheet/row/column preview, import and separate quote confirmation. Each included-discount table case injects lost-receipt recovery with an API restart before a fresh Worker. The complete gate requires exactly eight distinct drafts and eight POST attempts. See [the table-to-ERP acceptance contract](stage13-tabular-erp-acceptance.md) for source provenance and stale quote/policy refusal checks.
+
+Each case runs approval, Worker execution, independent GET verification, and replay. A separate in-container database audit uses fixed expected values without importing the adapter. It checks all item/charge components and totals, zero POs/submissions, unique-key enforcement, and unchanged restricted permissions. Both SQLite and PostgreSQL business-database matrix legs must pass the updated evidence checker; historical two- or four-draft artifacts deliberately fail it.
 
 Local reproduction uses the existing guarded procedure in [stage6](stage6-erp-sandbox.md), followed by the permission-probe and evidence commands in the current workflow. It requires a fresh isolated Docker project. Without Docker, only offline adapter and evidence contracts run; do not label their fixtures as real ERP results.
 

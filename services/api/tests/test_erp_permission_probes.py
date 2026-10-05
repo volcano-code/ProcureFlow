@@ -20,8 +20,8 @@ def inputs():
         'supplier': 'PF Synthetic Supplier', 'nonce': 'a' * 64,
         'api_key': CANARY + '_KEY', 'api_secret': CANARY + '_SECRET'}
     operations = [{'remote_id': f'PUR-SQTN-2026-0000{idx + 1}', 'operation_id': c * 64,
-        'snapshot_hash': d * 64, 'expected_total': probe.COST_CASES[scenario]['total'], 'scenario': scenario}
-        for idx, (scenario, c, d) in enumerate(zip(probe.COST_CASES, 'abcd', 'cdef', strict=True))]
+        'snapshot_hash': d * 64, 'expected_total': probe.ACCEPTANCE_CASES[scenario]['total'], 'scenario': scenario}
+        for idx, (scenario, c, d) in enumerate(zip(probe.ACCEPTANCE_CASES, '01234567', '89abcdef', strict=True))]
     return data, operations
 
 
@@ -41,7 +41,7 @@ def draft(data, operation):
         'custom_procureflow_operation_key': operation['operation_id'],
         'custom_procureflow_snapshot_hash': operation['snapshot_hash'], 'grand_total': operation['expected_total'],
         'transaction_date': '2026-09-30', 'modified': '2026-09-30 00:00:00',
-        'items': [{'item_code': data['sku'], 'uom': 'EA', 'qty': 20, 'rate': probe.COST_CASES[operation['scenario']]['unit_price']}]}
+        'items': [{'item_code': data['sku'], 'uom': 'EA', 'qty': 20, 'rate': probe.ACCEPTANCE_CASES[operation['scenario']]['unit_price']}]}
 
 
 def fake_erp(*, changed=None, identity=None, bad_account_selection=False, failed_probe=None,
@@ -88,7 +88,7 @@ def fake_erp(*, changed=None, identity=None, bad_account_selection=False, failed
 
 def passed_record():
     return {'stage': 'permission-probes', 'status': 'passed', 'real_user_account_used': False,
-        'draft_documents_checked': 4, **dict.fromkeys(probe.REQUIRED_TRUE, True),
+        'draft_documents_checked': 8, **dict.fromkeys(probe.REQUIRED_TRUE, True),
         'probes': [{'name': name, 'method': method, 'endpoint': endpoint, 'status': 403,
             'error_type': 'PermissionError', 'permission_denied': True} for name, method, endpoint in probe.PROBES]}
 
@@ -99,7 +99,7 @@ def test_all_realistic_rest_denials_and_positive_controls_are_required():
     result = probe.exercise(data, operations, transport=transport)
     assert result['status'] == 'passed'
     assert probe.require_probe_evidence(result) is result
-    assert len(negatives) == 7 and len(calls) == 18
+    assert len(negatives) == 7 and len(calls) == 26
     assert json.loads(negatives[3].content) == {'docstatus': 1}
     assert json.loads(negatives[1].content) == {'disabled': 0}
     po = json.loads(negatives[-1].content)
@@ -209,7 +209,7 @@ def test_nonfixture_credentials_cannot_enable_network(tmp_path, monkeypatch, fie
     assert result['status'] == 'blocked' and result['network_attempted'] is False
 
 
-@pytest.mark.parametrize('mutation', ['failed', 'nonfixture', 'missing', 'duplicate', 'mock', 'unsafe_path', 'bad_hash'])
+@pytest.mark.parametrize('mutation', ['failed', 'nonfixture', 'missing', 'duplicate', 'mock', 'unsafe_path', 'bad_hash', 'old-four-cases', 'reordered'])
 def test_unverified_roundtrip_cannot_supply_probe_targets(tmp_path, mutation):
     paths = write_inputs(tmp_path)
     run = json.loads(paths[2].read_text())
@@ -220,6 +220,8 @@ def test_unverified_roundtrip_cannot_supply_probe_targets(tmp_path, mutation):
     if mutation == 'mock': run['operations'][0]['remote_id'] = 'MOCK-1'
     if mutation == 'unsafe_path': run['operations'][0]['remote_id'] = '../User/Administrator'
     if mutation == 'bad_hash': run['operations'][0]['snapshot_hash'] = 'not-a-hash'
+    if mutation == 'old-four-cases': run['operations'] = run['operations'][:4]
+    if mutation == 'reordered': run['operations'][4:6] = reversed(run['operations'][4:6])
     paths[2].write_text(json.dumps(run))
     with pytest.raises(ValueError, match='ROUNDTRIP_NOT_VERIFIED'):
         probe.validate_inputs(*paths)
@@ -293,3 +295,11 @@ def test_aggregate_contract_rejects_reordering_repeats_and_extra_response_fields
         if mutation == 'extra': record['probes'][0]['response'] = CANARY
         with pytest.raises(ValueError):
             probe.require_probe_evidence(record)
+
+
+@pytest.mark.parametrize('count', [4, 7, 9, True, 8.0, '8'])
+def test_probe_contract_requires_all_eight_draft_documents(count):
+    record = passed_record()
+    record['draft_documents_checked'] = count
+    with pytest.raises(ValueError, match='PERMISSION_PROBE_CONTEXT_INVALID'):
+        probe.require_probe_evidence(record)

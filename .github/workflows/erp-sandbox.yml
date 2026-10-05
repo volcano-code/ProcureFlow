@@ -48,7 +48,7 @@ jobs:
           mkdir -p .data
           docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp erp-backend:/tmp/pf-erp-sandbox-credentials.json .data/erp-sandbox.json
           chmod 600 .data/erp-sandbox.json
-      - name: Real business HTTP approval and Worker execution
+      - name: Real TXT CSV XLSX HTTP approval and Worker execution
         id: roundtrip
         run: python scripts/verify_erp_sandbox.py --ephemeral-test --business-database ${{ matrix.business-database }} --output evals/reports/ci/erp-sandbox/roundtrip.json
       - name: Prove negative REST permissions with the restricted identity

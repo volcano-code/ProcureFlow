@@ -20,7 +20,7 @@ from urllib.parse import quote
 import httpx
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/erpnext/sandbox'))
-from cost_fixtures import COST_CASES
+from cost_fixtures import ACCEPTANCE_CASES
 
 TARGET = 'http://127.0.0.1:18080'
 MAX_INPUT_BYTES = 1024 * 1024
@@ -98,8 +98,8 @@ def validate_inputs(credentials, env_file, roundtrip):
     require(run.get('status') == 'passed' and run.get('synthetic_only') is True
             and run.get('real_user_account_used') is False, 'ROUNDTRIP_NOT_VERIFIED')
     operations = run.get('operations')
-    require(isinstance(operations, list) and len(operations) == len(COST_CASES), 'ROUNDTRIP_NOT_VERIFIED')
-    require([op.get('scenario') if isinstance(op, dict) else None for op in operations] == list(COST_CASES),
+    require(isinstance(operations, list) and len(operations) == len(ACCEPTANCE_CASES), 'ROUNDTRIP_NOT_VERIFIED')
+    require([op.get('scenario') if isinstance(op, dict) else None for op in operations] == list(ACCEPTANCE_CASES),
             'ROUNDTRIP_NOT_VERIFIED')
     for operation in operations:
         require(isinstance(operation, dict) and valid_identifier(operation.get('remote_id'))
@@ -107,10 +107,10 @@ def validate_inputs(credentials, env_file, roundtrip):
                 and valid_identifier(operation.get('operation_id'))
                 and isinstance(operation.get('snapshot_hash'), str)
                 and re.fullmatch(r'[0-9a-f]{64}', operation['snapshot_hash']) is not None
-                and operation.get('scenario') in COST_CASES
-                and operation.get('expected_total') == COST_CASES[operation['scenario']]['total'], 'ROUNDTRIP_NOT_VERIFIED')
-    require(len({op['remote_id'] for op in operations}) == len(COST_CASES)
-            and len({op['operation_id'] for op in operations}) == len(COST_CASES), 'ROUNDTRIP_NOT_VERIFIED')
+                and operation.get('scenario') in ACCEPTANCE_CASES
+                and operation.get('expected_total') == ACCEPTANCE_CASES[operation['scenario']]['total'], 'ROUNDTRIP_NOT_VERIFIED')
+    require(len({op['remote_id'] for op in operations}) == len(ACCEPTANCE_CASES)
+            and len({op['operation_id'] for op in operations}) == len(ACCEPTANCE_CASES), 'ROUNDTRIP_NOT_VERIFIED')
     return data, operations
 
 
@@ -153,7 +153,7 @@ def require_probe_evidence(record):
     require(all(record.get(key) is True for key in REQUIRED_TRUE)
             and record.get('real_user_account_used') is False
             and type(record.get('draft_documents_checked')) is int
-            and record['draft_documents_checked'] == len(COST_CASES), 'PERMISSION_PROBE_CONTEXT_INVALID')
+            and record['draft_documents_checked'] == len(ACCEPTANCE_CASES), 'PERMISSION_PROBE_CONTEXT_INVALID')
     observed = record.get('probes')
     require(isinstance(observed, list) and len(observed) == len(PROBES), 'PERMISSION_PROBES_INCOMPLETE')
     for row, (name, method, endpoint) in zip(observed, PROBES, strict=True):
@@ -183,7 +183,7 @@ def draft_snapshot(client, data, operation):
     try:
         require(item.get('item_code') == data['sku'] and item.get('uom') == 'EA'
                 and Decimal(str(item.get('qty'))) == Decimal('20')
-                and Decimal(str(item.get('rate'))) == Decimal(COST_CASES[operation['scenario']]['unit_price'])
+                and Decimal(str(item.get('rate'))) == Decimal(ACCEPTANCE_CASES[operation['scenario']]['unit_price'])
                 and Decimal(str(doc.get('grand_total'))) == Decimal(operation['expected_total']), 'DRAFT_FIXTURE_NOT_VERIFIED')
         datetime.date.fromisoformat(doc['transaction_date'])
     except (ValueError, InvalidOperation, TypeError, KeyError):

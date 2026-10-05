@@ -27,7 +27,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from erp_business_database import business_database, postgres_test_url, audit_business_database
 sys.path.insert(0, str(ROOT / 'integrations/erpnext/sandbox'))
-from cost_fixtures import COST_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT
+from cost_fixtures import ACCEPTANCE_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT
+from erp_tabular_fixtures import expected_values, import_tabular_quote, save_source_files
 TARGET='http://127.0.0.1:18080'
 
 
@@ -251,17 +252,29 @@ def exercise(data, backend='sqlite'):
                     r=client.request(method,'/api/v1'+path,headers={'Authorization':'Bearer '+tokens[role]},**kwargs)
                     if r.status_code!=expected:raise AssertionError(f'HTTP_{r.status_code}_EXPECTED_{expected}')
                     return r.json()
+                def restart():
+                    nonlocal p
+                    stop(p); p = start()
                 def prepare(title, scenario='normal'):
-                    fixture = COST_CASES[scenario]
+                    fixture = ACCEPTANCE_CASES[scenario]
                     req=call('POST','/requests',expected=201,json={'title':title,'sku':data['sku'],'quantity':'20','budget':'30000.00','max_delivery_days':14})
-                    values={'supplier_id':data['supplier'],'sku':data['sku'],'quantity':'20','uom':'EA','delivery_days':7,'currency':'CNY',
-                        **{key: fixture[key] for key in ('unit_price', 'tax_mode', 'tax_rate', 'shipping_cost', 'discount')}}
-                    text='\n'.join(f'{k}: {v}' for k,v in values.items()).encode()
-                    q=call('POST',f"/requests/{req['id']}/documents",expected=201,files={'file':('synthetic.txt',text)})
-                    call('POST',f"/quotes/{q['id']}/confirm",json={'expected_version':q['version'],'acknowledge':True})
-                    proposal=call('POST',f"/requests/{req['id']}/analyze",json={})['proposal']
-                    assert proposal and proposal['total']==fixture['total']
-                    return req,proposal
+                    if fixture['input_format'] == 'txt':
+                        values = expected_values(data, scenario)
+                        text='\n'.join(f'{k}: {v}' for k,v in values.items()).encode()
+                        q=call('POST',f"/requests/{req['id']}/documents",expected=201,files={'file':('synthetic.txt',text)})
+                        provenance = {'input_format': 'txt'}
+                    else:
+                        before_posts = len(wire['posts'])
+                        q, provenance = import_tabular_quote(call, req['id'], data, scenario, restart)
+                        assert len(wire['posts']) == before_posts
+                    confirmed=call('POST',f"/quotes/{q['id']}/confirm",json={'expected_version':q['version'],'acknowledge':True})
+                    assert confirmed['confirmed_by'] == 'buyer' and confirmed['values'] == q['values']
+                    assert confirmed['evidence'] == q['evidence']
+                    comparison=call('POST',f"/requests/{req['id']}/analyze",json={})
+                    proposal=comparison['proposal']
+                    assert comparison['llm_used'] is False and comparison['evaluation']['current']
+                    assert proposal and proposal['total']==fixture['total'] and proposal['quote_id']==q['id']
+                    return req,proposal,q,provenance
                 def approve(req,proposal):
                     call('POST',f"/requests/{req['id']}/approval",role='approver',json={'snapshot_hash':proposal['snapshot_hash']})
                 def enqueue(req,proposal):
@@ -277,7 +290,7 @@ def exercise(data, backend='sqlite'):
                 finally:adapter.client.close()
                 report['steps'].append('dedicated_identity_get_only_preflight')
                 phase='approval-safeguards'
-                req,proposal=prepare('Synthetic approval safeguards')
+                req,proposal,_,_=prepare('Synthetic approval safeguards')
                 call('POST',f"/requests/{req['id']}/execute",expected=409,json={'snapshot_hash':proposal['snapshot_hash']})
                 call('POST',f"/requests/{req['id']}/approval",role='self',expected=403,json={'snapshot_hash':proposal['snapshot_hash']})
                 approve(req,proposal)
@@ -287,15 +300,41 @@ def exercise(data, backend='sqlite'):
                 call('POST',f"/requests/{req['id']}/execute",expected=409,json={'snapshot_hash':proposal['snapshot_hash']})
                 assert wire['posts']==[]
                 report['steps'].append('unapproved_self_approved_and_stale_writes_denied')
+                phase='tabular-approval-safeguards'
+                # Real table imports, then independent quote and policy invalidation.
+                # These requests never enqueue or create an external operation.
+                for scenario in ('csv-excluded-discount', 'xlsx-excluded-discount'):
+                    req,proposal,quote,_=prepare('Synthetic stale table approval', scenario)
+                    approve(req,proposal)
+                    changed=call('PUT',f"/quotes/{quote['id']}",json={
+                        'expected_version':quote['version'], 'values':{**quote['values'], 'shipping_cost':'81.00'},
+                        'reason':'Synthetic corrected freight invalidates table approval'})
+                    assert changed['confirmed_by'] is None and changed['version'] == quote['version'] + 1
+                    call('POST',f"/requests/{req['id']}/execute",expected=409,json={'snapshot_hash':proposal['snapshot_hash']})
+                    call('POST',f"/quotes/{changed['id']}/confirm",json={'expected_version':changed['version'],'acknowledge':True})
+                    current=call('POST',f"/requests/{req['id']}/analyze",json={})['proposal']
+                    assert current and current['snapshot_hash'] != proposal['snapshot_hash']
+                    approve(req,current)
+                    policy=call('GET','/policy')
+                    call('POST','/policy/versions',role='approver',expected=201,json={
+                        'expected_version':policy['latest_version'], 'budget_cap':policy['budget_cap'],
+                        'max_delivery_days':policy['max_delivery_days'],
+                        'minimum_valid_quotes':policy['minimum_valid_quotes'],
+                        'reason':'Synthetic policy version invalidates prior table approval'})
+                    call('POST',f"/requests/{req['id']}/execute",expected=409,json={'snapshot_hash':current['snapshot_hash']})
+                    assert wire['posts'] == []
+                report['steps'].append('tabular_preview_import_and_stale_quote_policy_writes_denied')
                 verified=[]
-                for label in COST_CASES:
-                    lose = label == 'lost-receipt'
+                import_replays=[]
+                for label, fixture in ACCEPTANCE_CASES.items():
+                    lose = fixture['lose_receipt']
                     phase=label
-                    req,proposal=prepare('Synthetic '+label, label);approve(req,proposal);op=enqueue(req,proposal)
+                    req,proposal,quote,provenance=prepare('Synthetic '+label, label);approve(req,proposal);op=enqueue(req,proposal)
                     wire['lose_next']=lose;worker()
                     first=call('GET',f"/operations/{op['id']}")
                     if lose:
                         assert first['status']=='RECONCILING',first.get('error','RECOVERY_NOT_ENTERED')
+                        restart()
                         worker()
                     final=call('GET',f"/operations/{op['id']}")
                     assert final['status']=='COMPLETED',final.get('error','NOT_COMPLETED')
@@ -307,20 +346,31 @@ def exercise(data, backend='sqlite'):
                     assert enqueue(req,proposal)['id']==op['id'];worker()
                     assert len([x for x in wire['posts'] if x['key']==op['id']])==1
                     verified.append({'operation_id':op['id'],'snapshot_hash':proposal['snapshot_hash'],
-                        'remote_id':final['remote_id'],'expected_total':COST_CASES[label]['total'],'scenario':label,
-                        'cost_components_verified': True})
+                        'remote_id':final['remote_id'],'expected_total':fixture['total'],'scenario':label,
+                        'cost_components_verified': True, **provenance})
+                    if fixture['input_format'] != 'txt':
+                        current_quote, = call('GET', f"/requests/{req['id']}/quotes")
+                        assert current_quote['confirmed_by'] == 'buyer' and current_quote['version'] == 1
+                        assert current_quote['values'] == quote['values'] and current_quote['evidence'] == quote['evidence']
+                        replay_path = '/table-imports/' + provenance['provenance']['import_id'] + '/confirm'
+                        replay_command = {'expected_revision': 2, 'acknowledge': True}
+                        assert call('POST', replay_path, json=replay_command) == current_quote
+                        assert call('GET', f"/requests/{req['id']}/quotes") == [current_quote]
+                        import_replays.append((replay_path, replay_command, current_quote))
                     report['steps'].append(label+'_independent_worker_draft_readback_and_replay')
                 phase='restart'
-                stop(p);p=start()
+                restart()
                 for result in verified:
                     assert call('GET',f"/operations/{result['operation_id']}")['remote_id']==result['remote_id']
+                for replay_path, replay_command, current_quote in import_replays:
+                    assert call('POST', replay_path, json=replay_command) == current_quote
                 report['steps'].append('api_process_restart_retains_remote_ids')
                 if backend == 'postgresql':
                     phase = 'business-database-audit'
                     report['business_database_audit'] = audit_business_database(database_url, verified)
                 report.update(status='passed',operations=verified,post_attempts=len(wire['posts']),
                     real_erpnext_drafts_verified=len(verified),api_business_database='PostgreSQL' if backend == 'postgresql' else 'SQLite',real_erp_database='MariaDB',
-                    fault_injection='loopback HTTP gateway returns 504 after ERP commits; next worker only reads')
+                    fault_injection='loopback HTTP gateway returns 504 after ERP commits; API restarts, then fresh worker only reads')
         except Exception as error:
             report.update(status='failed', phase=phase, reason=safe_failure(error),
                 network_attempted=True, http_evidence=wire['requests'])
@@ -347,11 +397,14 @@ def main(argv=None):
         except (OSError,ValueError,KeyError,TypeError):
             report['reason']='LAB_CONFIGURATION_MISMATCH'
         else:
+            network_started = False
             try:
+                save_source_files(a.output.parent, data)
+                network_started = True
                 report=exercise(data) if a.business_database == 'sqlite' else exercise(data, 'postgresql')
                 code=0 if report.get('status')=='passed' else 1
             except Exception as error:
-                report={'status':'failed','network_attempted':True,'reason':safe_failure(error)}
+                report={'status':'failed','network_attempted':network_started,'reason':safe_failure(error)}
                 code=1
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(report,indent=2)+'\n')

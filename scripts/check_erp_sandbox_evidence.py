@@ -10,18 +10,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/erpnext/sandbox'))
 from probe_erp_permissions import require_probe_evidence, PROBES, REQUIRED_TRUE as PROBE_REQUIRED_TRUE
 from lab_permissions import require_select_only
-from cost_fixtures import COST_CASES
+from cost_fixtures import ACCEPTANCE_CASES
 
 FILES = ('seed.json', 'roundtrip.json', 'database-audit.json', 'image-digests.json', 'permission-probes.json')
+MAX_SOURCE_BYTES = 2 * 1024 * 1024
 STEPS = [
     'dedicated_identity_get_only_preflight',
     'unapproved_self_approved_and_stale_writes_denied',
-    'normal_independent_worker_draft_readback_and_replay',
-    'lost-receipt_independent_worker_draft_readback_and_replay',
-    'excluded-discount_independent_worker_draft_readback_and_replay',
-    'included-discount_independent_worker_draft_readback_and_replay',
+    'tabular_preview_import_and_stale_quote_policy_writes_denied',
+    *(f'{scenario}_independent_worker_draft_readback_and_replay' for scenario in ACCEPTANCE_CASES),
     'api_process_restart_retains_remote_ids',
 ]
+
+
+TABULAR_MAPPING = {
+    'currency': 'B', 'shipping_cost': 'C', 'supplier_id': 'D', 'tax_mode': 'E',
+    'sku': 'F', 'discount': 'G', 'unit_price': 'H', 'delivery_days': 'I',
+    'tax_rate': 'J', 'quantity': 'K', 'uom': 'L',
+}
+
+TABULAR_HEADERS = {
+    'currency': '币种', 'shipping_cost': '运费', 'supplier_id': '供应商编码', 'tax_mode': '税价模式',
+    'sku': '物料编码', 'discount': '折扣金额', 'unit_price': '单价', 'delivery_days': '交期天数',
+    'tax_rate': '税率', 'quantity': '数量', 'uom': '单位',
+}
 
 
 def require(condition: bool, reason: str) -> None:
@@ -41,8 +53,56 @@ def unique_object(pairs):
     return result
 
 
+def require_tabular_provenance(operation: dict) -> None:
+    """Check source/selection/quote links, never infer provenance from a total."""
+    fixture = ACCEPTANCE_CASES[operation['scenario']]
+    kind = fixture['input_format']
+    provenance = operation.get('provenance')
+    require(isinstance(provenance, dict), 'TABULAR_PROVENANCE_MISSING')
+    sha = provenance.get('document_sha256')
+    require(isinstance(sha, str) and re.fullmatch('[0-9a-f]{64}', sha) is not None,
+            'INVALID_TABULAR_SOURCE_HASH')
+    for key, prefix in (('import_id', 'tim_'), ('quote_id', 'quo_')):
+        value = provenance.get(key)
+        require(isinstance(value, str) and re.fullmatch(prefix + '[0-9a-f]{32}', value) is not None,
+                'INVALID_TABULAR_ID')
+    document_id = 'doc_' + provenance['import_id'][4:]
+    require(provenance.get('document_id') == document_id, 'INVALID_TABULAR_DOCUMENT_ID')
+    sheet = 'CSV' if kind == 'csv' else '报价明细'
+    require(provenance.get('selected_sheet') == sheet
+            and count_is(provenance.get('header_row'), 3)
+            and count_is(provenance.get('selected_row'), 5)
+            and provenance.get('column_mapping') == TABULAR_MAPPING, 'INVALID_TABULAR_SELECTION')
+    values = provenance.get('quote_values')
+    require(isinstance(values, dict) and set(values) == set(TABULAR_MAPPING), 'INVALID_TABULAR_VALUES')
+    supplier = values.get('supplier_id')
+    require(isinstance(supplier, str) and 0 < len(supplier) <= 80 and supplier.strip() == supplier,
+            'INVALID_TABULAR_VALUES')
+    expected = {key: fixture[key] for key in ('unit_price', 'tax_mode', 'tax_rate', 'shipping_cost', 'discount')}
+    expected.update(supplier_id=supplier, sku='PF-SANDBOX-ITEM', quantity='20',
+                    uom='EA', currency='CNY', delivery_days=7)
+    require(values == expected and count_is(values.get('delivery_days'), 7), 'INVALID_TABULAR_VALUES')
+    fields = provenance.get('field_evidence')
+    require(isinstance(fields, dict) and set(fields) == set(TABULAR_MAPPING), 'INVALID_TABULAR_FIELD_EVIDENCE')
+    raw_values = {**expected, 'currency': '人民币', 'tax_rate': '13%',
+                  'tax_mode': '含税' if fixture['tax_mode'] == 'included' else '未税'}
+    for index, (field, column) in enumerate(TABULAR_MAPPING.items()):
+        evidence = fields[field]
+        require(isinstance(evidence, dict), 'INVALID_TABULAR_FIELD_EVIDENCE')
+        locator = {'kind': kind, 'document_id': document_id, 'document_sha256': sha,
+            'fragment_id': f'{document_id}:f{index:04d}', 'sheet': sheet, 'row': 5,
+            'column': column, 'cell_range': f'{column}5', 'header_row': 3, 'label_cell': f'{column}3'}
+        if kind == 'csv':
+            locator.update(line_start=6, line_end=6)
+        require(set(evidence) == set(locator) | {'text'}
+                and all(evidence.get(key) == value and type(evidence.get(key)) is type(value)
+                        for key, value in locator.items()), 'INVALID_TABULAR_FIELD_EVIDENCE')
+        text = evidence.get('text')
+        require(text == f'{TABULAR_HEADERS[field]}: {raw_values[field]}', 'INVALID_TABULAR_FIELD_TEXT')
+
+
 def check(directory: Path, backend='sqlite') -> dict:
-    records, digests = {}, {}
+    records, digests, source_digests = {}, {}, {}
     for name in FILES:
         with (directory / name).open('rb') as stream:
             raw = stream.read(1024 * 1024 + 1)
@@ -63,7 +123,7 @@ def check(directory: Path, backend='sqlite') -> dict:
     require(run.get('synthetic_only') is True and all(run.get(k) is False for k in
         ('real_user_account_used', 'human_approval_measured', 'model_used')), 'INVALID_SCOPE')
     require(run.get('steps') == STEPS, 'MISSING_OR_REPEATED_STEPS')
-    require(count_is(run.get('post_attempts'), len(COST_CASES)) and count_is(run.get('real_erpnext_drafts_verified'), len(COST_CASES)), 'INVALID_WRITE_COUNTS')
+    require(count_is(run.get('post_attempts'), len(ACCEPTANCE_CASES)) and count_is(run.get('real_erpnext_drafts_verified'), len(ACCEPTANCE_CASES)), 'INVALID_WRITE_COUNTS')
     require(run.get('api_business_database') == {'sqlite': 'SQLite', 'postgresql': 'PostgreSQL'}[backend]
             and run.get('real_erp_database') == 'MariaDB', 'INVALID_DATABASE_SCOPE')
     if backend == 'postgresql':
@@ -71,7 +131,7 @@ def check(directory: Path, backend='sqlite') -> dict:
         require(business.get('status') == 'passed' and business.get('database') == 'PostgreSQL', 'BUSINESS_AUDIT_MISSING')
         require(all(business.get(key) is True for key in ('isolated_schema', 'migration_current',
             'operation_identity_matches', 'read_only_audit', 'after_api_restart')), 'BUSINESS_AUDIT_INCOMPLETE')
-        require(all(count_is(business.get(key), len(COST_CASES)) for key in ('operation_count', 'completed_operation_count',
+        require(all(count_is(business.get(key), len(ACCEPTANCE_CASES)) for key in ('operation_count', 'completed_operation_count',
             'outbox_count', 'done_outbox_count', 'verified_receipt_count')), 'BUSINESS_AUDIT_INVALID_COUNTS')
         require(isinstance(business.get('server_version_num'), str)
             and re.fullmatch('[0-9]{5,6}', business['server_version_num']) is not None, 'POSTGRES_VERSION_MISSING')
@@ -80,19 +140,42 @@ def check(directory: Path, backend='sqlite') -> dict:
             and preflight.get('write_probe_performed') is False,
             'IDENTITY_NOT_VERIFIED')
     operations = run.get('operations')
-    require(isinstance(operations, list) and len(operations) == len(COST_CASES) and all(isinstance(x, dict) for x in operations),
+    require(isinstance(operations, list) and len(operations) == len(ACCEPTANCE_CASES) and all(isinstance(x, dict) for x in operations),
             'INVALID_OPERATIONS')
-    require([x.get('scenario') for x in operations] == list(COST_CASES), 'INVALID_SCENARIOS')
+    require([x.get('scenario') for x in operations] == list(ACCEPTANCE_CASES), 'INVALID_SCENARIOS')
     for op in operations:
         require(isinstance(op.get('operation_id'), str) and bool(op['operation_id']), 'INVALID_OPERATION_ID')
         require(isinstance(op.get('remote_id'), str) and bool(op['remote_id']) and not op['remote_id'].startswith('MOCK-'),
                 'INVALID_REMOTE_ID')
         require(isinstance(op.get('snapshot_hash'), str) and re.fullmatch('[0-9a-f]{64}', op['snapshot_hash']) is not None,
                 'INVALID_SNAPSHOT_HASH')
-        require(op.get('expected_total') == COST_CASES[op['scenario']]['total'] and op.get('cost_components_verified') is True, 'INVALID_EXPECTED_TOTAL')
-    require(len({x['operation_id'] for x in operations}) == len(COST_CASES) and len({x['remote_id'] for x in operations}) == len(COST_CASES),
+        fixture = ACCEPTANCE_CASES[op['scenario']]
+        require(op.get('expected_total') == fixture['total'] and op.get('cost_components_verified') is True, 'INVALID_EXPECTED_TOTAL')
+        require(op.get('input_format') == fixture['input_format'], 'INVALID_INPUT_FORMAT')
+        if fixture['input_format'] in {'csv', 'xlsx'}:
+            require(all(op.get(key) is True for key in ('tabular_provenance_verified',
+                'duplicate_import_reused', 'preview_import_restart_verified')), 'TABULAR_CHECKS_MISSING')
+            require_tabular_provenance(op)
+    tabular = [op['provenance'] for op in operations if op['input_format'] in {'csv', 'xlsx'}]
+    require(all(len({entry[key] for entry in tabular}) == len(tabular)
+                for key in ('document_sha256', 'document_id', 'import_id', 'quote_id')), 'DUPLICATE_TABULAR_PROVENANCE')
+    # The CI artifact retains the original upload bytes. Recompute their hashes
+    # without parsing them or treating matching reports as a new ERP execution.
+    for operation in operations:
+        fixture = ACCEPTANCE_CASES[operation['scenario']]
+        if fixture['input_format'] == 'txt':
+            continue
+        filename = f"input-fixtures/synthetic-{operation['scenario']}.{fixture['input_format']}"
+        with (directory / filename).open('rb') as stream:
+            source = stream.read(MAX_SOURCE_BYTES + 1)
+        require(len(source) <= MAX_SOURCE_BYTES, 'OVERSIZED_SOURCE_FIXTURE')
+        require(bool(source), 'EMPTY_SOURCE_FIXTURE')
+        source_digests[filename] = hashlib.sha256(source).hexdigest()
+        require(source_digests[filename] == operation['provenance']['document_sha256'],
+                'SOURCE_FIXTURE_HASH_MISMATCH')
+    require(len({x['operation_id'] for x in operations}) == len(ACCEPTANCE_CASES) and len({x['remote_id'] for x in operations}) == len(ACCEPTANCE_CASES),
             'DUPLICATE_OPERATION_OR_DRAFT')
-    require(audit.get('stage') == 'database-audit' and count_is(audit.get('draft_count'), len(COST_CASES)) and
+    require(audit.get('stage') == 'database-audit' and count_is(audit.get('draft_count'), len(ACCEPTANCE_CASES)) and
             count_is(audit.get('purchase_order_count'), 0) and count_is(audit.get('submitted_count'), 0), 'INVALID_DATABASE_COUNTS')
     require_select_only(seed.get('reference_permissions'))
     require_select_only(audit.get('reference_permissions'))
@@ -109,8 +192,9 @@ def check(directory: Path, backend='sqlite') -> dict:
         ('erpnext_version', 'frappe_version', 'database_version')), 'VERSIONS_MISSING')
     require(isinstance(images, list) and len(images) > 0 and all(isinstance(x, str) and
         re.fullmatch(r'frappe/erpnext@sha256:[0-9a-f]{64}', x) for x in images), 'IMAGE_DIGEST_MISSING')
-    return {'status': 'passed', 'record_sha256': digests, 'synthetic_only': True,
+    return {'status': 'passed', 'record_sha256': digests, 'source_sha256': source_digests, 'synthetic_only': True,
         'normal_and_lost_receipt_checked': True, 'database_audit_checked': True,
+        'tabular_import_evidence_checked': True,
         'api_business_database': run['api_business_database'], 'negative_rest_permissions_checked': True,
         'business_database_audit_checked': backend == 'postgresql',
         'scope': 'Consistency check of CI records, not a new ERP execution or cryptographic attestation'}

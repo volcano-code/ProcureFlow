@@ -41,7 +41,7 @@ def test_unknown_error_class_and_exception_message_not_exported():
 @pytest.mark.parametrize('status,code', [('failed', 1), ('passed', 0)])
 def test_cli_preserves_failure_exit_status(tmp_path, monkeypatch, status, code):
     module = runner()
-    monkeypatch.setattr(module, 'validate_lab', lambda *_: {})
+    monkeypatch.setattr(module, 'validate_lab', lambda *_: {'supplier': 'PF Synthetic Supplier', 'sku': 'PF-SANDBOX-ITEM'})
     monkeypatch.setattr(module, 'exercise', lambda *_: {'status': status})
     output = tmp_path / 'report.json'
     assert module.main(['--ephemeral-test', '--output', str(output)]) == code

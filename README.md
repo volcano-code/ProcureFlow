@@ -8,7 +8,7 @@
 
 ## 当前能力与边界
 
-- 单 SKU、CNY、EA；保留 TXT/CSV/文本 PDF/XLSX 固定键值布局，并支持普通 CSV/XLSX 的工作表/报价行选择、显式列映射和持久预览（见 [阶段十二](docs/stage12-tabular-import.md)）。没有 OCR、多商品合并或任意单位/币种换算
+- 单 SKU、CNY、EA；保留 TXT/CSV/文本 PDF/XLSX 固定键值布局，并支持普通 CSV/XLSX 的工作表/报价行选择、显式列映射和持久预览（见 [阶段十二](docs/stage12-tabular-import.md)）。普通表格到隔离真实 ERP 的严格验收合同见 [阶段十三](docs/stage13-tabular-erp-acceptance.md)。没有 OCR、多商品合并或任意单位/币种换算
 - 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复

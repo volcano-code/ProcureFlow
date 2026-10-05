@@ -13,5 +13,18 @@ COST_CASES = {
         shipping_cost='80.00', discount='113.00', goods='2260.00', net='1900.00',
         tax_before='260.00', tax_after='247.00', total='2227.00'),
 }
+# Preserve the original independently specified cost cases for adapter contracts.
+# The acceptance matrix also exercises ordinary files through preview/import.
+ACCEPTANCE_CASES = {
+    scenario: {**fixture, 'input_format': 'txt', 'lose_receipt': scenario == 'lost-receipt'}
+    for scenario, fixture in COST_CASES.items()
+}
+for _format in ('csv', 'xlsx'):
+    for _cost_case, _lose_receipt in (('excluded-discount', False), ('included-discount', True)):
+        _scenario = f"{_format}-{_cost_case}" + ('-lost-receipt' if _lose_receipt else '')
+        ACCEPTANCE_CASES[_scenario] = {
+            **COST_CASES[_cost_case], 'input_format': _format, 'lose_receipt': _lose_receipt,
+        }
+
 TAX_ACCOUNT = 'PF Synthetic Goods Tax - PFL'
 FREIGHT_ACCOUNT = 'PF Synthetic Gross Freight - PFL'

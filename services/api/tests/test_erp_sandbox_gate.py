@@ -32,6 +32,7 @@ def test_sandbox_runner_without_valid_marker_never_networks(tmp_path,monkeypatch
     assert module.main(args+['--credentials',str(tmp_path/'missing.json'), '--env-file',str(tmp_path/'missing.env'), '--output',str(out)])==2
     report=json.loads(out.read_text())
     assert report['status']=='blocked' and report['network_attempted'] is False
+    assert not (tmp_path/'input-fixtures').exists()
 
 
 @pytest.mark.parametrize('field,value',[('nonce','b'*64),('site','production'),('company','Actual Company'),('user','Administrator'),('sku','ACTUAL'),('api_key','')])
