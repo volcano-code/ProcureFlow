@@ -1,7 +1,9 @@
 "use client";
 import {useCallback, useEffect, useRef, useState, type FormEvent} from "react";
-import {API, api, loadDemo, watchAudit, type Identity, type Capabilities, type ProcurementRequest,
+import {API, api, loadDemo, watchAudit, type Capabilities, type ProcurementRequest,
   type Quote, type QuoteValues, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
+import SessionBoundary,{type AuthenticatedProps} from "@/components/session-boundary";
+import type {Credential} from "@/lib/session.mjs";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
@@ -23,9 +25,9 @@ const adviceStatus:Record<AdviceRun["status"],string> = {PENDING:"已预留，�
   FAILED:"生成失败",INTERRUPTED:"执行中断，禁止重放",STALE:"版本或来源已失效"};
 type AdviceContext = {active:boolean;controller:AbortController};
 
-/** This component is keyed by credential, request ID and version. Leaving its scope cancels
+/** This component is keyed by session generation, request ID and version. Leaving its scope cancels
  * browser waits, never retries a provider call, and cannot publish a late result to a new scope. */
-function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent,policyHash,beginEvidence,onEvidence}:{request:ProcurementRequest;token:string;
+function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent,policyHash,beginEvidence,onEvidence}:{request:ProcurementRequest;token:Credential;
   cap:Capabilities|null;buyer:boolean;workflowBusy:boolean;quotes:Quote[];beginEvidence:()=>number;
   freshnessEvent:string;policyHash:string|null;onEvidence:(evidence:EvidenceRef,ticket:number)=>void}) {
   const [runs,setRuns] = useState<AdviceRun[]>([]);
@@ -186,9 +188,10 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
 }
 
 export default function Workbench() {
-  const [token,setToken] = useState("");
-  const [me,setMe] = useState<Identity|null>(null);
-  const [cap,setCap] = useState<Capabilities|null>(null);
+  return <SessionBoundary>{props=><AuthenticatedWorkbench key={props.token.id} {...props}/>}</SessionBoundary>;
+}
+
+function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) {
   const [requests,setRequests] = useState<ProcurementRequest[]>([]);
   const [selected,setSelected] = useState<ProcurementRequest|null>(null);
   const [quotes,setQuotes] = useState<Quote[]>([]);
@@ -217,18 +220,19 @@ export default function Workbench() {
   const freshnessEvent = `${selected?.version}:${selected?.status}:${businessEvent}:${policy?.policy_hash||"unknown"}`;
 
   const act = useCallback(async(fn:()=>Promise<void>) => {
-    if (mutationLock.current) return;
+    if (mutationLock.current || !token.active) return;
     mutationLock.current = true; setBusy(true); setError("");
     try { await fn(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { mutationLock.current = false; setBusy(false); }
-  },[]);
+    catch (e) { if(token.active)setError(e instanceof Error ? e.message : String(e)); }
+    finally { mutationLock.current = false; if(token.active)setBusy(false); }
+  },[token]);
   const clearContext = useCallback(() => {
     ++evidenceReadEpoch.current;
     setSelected(null); setQuotes([]); setEvents([]); setOperation(null); setEvidence(null); setVerification(null);
     setEditing(null); setConfirming(null); setRequestForm(null); setStream("idle");
   },[]);
   const refresh = useCallback(async(id:string, credential=token) => {
+    token.assertCurrent();
     ++evidenceReadEpoch.current;
     const epoch = ++readEpoch.current;
     activeScope.current = credential + "\n" + id;
@@ -239,19 +243,17 @@ export default function Workbench() {
     ]);
     const reserved = [...e].reverse().find(x=>x.type === "ERP_OPERATION_RESERVED");
     const op = reserved ? await api<Operation>(`/operations/${reserved.payload.operation_id}`,credential) : null;
-    if (epoch !== readEpoch.current) return; // A slower response must not overwrite a newer identity/request.
+    if (!token.active || epoch !== readEpoch.current) return; // A slower response must not overwrite a newer identity/request.
     setSelected(r); setQuotes(q); setEvents(e); setRequests(list); setOperation(op);
   },[token]);
-  const login = async(credential:string) => {
-    const epoch = ++readEpoch.current;
-    activeScope.current = ""; setPolicy(null); setToken(""); setMe(null); setCap(null); setRequests([]); clearContext();
-    const [identity,capabilities,list] = await Promise.all([
-      api<Identity>("/me",credential), api<Capabilities>("/capabilities",credential), api<ProcurementRequest[]>("/requests",credential),
-    ]);
-    if (epoch !== readEpoch.current) return;
-    setToken(credential); setMe(identity); setCap(capabilities); setRequests(list);
-    if (list.length) await refresh(list[0].id,credential);
-  };
+  useEffect(()=>{
+    let active=true;const epoch=++readEpoch.current;
+    void api<ProcurementRequest[]>("/requests",token).then(async list=>{
+      if(!active||!token.active||epoch!==readEpoch.current)return;
+      setRequests(list);if(list.length)await refresh(list[0].id);
+    }).catch(error=>{if(active&&token.active)setError(error instanceof Error?error.message:String(error));});
+    return()=>{active=false;++readEpoch.current;++evidenceReadEpoch.current;};
+  },[token,refresh]);
   const choose = async(id:string) => { clearContext(); await refresh(id); };
   useEffect(() => {
     if (!selected || !token) return;
@@ -264,7 +266,7 @@ export default function Workbench() {
         if (!controller.signal.aborted && activeScope.current === scope)
           setEvents(old=>old.some(e=>e.id === event.id) ? old : [...old,event]);
       },
-    });
+    }).catch(()=>{}); // Session invalidation already owns the global signed-out state.
     return ()=>controller.abort();
   },[selected?.id,token]);
 
@@ -281,6 +283,19 @@ export default function Workbench() {
     }).catch(e=>{if(!controller.signal.aborted&&activeScope.current===scope)setError(`策略绑定回读失败：${e instanceof Error?e.message:String(e)}`);});
     return()=>controller.abort();
   },[policy?.policy_hash,businessEvent,selected?.id,token]);
+
+  useEffect(()=>{
+    if(cap.mode!=="pilot"||!operation||!["PENDING","IN_FLIGHT","RECONCILING"].includes(operation.status))return;
+    const controller=new AbortController(),id=operation.id,scope=activeScope.current;
+    const timer=setTimeout(()=>{
+      void api<Operation>(`/operations/${id}`,token,"GET",undefined,controller.signal).then(saved=>{
+        if(!controller.signal.aborted&&token.active&&activeScope.current===scope){
+          setOperation(saved);if(saved.status!==operation.status&&selected)void refresh(selected.id).catch(()=>{});
+        }
+      }).catch(error=>{if(!controller.signal.aborted&&token.active)setError(`执行状态回读失败：${error instanceof Error?error.message:String(error)}`);});
+    },2000);
+    return()=>{clearTimeout(timer);controller.abort();};
+  },[cap.mode,operation,token,refresh,selected?.id]);
 
   const saveRequest = async(event:FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -326,7 +341,7 @@ export default function Workbench() {
     if (!selected?.proposal || !proposalCurrent) return;
     const op = await api<Operation>(`/requests/${selected.id}/execute`,token,"POST",{snapshot_hash:selected.proposal.snapshot_hash});
     setOperation(op);
-    try { await api(`/operations/${op.id}/process`,token,"POST"); }
+    try { if(cap.mode!=="pilot")await api(`/operations/${op.id}/process`,token,"POST"); }
     finally { await refresh(selected.id); }
   });
 
@@ -340,15 +355,8 @@ export default function Workbench() {
       <div className="side-bottom">{cap?.erp_mode === "erpnext" ? "ERPNext · 授权沙箱草稿" : "模拟 ERP · 规则基线"}<br/>禁止自动审批及正式提交</div>
     </aside>
     <main>
-      <header className="topbar"><span>工作区 / 采购中心</span>
-        <form onSubmit={e=>{e.preventDefault();const value=String(new FormData(e.currentTarget).get("token"));void act(()=>login(value));}} className="identity">
-          <input aria-label="访问令牌" name="token" type="password" autoComplete="off" placeholder="服务端分配的访问令牌" required/>
-          <button className="secondary" disabled={busy}>登录</button><span data-testid="identity">{me?.role||"未登录"}</span>
-        </form>
-        {cap?.demo_samples && <select aria-label="切换演示身份" disabled={busy} value={token} onChange={e=>void act(()=>login(e.target.value))}>
-          <option value="demo-buyer">采购员</option><option value="demo-approver">独立审批人</option><option value="demo-auditor">审计员</option>
-          {!token.startsWith("demo-") && <option value={token}>当前自定义身份</option>}
-        </select>}
+      <header className="topbar" style={{height:"auto",minHeight:74,paddingTop:12,paddingBottom:12}}><span>工作区 / 采购中心</span>
+        {authControls}
       </header>
       <section className="content" aria-busy={busy}>
         <div className="page-heading"><div><div className="eyebrow">PROCUREMENT / WORKBENCH</div>
@@ -358,13 +366,12 @@ export default function Workbench() {
         </div>
         <div className="notice">本地 Alpha：金额由确定性规则计算，不是 LLM 推理。当前 ERP：{cap?.erp_mode||"尚未认证"}。正式提交始终不在本工作台权限内。</div>
         {error && <div role="alert" className="form-error">{error}</div>}
-        {me && <PolicyPanel key={token} token={token} approver={me.role==="approver"} workflowBusy={busy}
+        {me && <PolicyPanel key={token.id} token={token} approver={me.role==="approver"} workflowBusy={busy}
           refreshEvent={policyRefresh+events.filter(event=>event.type==="POLICY_CHANGED").length} onRead={onPolicyRead}/>}
         <div className="metrics">{[["采购需求",requests.length],["报价版本",quotes.length],["已确认",quotes.filter(q=>q.confirmed_by).length],["审计记录",events.length]].map(([label,count])=>
           <div className="metric" key={label}><label>{label}</label><strong>{count}</strong></div>)}</div>
         {!selected ? <section className="empty panel"><h2>{me ? "创建或选择一项采购需求" : "登录后开始采购核对"}</h2>
-          <p>演示环境采用合成数据与独立身份，不会写入真实 ERP；已配置模型仅在显式生成只读建议时调用。</p>
-          {!me && <button data-testid="login-demo-buyer" className="primary" disabled={busy} onClick={()=>void act(()=>login("demo-buyer"))}>以演示采购员登录</button>}
+          <p>{cap.mode==="demo"?"演示环境采用合成数据与独立身份，不会写入真实 ERP。":"受控工作区中的操作受当前租户与角色权限约束。"}已配置模型仅在显式生成只读建议时调用。</p>
         </section> : <>
           <section className="panel request-panel"><div><div className="eyebrow">{selected.id}</div><h2>{selected.title}</h2>
             <p data-testid="request-meta">{selected.sku} · {selected.quantity} {selected.uom} · 预算 ¥{selected.budget} · ≤ {selected.max_delivery_days} 天 · v{selected.version}</p>
@@ -423,7 +430,8 @@ export default function Workbench() {
                   <p>{verification.simulated ? "模拟 ERP" : "ERPNext"} · {verification.verified_at} · {verification.remote_id||verification.reason}</p>
                   <small>本次仅回读，不创建、不重试、不改写历史执行状态。</small></div>}
                 <p className="decision-result">{operation.status} · {operation.remote_id||operation.error}</p>
-                {buyer && operation.status !== "COMPLETED" && <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{
+                {cap.mode==="pilot"&&operation.status!=="COMPLETED"&&<p>执行已预留，交由独立 Worker 处理。退出登录不会撤回已接受的执行；撤销用户或角色权限会阻止尚未发送的首次写入。请回读最终结果。</p>}
+                {buyer && cap.mode!=="pilot" && operation.status !== "COMPLETED" && <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{
                   await api(`/operations/${operation.id}/process`,token,"POST"); await refresh(selected.id);
                 })}>处理 / 只读核对</button>}</>}
             </> : <p className="subtle-empty">核对报价后生成方案；需求、报价或策略变化后需要重新生成和审批。</p>}

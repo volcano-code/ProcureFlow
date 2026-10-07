@@ -1,9 +1,10 @@
 "use client";
+import type {Credential} from "@/lib/session.mjs";
 import {useCallback,useEffect,useRef,useState,type FormEvent} from "react";
 import {api,type PolicyVersion} from "@/lib/api";
 import {APIError} from "@/lib/transport.mjs";
 
-type Props={token:string;approver:boolean;workflowBusy:boolean;refreshEvent:number;onRead:(policy:PolicyVersion|null)=>void};
+type Props={token:Credential;approver:boolean;workflowBusy:boolean;refreshEvent:number;onRead:(policy:PolicyVersion|null)=>void};
 const statusLabels={effective:"当前生效",scheduled:"已发布，待生效",superseded:"历史版本"};
 const when=(value:string)=>`${new Date(value).toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
 

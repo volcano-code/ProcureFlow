@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, SecretStr, field_validator
 
 
 def decimal_string(value):
@@ -33,6 +33,25 @@ class Principal(Contract):
     user_id: str
     tenant_id: str
     role: Literal["buyer", "approver", "auditor"]
+    _session_id: str | None = PrivateAttr(default=None)
+    _auth_version: str | None = PrivateAttr(default=None)
+    _session_expires_at: str | None = PrivateAttr(default=None)
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    @property
+    def auth_version(self) -> str | None:
+        return self._auth_version
+
+    @property
+    def session_expires_at(self) -> str | None:
+        return self._session_expires_at
+
+
+class LoginCommand(Contract):
+    credential: SecretStr = Field(min_length=32, max_length=256)
 
 
 class RequestCreate(Contract):

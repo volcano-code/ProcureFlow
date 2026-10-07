@@ -52,7 +52,9 @@ def test_aggregate_covers_every_schema_visible_route_and_preserves_auth(generate
         assert route in actual
     assert ("/api/v1/operations/{operation_id}/verify", "post") in actual
     for path, method in actual:
-        if path.startswith("/api/"):
+        if (path, method) in {("/api/v1/auth/config", "get"), ("/api/v1/auth/login", "post")}:
+            assert not schema["paths"][path][method].get("security")
+        elif path.startswith("/api/"):
             assert schema["paths"][path][method]["security"] == [{"HTTPBearer": []}]
     assert schema["components"]["securitySchemes"]["HTTPBearer"] == {"type": "http", "scheme": "bearer"}
 

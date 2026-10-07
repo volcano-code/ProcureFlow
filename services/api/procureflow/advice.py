@@ -99,7 +99,7 @@ class AdviceService:
 
     def reserve(self, principal, request_id, command: AdviceRunCommand):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.procurement.transaction(principal, write=True) as session:
             request = self.procurement._request(session, principal, request_id, lock=True)
             row = session.scalar(select(AdviceRunRow).where(AdviceRunRow.tenant_id == principal.tenant_id,
                 AdviceRunRow.request_id == request_id, AdviceRunRow.idempotency_key == command.idempotency_key))
@@ -120,13 +120,13 @@ class AdviceService:
             return self._dto(row, True, None)
 
     def get(self, principal, run_id):
-        with self.db.transaction(write=True) as session:
+        with self.procurement.transaction(principal, write=True) as session:
             row = self._run(session, principal, run_id)
             request = self.procurement._request(session, principal, row.request_id, lock=True)
             return self._dto(row, *self._freshness(session, principal, request, row))
 
     def list(self, principal, request_id):
-        with self.db.transaction(write=True) as session:
+        with self.procurement.transaction(principal, write=True) as session:
             request = self.procurement._request(session, principal, request_id, lock=True)
             rows = list(session.scalars(select(AdviceRunRow).where(AdviceRunRow.tenant_id == principal.tenant_id,
                 AdviceRunRow.request_id == request_id).order_by(AdviceRunRow.created_at.desc(), AdviceRunRow.id).limit(20)))
@@ -144,9 +144,9 @@ class AdviceService:
     def process(self, principal, run_id, factory):
         require(principal, "buyer")
         # Lock order is tenant, request, then run, matching policy publication and edits.
-        with self.db.transaction() as session:
+        with self.procurement.transaction(principal) as session:
             request_id = self._run(session, principal, run_id).request_id
-        with self.db.transaction(write=True) as session:
+        with self.procurement.transaction(principal, write=True) as session:
             request = self.procurement._request(session, principal, request_id, lock=True)
             row = self._run(session, principal, run_id, lock=True)
             if expired(row):
@@ -165,6 +165,8 @@ class AdviceService:
         documents = snapshot["documents"]
         evidence_ids = {fragment["id"] for document in documents.values() for fragment in document["fragments"]}
         def invoke(name, arguments):
+            with self.procurement.transaction(principal):
+                pass
             if name == "get_comparison":
                 return {"request": snapshot["request"], "quotes": snapshot["quotes"]}
             if name == "search_policy":
@@ -175,7 +177,7 @@ class AdviceService:
 
         def observe(event):
             # Adapter emits only bounded metadata; no messages/reasoning/tool text.
-            with self.db.transaction(write=True) as session:
+            with self.procurement.transaction(principal, write=True) as session:
                 audit(session, principal, request_id, "AGENT_" + event["type"].upper(), {**event, "run_id": run_id})
 
         agent, output, error_code = None, None, None
@@ -195,6 +197,8 @@ class AdviceService:
                 except Exception:
                     error_code = "ADVICE_FAILED"
 
+        # Finalize an already-claimed run even after logout/revocation. This only
+        # records its outcome; it cannot replay a model call or reserve new work.
         with self.db.transaction(write=True) as session:
             request = self.procurement._request(session, principal, request_id, lock=True)
             row = self._run(session, principal, run_id, lock=True)
@@ -210,7 +214,11 @@ class AdviceService:
                 else:
                     row.output = output
                     self._finish(session, principal, row, "COMPLETED", None)
-            return self._dto(row, current, reason)
+            result = self._dto(row, current, reason)
+        # Receipt finalization is unconditional; disclosure is still session-bound.
+        with self.procurement.transaction(principal):
+            pass
+        return result
 
     def _finish(self, session, principal, row, status, error_code):
         row.status, row.error_code, row.completed_at, row.lease_until = status, error_code, now(), None

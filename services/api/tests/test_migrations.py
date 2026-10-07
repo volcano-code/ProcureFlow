@@ -41,7 +41,7 @@ def test_advice_migration_preserves_existing_procurement_data(tmp_path):
         assert db.execute("SELECT version, status, data FROM procurement_requests").fetchone() == (
             7, 'APPROVED', '{"title":"Preserve"}')
         assert db.execute("SELECT count(*) FROM advice_runs").fetchone() == (0,)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('b9134d27c80f',)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('d261a40ce712',)
     run('downgrade', '426d852ce82c')
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT id FROM procurement_requests").fetchone() == ('req_existing',)
@@ -79,3 +79,35 @@ def test_policy_migration_preserves_legacy_advice_and_approval_without_inventing
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT output FROM advice_runs").fetchone() == ('{"summary":"Original advisory text"}',)
         assert db.execute("SELECT note FROM approvals").fetchone() == ('Original note',)
+
+
+def test_pilot_migration_keeps_legacy_authority_unbound_and_no_accounts(tmp_path):
+    path = tmp_path / 'pilot-upgrade.sqlite3'
+    env = {**os.environ, 'PF_DATABASE_URL': f'sqlite:///{path}', 'PF_DATA_DIR': str(tmp_path)}
+    def run(*args):
+        result = subprocess.run([sys.executable, '-m', 'alembic', *args], cwd=API, env=env,
+                                text=True, capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+    run('upgrade', 'b9134d27c80f')
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO procurement_requests VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                   ('req_legacy', 'demo', 'buyer-01', '{"title":"Original"}', 3, 'ERP_PENDING', None, '2026-01-01'))
+        db.execute("INSERT INTO approvals (id, request_id, tenant_id, approver_id, snapshot_hash, status, note, "
+                   "expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   ('ap_legacy', 'req_legacy', 'demo', 'approver-01', 'a' * 64, 'APPROVED', 'Original approval',
+                    '2026-12-01', '2026-01-01'))
+        db.execute("INSERT INTO external_operations (id, request_id, tenant_id, approval_id, payload, snapshot_hash, "
+                   "status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   ('op_legacy', 'req_legacy', 'demo', 'ap_legacy', '{"original":true}', 'a' * 64, 'PENDING', 0, '2026-01-01'))
+    run('upgrade', 'head')
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT note, approver_auth_version FROM approvals").fetchone() == ('Original approval', None)
+        assert db.execute("SELECT payload, initiator_id, initiator_auth_version FROM external_operations").fetchone() == (
+            '{"original":true}', None, None)
+        for table in ('pilot_tenants', 'pilot_memberships', 'pilot_invites', 'pilot_sessions'):
+            assert db.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
+    run('downgrade', 'b9134d27c80f')
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT note FROM approvals").fetchone() == ('Original approval',)
+        assert db.execute("SELECT payload FROM external_operations").fetchone() == ('{"original":true}',)
+    run('upgrade', 'head')

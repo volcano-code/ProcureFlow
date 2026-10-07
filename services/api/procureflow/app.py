@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -16,8 +17,9 @@ from starlette.formparsers import MultiPartException
 from . import __version__
 from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
+from .auth import IdentityService
 from .config import Settings
-from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, Principal,
+from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, LoginCommand, Principal,
     PolicyVersionCreate, QuoteConfirm, QuoteEdit, RequestCreate, RequestUpdate, TableImportPreview, TableImportConfirm)
 from .db import Database, uid
 from .erp import ERPNextClient, ERPRejected, ERPUnknown, MockERP
@@ -75,6 +77,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
     service = ProcurementService(db, settings, erp)
     advice_service = AdviceService(service)
+    identities = IdentityService(db, settings)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -86,6 +89,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     app = FastAPI(title="ProcureFlow", version=__version__, lifespan=lifespan,
         description="Evidence-first procurement local alpha. Mock ERP and deterministic baseline by default; no live ordering.")
     app.state.service, app.state.settings = service, settings
+    app.state.identities = identities
     app.add_middleware(BoundedRequestBody, limit=settings.max_upload_bytes + 65536)
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.web_origins),
                        allow_credentials=False, allow_methods=["GET", "POST", "PUT"],
@@ -96,10 +100,16 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise DomainError("UNAUTHENTICATED", "A bearer token is required", 401)
         # No client-supplied tenant, role or approver ID is trusted.
-        for token, principal in settings.auth_tokens.items():
-            if secrets.compare_digest(token.encode(), credentials.credentials.encode()):
-                return Principal.model_validate(principal)
-        raise DomainError("UNAUTHENTICATED", "Invalid bearer token", 401)
+        return identities.authenticate(credentials.credentials)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, error):
+        if request.url.path == "/api/v1/auth/login":
+            # FastAPI's default validation response echoes input values, which
+            # must never reflect an invitation or any extra credential fields.
+            return JSONResponse(status_code=422, content={"error": {
+                "code": "INVALID_LOGIN", "message": "Provide one valid invitation credential"}})
+        return await request_validation_exception_handler(request, error)
 
     @app.exception_handler(DomainError)
     async def domain_error(_, error):
@@ -107,6 +117,11 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        if settings.mode == "pilot" and request.url.path in {"/api/v1/auth/login", "/api/v1/auth/logout"}:
+            origin = request.headers.get("origin")
+            if origin and origin not in {*settings.web_origins, str(request.base_url).rstrip("/")}:
+                return JSONResponse(status_code=403, content={"error": {
+                    "code": "ORIGIN_DENIED", "message": "Browser origin is not allowed"}})
         length = request.headers.get("content-length")
         if length:
             try:
@@ -139,6 +154,20 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             # No raw DSN, SQL, credentials or exception details in unauthenticated output.
             return JSONResponse(status_code=503, content={"status": "not_ready",
                 "error": "DATABASE_NOT_READY"})
+
+    @app.get("/api/v1/auth/config")
+    def auth_config():
+        return {"mode": settings.mode, "login_method": "invite" if settings.mode == "pilot" else "static_bearer",
+                "session_ttl_seconds": settings.session_ttl_seconds if settings.mode == "pilot" else None}
+
+    @app.post("/api/v1/auth/login")
+    def login(command: LoginCommand):
+        return identities.login(command.credential.get_secret_value())
+
+    @app.post("/api/v1/auth/logout")
+    def logout(principal=Depends(identity)):
+        identities.logout(principal)
+        return {"status": "logged_out"}
 
     @app.get("/api/v1/capabilities")
     def capabilities(principal=Depends(identity)):
@@ -174,7 +203,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.get("/api/v1/me")
     def me(principal=Depends(identity)):
-        return principal
+        return {**principal.model_dump(), **({"expires_at": principal.session_expires_at} if settings.mode == "pilot" else {})}
 
     @app.get("/api/v1/requests")
     def list_requests(principal=Depends(identity)):
@@ -259,7 +288,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.get("/api/v1/suppliers")
     def suppliers(principal=Depends(identity)):
         try:
-            return {"mode": erp.mode, "items": erp.suppliers(), "limit": 100, "may_have_more": erp.mode == "erpnext"}
+            items = erp.suppliers()
+            with db.transaction() as session:
+                identities.validate_principal(session, principal)
+            return {"mode": erp.mode, "items": items, "limit": 100, "may_have_more": erp.mode == "erpnext"}
         except (ERPRejected, ERPUnknown) as error:
             raise DomainError("ERP_READ_FAILED", "Supplier lookup failed; check server-side ERP configuration", 502) from error
 
@@ -342,7 +374,17 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             for _ in range(20):
                 if await request.is_disconnected():
                     break
-                for event in await asyncio.to_thread(service.events, principal, request_id, cursor):
+                try:
+                    # service.events revalidates durable authority in its own
+                    # transaction on every poll; a long stream cannot cache it.
+                    batch = await asyncio.to_thread(service.events, principal, request_id, cursor)
+                except DomainError as error:
+                    if error.status_code != 401:
+                        raise
+                    yield "event: auth_invalid\ndata: " + json.dumps({"code": "UNAUTHENTICATED",
+                        "message": "Session is no longer valid; sign in again"}) + "\n\n"
+                    return
+                for event in batch:
                     cursor = event["id"]
                     yield f"id: {cursor}\nevent: audit\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 yield ": heartbeat\n\n"
@@ -350,7 +392,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return StreamingResponse(generate(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
     demo = ROOT / "apps" / "demo"
-    if demo.exists():
+    if demo.exists() and settings.mode != "pilot":
         app.mount("/assets", StaticFiles(directory=demo), name="assets")
         @app.get("/", include_in_schema=False)
         def workbench():

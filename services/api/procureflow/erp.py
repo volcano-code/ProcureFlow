@@ -25,6 +25,7 @@ class ERPPort(Protocol):
     def suppliers(self) -> list[dict]: ...
     def find(self, operation_key: str) -> dict | None: ...
     def create_draft(self, operation_key, payload: dict) -> dict: ...
+    def create_draft_guarded(self, operation_key, payload: dict, before_write) -> dict: ...
 
 
 class MockERP:
@@ -56,6 +57,10 @@ class MockERP:
     def count(self):
         with self._connect() as connection:
             return connection.execute("SELECT count(*) FROM drafts").fetchone()[0]
+
+    def create_draft_guarded(self, operation_key, payload, before_write):
+        before_write()
+        return self.create_draft(operation_key, payload)
 
     def create_draft(self, operation_key, payload):
         v = payload["quote_values"]
@@ -397,7 +402,10 @@ class ERPNextClient:
             raise ERPRejected("ERP_READBACK_PAYLOAD_MISMATCH")
         return remote
 
-    def create_draft(self, operation_key, payload):
+    def create_draft_guarded(self, operation_key, payload, before_write):
+        return self.create_draft(operation_key, payload, before_write=before_write)
+
+    def create_draft(self, operation_key, payload, *, before_write=None):
         if not self.allow_writes:
             raise ERPRejected("ERP_DRAFT_WRITES_DISABLED")
         if payload.get("erp_company") != self.company:
@@ -416,8 +424,14 @@ class ERPNextClient:
                 self.hash_field: payload["snapshot_hash"], "items": [{"item_code": values["sku"],
                 "qty": values["quantity"], "uom": values["uom"], "rate": values["unit_price"], "price_list_rate": values["unit_price"],
                 "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}], **costs}
+        content = erp_numeric_json(body)
+        # Company/field metadata checks above perform network I/O. Authority may
+        # expire during them, so the caller's final gate belongs here, directly
+        # before the first POST, while its business/identity locks remain held.
+        if before_write is not None:
+            before_write()
         try:
-            record = self._call("POST", "api/resource/Supplier Quotation", content=erp_numeric_json(body),
+            record = self._call("POST", "api/resource/Supplier Quotation", content=content,
                 headers={"Content-Type": "application/json"})
         except ERPRejected:
             # A conflicting unique insert can be somebody else's identical delivery.

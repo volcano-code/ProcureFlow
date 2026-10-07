@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 from .database_config import normalize_database_url
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, text
+from sqlalchemy import JSON, Boolean, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -97,6 +97,7 @@ class ApprovalRow(Base):
     request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     approver_id: Mapped[str] = mapped_column(String(80))
+    approver_auth_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     snapshot_hash: Mapped[str] = mapped_column(String(64))
     snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(24))
@@ -112,6 +113,8 @@ class OperationRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"))
     approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"))
+    initiator_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    initiator_auth_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     snapshot_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
@@ -168,6 +171,55 @@ class TenantPolicyRow(Base):
     __tablename__ = "tenant_policies"
     tenant_id: Mapped[str] = mapped_column(String(80), primary_key=True)
     latest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PilotTenantRow(Base):
+    __tablename__ = "pilot_tenants"
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenant_policies.tenant_id"), primary_key=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotMembershipRow(Base):
+    """User identities are scoped to a tenant, with one controlled role."""
+    __tablename__ = "pilot_memberships"
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("pilot_tenants.tenant_id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    role: Mapped[str] = mapped_column(String(24), nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotInviteRow(Base):
+    __tablename__ = "pilot_invites"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "user_id"],
+        ["pilot_memberships.tenant_id", "pilot_memberships.user_id"]),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    user_id: Mapped[str] = mapped_column(String(80))
+    credential_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    auth_version: Mapped[str] = mapped_column(String(80))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    consumed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    revoked_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotSessionRow(Base):
+    __tablename__ = "pilot_sessions"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "user_id"],
+        ["pilot_memberships.tenant_id", "pilot_memberships.user_id"]),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    user_id: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    auth_version: Mapped[str] = mapped_column(String(80))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    revoked_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
 class PolicyVersionRow(Base):

@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import hashlib
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from sqlalchemy import select
 from .config import Settings
+from .auth import IdentityService
 from .contracts import Principal, QuoteValues
 from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, OutboxRow,
-                 QuoteRow, QuoteVersionRow, RequestRow, EvaluationRow, TenantPolicyRow, audit, now, uid)
+                 QuoteRow, QuoteVersionRow, RequestRow, EvaluationRow, TenantPolicyRow, PolicyVersionRow, PilotMembershipRow, PilotSessionRow, audit, now, uid)
 from .domain import digest, offer_check
 from .policies import bootstrap, effective_policy, lock_tenant, policy_versions, publish
 from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
@@ -39,11 +41,28 @@ def op_dto(row):
 class ProcurementService(TableImportServiceMixin):
     def __init__(self, db: Database, settings: Settings, erp: ERPPort):
         self.db, self.settings, self.erp = db, settings, erp
+        self.identities = IdentityService(db, settings)
         self.document_dir = settings.data_dir / "documents"
         self.document_dir.mkdir(exist_ok=True)
         with self.db.transaction(write=True) as session:
             for tenant in sorted({p["tenant_id"] for p in settings.auth_tokens.values()}):
                 bootstrap(session, tenant)
+
+    @contextmanager
+    def transaction(self, principal, write=False):
+        """Revalidate durable authority inside the business transaction, never a cache.
+
+        Pilot writes lock tenant → identity → session before aggregate locks. Revocation
+        uses the same order, so either it commits first and this action is denied, or
+        this already-authorized action finishes before revocation takes effect.
+        """
+        with self.db.transaction(write=write) as session:
+            self.identities.validate_principal(session, principal, lock=write)
+            yield session
+            # Time can pass even while revocation is locked out. Roll back local
+            # mutations that crossed expiry; external write receipts use their own
+            # finalization transaction and are never rolled back by session expiry.
+            self.identities.validate_principal(session, principal, lock=write)
 
     def _request(self, session, principal, request_id, lock=False):
         if lock:
@@ -55,18 +74,18 @@ class ProcurementService(TableImportServiceMixin):
         return row
 
     def policy(self, principal):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             current = effective_policy(session, principal.tenant_id)
             return {**current, "latest_version": session.get(TenantPolicyRow, principal.tenant_id).latest_version,
                     "status": "effective"}
 
     def policy_history(self, principal):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             return policy_versions(session, principal.tenant_id)
 
     def publish_policy(self, principal, command):
         require(principal, "approver")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             row = publish(session, principal, command)
             active = effective_policy(session, principal.tenant_id)
             if active["version"] == row.version:
@@ -130,7 +149,7 @@ class ProcurementService(TableImportServiceMixin):
 
     def create_request(self, principal, command):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             lock_tenant(session, principal.tenant_id)
             row = RequestRow(id=uid("req_"), tenant_id=principal.tenant_id, owner_id=principal.user_id,
                              data=command.model_dump(mode="json"), version=1, status="DRAFT")
@@ -140,17 +159,17 @@ class ProcurementService(TableImportServiceMixin):
             return self._request_dto(session, principal, row)
 
     def list_requests(self, principal):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             return [self._request_dto(session, principal, row) for row in session.scalars(select(RequestRow).where(
                 RequestRow.tenant_id == principal.tenant_id).order_by(RequestRow.created_at.desc()).limit(200))]
 
     def get_request(self, principal, request_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             return self._request_dto(session, principal, self._request(session, principal, request_id))
 
     def update_request(self, principal, request_id, command):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             row = self._request(session, principal, request_id, lock=True)
             self._mutable(row)
             if command.expected_version != row.version:
@@ -164,7 +183,7 @@ class ProcurementService(TableImportServiceMixin):
         require(principal, "buyer")
         if not data or len(data) > self.settings.max_upload_bytes:
             raise DomainError("UPLOAD_LIMIT", "The file must be non-empty and no larger than 2 MiB", 413)
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             self._mutable(self._request(session, principal, request_id))
         filename = Path(filename.replace("\\", "/")).name[:160]
         document_id = uid("doc_")
@@ -173,7 +192,7 @@ class ProcurementService(TableImportServiceMixin):
         # Source bytes are not accessible through a static-file route.
         created_file = False
         try:
-            with self.db.transaction(write=True) as session:
+            with self.transaction(principal, write=True) as session:
                 request = self._request(session, principal, request_id, lock=True)
                 self._mutable(request)
                 duplicate = session.scalar(select(DocumentRow).where(DocumentRow.request_id == request_id,
@@ -212,7 +231,7 @@ class ProcurementService(TableImportServiceMixin):
                                            policy or effective_policy(session, request.tenant_id))}
 
     def list_quotes(self, principal, request_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             request = self._request(session, principal, request_id)
             result = []
             for quote in session.scalars(select(QuoteRow).where(QuoteRow.request_id == request_id).order_by(QuoteRow.id)):
@@ -221,7 +240,7 @@ class ProcurementService(TableImportServiceMixin):
             return result
 
     def quote_history(self, principal, quote_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             quote, _ = self._quote(session, principal, quote_id)
             request = self._request(session, principal, quote.request_id)
             return [self._quote_view(session, quote, version, request) for version in session.scalars(
@@ -229,7 +248,7 @@ class ProcurementService(TableImportServiceMixin):
 
     def edit_quote(self, principal, quote_id, command):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             quote, _ = self._quote(session, principal, quote_id)
             request = self._request(session, principal, quote.request_id, lock=True)
             # Refresh after taking the aggregate lock, including on PostgreSQL.
@@ -256,7 +275,7 @@ class ProcurementService(TableImportServiceMixin):
 
     def confirm_quote(self, principal, quote_id, command):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             quote, _ = self._quote(session, principal, quote_id)
             request = self._request(session, principal, quote.request_id, lock=True)
             session.refresh(quote)
@@ -272,7 +291,7 @@ class ProcurementService(TableImportServiceMixin):
             return self._quote_view(session, quote, version, request)
 
     def evidence(self, principal, document_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             document = session.scalar(select(DocumentRow).where(DocumentRow.id == document_id, DocumentRow.tenant_id == principal.tenant_id))
             if not document:
                 raise DomainError("NOT_FOUND", "Document not found in this workspace", 404)
@@ -331,7 +350,7 @@ class ProcurementService(TableImportServiceMixin):
                 "current": current, "stale_reason": None if current else reason or "EVALUATION_INPUT_CHANGED"}
 
     def evaluations(self, principal, request_id, offset=0, limit=100):
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             try:
                 binding, reason = self._binding(session, request), None
@@ -343,7 +362,7 @@ class ProcurementService(TableImportServiceMixin):
 
     def analyze(self, principal, request_id, preferred_quote_id=None):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             self._mutable(request)
             binding = self._binding(session, request)
@@ -410,7 +429,7 @@ class ProcurementService(TableImportServiceMixin):
 
     def approve(self, principal, request_id, command):
         require(principal, "approver")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             self._mutable(request)
             if principal.user_id == request.owner_id:
@@ -422,7 +441,7 @@ class ProcurementService(TableImportServiceMixin):
                 previous.status = "SUPERSEDED"
             status = "APPROVED" if command.decision == "approve" else "REJECTED"
             approval = ApprovalRow(id=uid("ap_"), request_id=request.id, tenant_id=principal.tenant_id,
-                approver_id=principal.user_id, snapshot_hash=command.snapshot_hash, snapshot=deepcopy(current), status=status, note=command.note,
+                approver_id=principal.user_id, approver_auth_version=principal.auth_version, snapshot_hash=command.snapshot_hash, snapshot=deepcopy(current), status=status, note=command.note,
                 expires_at=(datetime.now(timezone.utc) + timedelta(seconds=self.settings.approval_ttl_seconds)).isoformat())
             session.add(approval)
             session.flush()
@@ -434,7 +453,7 @@ class ProcurementService(TableImportServiceMixin):
                     "request": self._request_dto(session, principal, request)}
 
     def approvals(self, principal, request_id, offset=0, limit=100):
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             try:
                 current, reason = self._current_snapshot(session, principal, request), None
@@ -463,9 +482,8 @@ class ProcurementService(TableImportServiceMixin):
             raise DomainError("APPROVAL_REQUIRED", "A valid approval is required")
         if approval.expires_at <= now():
             raise DomainError("APPROVAL_EXPIRED", "The approval has expired")
-        valid_approver = any(identity["user_id"] == approval.approver_id and identity["tenant_id"] == principal.tenant_id
-            and identity["role"] == "approver" for identity in self.settings.auth_tokens.values())
-        if not valid_approver:
+        if not self.identities.approver_valid(session, principal.tenant_id, approval.approver_id,
+                auth_version=approval.approver_auth_version, lock=True):
             raise DomainError("APPROVER_REVOKED", "The approving user no longer has approval permission", 403)
         current = self._current_snapshot(session, principal, request)
         if approval.snapshot_hash != current["snapshot_hash"] or request.proposal["snapshot_hash"] != current["snapshot_hash"]:
@@ -474,14 +492,14 @@ class ProcurementService(TableImportServiceMixin):
         # checked again at authorization, not only at validation entry.
         if approval.expires_at <= now():
             raise DomainError("APPROVAL_EXPIRED", "The approval expired during validation")
-        if not any(identity["user_id"] == approval.approver_id and identity["tenant_id"] == principal.tenant_id
-                   and identity["role"] == "approver" for identity in self.settings.auth_tokens.values()):
+        if not self.identities.approver_valid(session, principal.tenant_id, approval.approver_id,
+                auth_version=approval.approver_auth_version, lock=True):
             raise DomainError("APPROVER_REVOKED", "The approving user no longer has approval permission", 403)
         return approval, current
 
     def enqueue(self, principal, request_id, snapshot_hash):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             existing = session.scalar(select(OperationRow).where(OperationRow.request_id == request.id))
             if existing:
@@ -497,7 +515,8 @@ class ProcurementService(TableImportServiceMixin):
                 raise DomainError("APPROVAL_STALE", "Execution must use the displayed approved snapshot")
             operation_id = digest({"tenant": principal.tenant_id, "request": request.id, "purpose": "supplier-quotation-draft-v1"})
             operation = OperationRow(id=operation_id, tenant_id=principal.tenant_id, request_id=request.id,
-                approval_id=approval.id, snapshot_hash=current["snapshot_hash"], payload=current, status="PENDING", attempts=0)
+                approval_id=approval.id, initiator_id=principal.user_id, initiator_auth_version=principal.auth_version,
+                snapshot_hash=current["snapshot_hash"], payload=current, status="PENDING", attempts=0)
             session.add(operation)
             session.flush()
             session.add(OutboxRow(id=uid("ob_"), operation_id=operation_id, status="PENDING"))
@@ -506,7 +525,7 @@ class ProcurementService(TableImportServiceMixin):
             return op_dto(operation)
 
     def get_operation(self, principal, operation_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             row = session.scalar(select(OperationRow).where(OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
             if not row:
                 raise DomainError("NOT_FOUND", "Operation not found in this workspace", 404)
@@ -527,7 +546,7 @@ class ProcurementService(TableImportServiceMixin):
         An earlier COMPLETED record is historical; this receipt detects later ERP
         drift without rewriting that record. Any workspace reader can verify.
         """
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             operation = session.scalar(select(OperationRow).where(
                 OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
             if operation is None:
@@ -558,14 +577,91 @@ class ProcurementService(TableImportServiceMixin):
             except Exception:
                 # Do not persist arbitrary upstream errors, URLs, credentials or document prose.
                 receipt.update(status="unavailable", reason="ERP_VERIFICATION_UNAVAILABLE")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             self._request(session, principal, request_id, lock=True)
             audit(session, principal, request_id, "ERP_VERIFICATION_" + receipt["status"].upper(), receipt)
         return receipt
 
+    def _validate_execution_authority(self, session, operation):
+        # Sessions end independently of already accepted business decisions. A
+        # membership change does withdraw old authority to initiate a first write.
+        if self.settings.mode == "pilot" and not self.identities.actor_valid(
+                session, operation.tenant_id, operation.initiator_id, "buyer",
+                auth_version=operation.initiator_auth_version, lock=True):
+            raise DomainError("BUYER_REVOKED", "The requesting user no longer has execution permission", 403)
+
+    def _assert_dispatch_deadlines(self, session, operation, approval, principal, trusted_worker):
+        """Use one final clock sample after all potentially slow identity reads.
+
+        The corresponding authority rows are already locked and validated. This
+        final step covers a buyer expiring while approval/source/policy validation
+        runs, or either member expiring while the other is being checked.
+        """
+        # A scheduled higher revision can become effective without any writer.
+        # Capture its earliest activation while the tenant lock prevents changes,
+        # then compare it with the same final clock used for identity deadlines.
+        policy_deadline = session.scalar(select(PolicyVersionRow.effective_at).where(
+            PolicyVersionRow.tenant_id == operation.tenant_id,
+            PolicyVersionRow.version > operation.payload["policy_version"])
+            .order_by(PolicyVersionRow.effective_at).limit(1))
+        members, caller = [], None
+        if self.settings.mode == "pilot":
+            users = [operation.initiator_id, approval.approver_id]
+            if not trusted_worker:
+                users.append(principal.user_id)
+            members = list(session.scalars(select(PilotMembershipRow).where(
+                PilotMembershipRow.tenant_id == operation.tenant_id,
+                PilotMembershipRow.user_id.in_(users))
+                .execution_options(populate_existing=True)))
+            if not trusted_worker:
+                caller = session.get(PilotSessionRow, principal.session_id)
+        stamp = datetime.now(timezone.utc)
+        def elapsed(value):
+            if not value:
+                return False
+            try:
+                parsed = datetime.fromisoformat(value)
+                return parsed.tzinfo is None or parsed <= stamp
+            except (TypeError, ValueError):
+                return True
+        if elapsed(policy_deadline):
+            raise DomainError("APPROVAL_STALE", "A new policy became effective before dispatch")
+        for member in members:
+            if elapsed(member.expires_at):
+                if not trusted_worker and member.user_id == principal.user_id:
+                    raise DomainError("UNAUTHENTICATED", "The calling membership expired before dispatch", 401)
+                code = "BUYER_REVOKED" if member.user_id == operation.initiator_id else "APPROVER_REVOKED"
+                raise DomainError(code, "A required membership expired before dispatch", 403)
+        if caller is not None and elapsed(caller.expires_at):
+            raise DomainError("UNAUTHENTICATED", "The session expired before dispatch", 401)
+        if elapsed(approval.expires_at):
+            raise DomainError("APPROVAL_EXPIRED", "The approval expired before dispatch")
+
     def process_operation(self, principal, operation_id):
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        result = self._process_operation(principal, operation_id)
+        # The external receipt has already committed. A session revoked during
+        # network I/O must not receive further protected data, but must not roll
+        # back the durable no-replay result either.
+        with self.transaction(principal):
+            pass
+        return result
+
+    def process_pending_operation(self, tenant_id, operation_id):
+        """Internal outbox entry. The API never accepts a caller-supplied worker flag.
+
+        A worker has no human session. The approving membership generation is still
+        checked durably at both first-write gates; uncertain operations remain read-only.
+        """
+        principal = Principal(user_id="outbox-worker", tenant_id=tenant_id, role="buyer")
+        return self._process_operation(principal, operation_id, trusted_worker=True)
+
+    def _process_operation(self, principal, operation_id, trusted_worker=False):
+        # For a human caller use the live session at each actionable transaction.
+        # Do not bypass validation by comparing a user-controlled user_id string.
+        transaction = (lambda: self.db.transaction(write=True)) if trusted_worker else (
+            lambda: self.transaction(principal, write=True))
+        with transaction() as session:
             operation = session.scalar(select(OperationRow).where(OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
             if not operation:
                 raise DomainError("NOT_FOUND", "Operation not found in this workspace", 404)
@@ -584,6 +680,7 @@ class ProcurementService(TableImportServiceMixin):
             fresh = operation.status == "PENDING"
             if fresh:
                 try:
+                    self._validate_execution_authority(session, operation)
                     self._validate_approval(session, principal, request, session.get(ApprovalRow, operation.approval_id))
                 except DomainError as error:
                     operation.status, operation.error = "NEEDS_HUMAN", error.code
@@ -605,16 +702,33 @@ class ProcurementService(TableImportServiceMixin):
             if remote is None and fresh:
                 # A slow lookup must not allow an expired/revoked approval to authorize a new write.
                 with self.db.transaction(write=True) as session:
+                    if not trusted_worker:
+                        self.identities.validate_principal(session, principal, lock=True)
                     request = self._request(session, principal, payload["request_id"], lock=True)
                     operation = session.get(OperationRow, operation_id)
                     if operation.lease_until != lease:
                         return op_dto(operation)
+                    self._validate_execution_authority(session, operation)
                     self._validate_approval(session, principal, request, session.get(ApprovalRow, operation.approval_id))
                     # Keep both locks through the external write. A concurrent policy
                     # publisher cannot commit between validation and dispatch. Future
                     # activation is evaluated immediately before this linearization point.
-                    self._assert_policy_current(session, request, payload["policy_hash"])
-                    remote = self.erp.create_draft(operation_id, payload)
+                    def authorize_first_write():
+                        # ERP adapters may perform slow metadata reads before
+                        # posting. Recheck at their actual first-write boundary.
+                        self._assert_policy_current(session, request, payload["policy_hash"])
+                        if not trusted_worker:
+                            self.identities.validate_principal(session, principal, lock=True)
+                        self._validate_execution_authority(session, operation)
+                        approval = session.get(ApprovalRow, operation.approval_id)
+                        if not self.identities.approver_valid(session, principal.tenant_id, approval.approver_id,
+                                auth_version=approval.approver_auth_version, lock=True):
+                            raise DomainError("APPROVER_REVOKED", "The approving user no longer has approval permission", 403)
+                        self._assert_dispatch_deadlines(session, operation, approval, principal, trusted_worker)
+                    guarded = getattr(self.erp, "create_draft_guarded", None)
+                    if not callable(guarded):
+                        raise ERPRejected("ERP_GUARDED_DISPATCH_REQUIRED")
+                    remote = guarded(operation_id, payload, authorize_first_write)
             if remote is None:
                 error = "REMOTE_ABSENCE_NOT_PROOF_OF_NO_COMMIT"
             elif remote_matches(remote, payload, operation_id):
@@ -630,6 +744,8 @@ class ProcurementService(TableImportServiceMixin):
         except Exception:
             # Unexpected adapter failures are also uncertain, never implicit success.
             status, error = "RECONCILING", "ERP_ADAPTER_FAILURE"
+        # Record the external result even if its initiating session is now invalid.
+        # This finalization cannot dispatch or authorize another external write.
         with self.db.transaction(write=True) as session:
             request = self._request(session, principal, payload["request_id"], lock=True)
             operation = session.get(OperationRow, operation_id)
@@ -644,7 +760,7 @@ class ProcurementService(TableImportServiceMixin):
             return op_dto(operation)
 
     def events(self, principal, request_id, after=0):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             self._request(session, principal, request_id)
             return [{"id": row.id, "type": row.type, "actor_id": row.actor_id, "payload": row.payload, "created_at": row.created_at}
                     for row in session.scalars(select(EventRow).where(EventRow.request_id == request_id,

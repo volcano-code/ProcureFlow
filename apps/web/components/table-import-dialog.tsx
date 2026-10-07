@@ -1,9 +1,10 @@
 "use client";
+import type {Credential} from "@/lib/session.mjs";
 import {useEffect,useRef,useState,type FormEvent} from "react";
 import {api,type Quote,type QuoteValues,type TableImportPreview,type TableImportSelection} from "@/lib/api";
 import {TABLE_FIELDS,createImportScope,importExpired,mappingProblems,selectionForSheet,previewBody,type ImportScope} from "@/lib/table-import.mjs";
 
-type Props={token:string;requestId:string;requestVersion:number;disabled:boolean;workflowBusy:boolean;onImported:()=>void};
+type Props={token:Credential;requestId:string;requestVersion:number;disabled:boolean;workflowBusy:boolean;onImported:()=>void};
 type DialogProps=Omit<Props,"disabled"|"workflowBusy">&{onClose:()=>void};
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 

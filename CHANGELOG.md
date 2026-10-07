@@ -1,5 +1,12 @@
 # Changelog
 
+## 待发布：受控试点身份与会话
+
+- 新增数据库身份与短期内存会话、一次性邀请、退出／到期／撤销及原生身份边界
+- 首次 ERP 写入同时核验买方与审批方授权版本；撤权后不确定结果仍仅回读，不重发
+- 新增迁移与严格 pilot 浏览器／隔离真实 ERP 联合验收入口；脚本存在不代表已经运行
+- 不包含真实账号发放、SSO、生产部署、付费模型、备份保留或 OCR／多 SKU
+
 ## Unreleased — ordinary table import
 
 CSV/XLSX worksheet/row selection, bilingual header suggestions, explicit mapping previews, source cell provenance, durable expiring import receipts, tenant-scoped deduplication and revision-bound confirmation. Existing correction reasons, quote confirmation and stale approval/ERP guards retained. Bounded decoder subprocess and streaming ingress byte limits added; not a production sandbox. Verification and limits: `docs/stage12-tabular-import.md`.

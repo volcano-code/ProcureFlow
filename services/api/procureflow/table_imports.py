@@ -50,14 +50,14 @@ class TableImportServiceMixin:
         filename = Path(filename.replace("\\", "/")).name[:160]
         sha = hashlib.sha256(data).hexdigest()
         # Authorize before spawning a parser; do not hold a database write lock while parsing.
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             self._mutable(self._request(session, principal, request_id))
         table = parse_table(filename, data)
         import_id = uid("tim_")
         path = self.document_dir / (import_id + Path(filename).suffix.lower())
         created_file = False
         try:
-            with self.db.transaction(write=True) as session:
+            with self.transaction(principal, write=True) as session:
                 request = self._request(session, principal, request_id, lock=True)
                 self._mutable(request)
                 row = session.scalar(select(TableImportRow).where(TableImportRow.tenant_id == principal.tenant_id,
@@ -97,7 +97,7 @@ class TableImportServiceMixin:
             raise
 
     def get_table_import(self, principal, import_id):
-        with self.db.transaction() as session:
+        with self.transaction(principal) as session:
             row = self._table_import(session, principal, import_id)
             self._verify_document(row)
             request = self._request(session, principal, row.request_id)
@@ -106,7 +106,7 @@ class TableImportServiceMixin:
     def preview_table_import(self, principal, import_id, command):
         from .service import require
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             row = self._table_import(session, principal, import_id)
             request = self._request(session, principal, row.request_id, lock=True)
             row = self._table_import(session, principal, import_id)
@@ -134,7 +134,7 @@ class TableImportServiceMixin:
     def confirm_table_import(self, principal, import_id, command):
         from .service import require
         require(principal, "buyer")
-        with self.db.transaction(write=True) as session:
+        with self.transaction(principal, write=True) as session:
             row = self._table_import(session, principal, import_id)
             request = self._request(session, principal, row.request_id, lock=True)
             row = self._table_import(session, principal, import_id)

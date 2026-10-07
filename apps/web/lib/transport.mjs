@@ -1,4 +1,5 @@
 /** Shared browser/Node transport. No automatic retry for business mutations. */
+import {requestScope} from "./session.mjs";
 export class APIError extends Error {
   constructor(code, message, status = 0) {
     super(`${code}: ${message}`);
@@ -10,12 +11,16 @@ function endpoint(base, path) {
   return base.replace(/\/$/, '') + '/api/v1' + path;
 }
 export async function requestJSON(base, token, path, {method = 'GET', body, signal, fetchImpl = fetch} = {}) {
+  const scope = requestScope(token, signal);
   const form = body instanceof FormData;
   const response = await fetchImpl(endpoint(base, path), {
-    method, signal, cache: 'no-store', redirect: 'error',
-    headers: {Authorization: `Bearer ${token}`, ...(body !== undefined && !form ? {'Content-Type': 'application/json'} : {})},
+    method, signal:scope.signal, cache: 'no-store', redirect: 'error', credentials: 'omit',
+    headers: {...(scope.token ? {Authorization: `Bearer ${scope.token}`} : {}), ...(body !== undefined && !form ? {'Content-Type': 'application/json'} : {})},
     body: body === undefined ? undefined : form ? body : JSON.stringify(body),
   });
+  scope.assertCurrent();
+  // A malformed denial body must still clear authenticated UI. Role denials (403) do not sign out.
+  if (response.status === 401) scope.invalidate();
   let data;
   try { data = await response.json(); }
   catch { throw new APIError('INVALID_RESPONSE', 'API response is not JSON', response.status); }
@@ -23,24 +28,29 @@ export async function requestJSON(base, token, path, {method = 'GET', body, sign
     const error = data && typeof data === 'object' ? data.error : null;
     throw new APIError(error?.code || 'HTTP_ERROR', error?.message || `HTTP ${response.status}; check the submitted fields`, response.status);
   }
+  scope.assertCurrent();
   return data;
 }
 /** Creates one new request. Individual imports are idempotent by document hash.
  * Partial failure retains its request ID; it never silently creates another request.
  */
 export async function loadDemo(base, token, {signal, fetchImpl = fetch, onCreated = () => {}} = {}) {
+  const scope = requestScope(token, signal);
+  signal = scope.signal;
   const opts = {signal, fetchImpl};
   const sample = await requestJSON(base, token, '/demo/samples', opts);
   if (sample.synthetic !== true || !Array.isArray(sample.files) || sample.files.length !== 3) {
     throw new APIError('INVALID_DEMO', 'Expected three explicitly synthetic samples');
   }
   const request = await requestJSON(base, token, '/requests', {...opts, method: 'POST', body: sample.request});
-  onCreated(request.id);
+  scope.assertCurrent(); onCreated(request.id);
   for (const filename of sample.files) {
     try {
       const response = await fetchImpl(endpoint(base, `/demo/samples/${encodeURIComponent(filename)}`), {
-        headers: {Authorization: `Bearer ${token}`}, signal, redirect: 'error', cache: 'no-store',
+        headers: {Authorization: `Bearer ${scope.token}`}, signal, redirect: 'error', cache: 'no-store', credentials: 'omit',
       });
+      scope.assertCurrent();
+      if (response.status === 401) scope.invalidate();
       if (!response.ok) throw new APIError('SAMPLE_FETCH_FAILED', `HTTP ${response.status}`, response.status);
       const form = new FormData(); form.append('file', await response.blob(), filename);
       await requestJSON(base, token, `/requests/${request.id}/documents`, {...opts, method: 'POST', body: form});
@@ -65,6 +75,9 @@ export class AuditDecoder {
       this.buffer = this.buffer.slice(match.index + match[0].length);
       const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
       if (!data) continue;
+      if (frame.split(/\r?\n/).some(line => /^event:\s*auth_invalid\s*$/.test(line))) {
+        events.push({type:"auth_invalid"}); continue;
+      }
       let event;
       try { event = JSON.parse(data); } catch { throw new APIError('STREAM_INVALID', 'Audit event is not valid JSON'); }
       if (!event || !Number.isSafeInteger(event.id) || event.id <= 0 || typeof event.type !== 'string') {
@@ -83,15 +96,18 @@ function sleep(ms, signal) {
   });
 }
 export async function watchAudit(base, token, requestId, {signal, after = 0, onEvent, onStatus = () => {}, fetchImpl = fetch, retryMs = 1500}) {
+  const scope = requestScope(token, signal); signal = scope.signal;
   let cursor = after;
   while (!signal.aborted) {
     let reader;
     try {
       onStatus('connecting');
       const response = await fetchImpl(endpoint(base, `/requests/${encodeURIComponent(requestId)}/events/stream?after=${cursor}`), {
-        headers: {Authorization: `Bearer ${token}`}, signal, cache: 'no-store', redirect: 'error',
+        headers: {Authorization: `Bearer ${scope.token}`}, signal, cache: 'no-store', redirect: 'error', credentials: 'omit',
       });
+      scope.assertCurrent();
       if (!response.ok) {
+        if (response.status === 401) scope.invalidate();
         if ([401, 403, 404].includes(response.status)) { onStatus('denied'); return; }
         throw new APIError('STREAM_HTTP', `HTTP ${response.status}`, response.status);
       }
@@ -102,6 +118,7 @@ export async function watchAudit(base, token, requestId, {signal, after = 0, onE
         if (done || signal.aborted) break;
         for (const event of decoder.feed(value)) {
           if (signal.aborted) break;
+          if (event.type === 'auth_invalid') { onStatus('denied'); scope.invalidate(); return; }
           if (event.id > cursor) { cursor = event.id; onEvent(event); }
         }
       }

@@ -1,9 +1,10 @@
 "use client";
+import type {Credential} from "@/lib/session.mjs";
 import {useCallback,useEffect,useRef,useState} from "react";
 import {api,type Evaluation,type ApprovalReceipt} from "@/lib/api";
 import {bindingCurrent,staleExplanation,violationExplanation} from "@/lib/policy.mjs";
 
-export default function EvaluationPanel({token,requestId,policyHash,refreshEvent}:{token:string;requestId:string;policyHash:string|null;refreshEvent:string}) {
+export default function EvaluationPanel({token,requestId,policyHash,refreshEvent}:{token:Credential;requestId:string;policyHash:string|null;refreshEvent:string}) {
   const [evaluations,setEvaluations]=useState<Evaluation[]>([]);
   const [approvals,setApprovals]=useState<ApprovalReceipt[]>([]);
   const [loading,setLoading]=useState(true),[error,setError]=useState("");

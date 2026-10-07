@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import time
 from sqlalchemy import and_, or_, select
-from .contracts import Principal
 from .db import OperationRow, OutboxRow, now
 
 
@@ -33,7 +32,7 @@ def drain_once(service=None):
     with service.db.transaction() as session:
         work = list(session.execute(pending_work_query()))
     for operation_id, tenant_id in work:
-        result = service.process_operation(Principal(user_id="outbox-worker", tenant_id=tenant_id, role="buyer"), operation_id)
+        result = service.process_pending_operation(tenant_id, operation_id)
         print(f"{operation_id[:12]} {result['status']}", flush=True)
     return len(work)
 

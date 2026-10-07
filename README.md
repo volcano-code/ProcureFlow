@@ -11,6 +11,7 @@
 - 单 SKU、CNY、EA；保留 TXT/CSV/文本 PDF/XLSX 固定键值布局，并支持普通 CSV/XLSX 的工作表/报价行选择、显式列映射和持久预览（见 [阶段十二](docs/stage12-tabular-import.md)）。普通表格到隔离真实 ERP 的严格验收合同见 [阶段十三](docs/stage13-tabular-erp-acceptance.md)。没有 OCR、多商品合并或任意单位/币种换算
 - 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
+- 受控 pilot 登录：一次性邀请、短期内存会话、退出／到期／跨进程撤权、用户／租户／角色展示；买方与审批方授权版本在首次 ERP 写入前重验（见 [阶段十四](docs/stage14-pilot-sessions.md)），不自动发放真实账号
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
 - ERPNext Supplier Quotation 草稿和独立读回。支持范围与税/运费/折扣合同以 [费用映射边界](docs/erp-cost-mapping.md) 和 [ERP 说明](integrations/erpnext/README.md) 为准；没有 Submit、Purchase Order、删除或支付功能
 - 原生 Next.js 工作台，以及 FastAPI 提供的轻量静态演示页；锁定 npm 安装、类型检查、生产构建、浏览器与容器验收入口
@@ -91,7 +92,7 @@ npm run dev
 python -m pip install -r services/api/requirements-dev.txt
 python scripts/test.py -q -m 'not postgres and not browser'
 python scripts/export_contracts.py --check
-node --test apps/web/tests/transport.test.mjs apps/web/tests/policy.test.mjs apps/web/tests/table-import.test.mjs
+npm run test:unit --prefix apps/web
 python scripts/smoke.py
 python scripts/web_http_smoke.py
 python scripts/verify_model_acceptance.py --fixture
@@ -129,7 +130,7 @@ PYTHONPATH=. python -m alembic upgrade head
 
 对已有实例先停止相关进程、备份并在副本验证迁移。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
 
-Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。私有令牌模式不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
+Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。旧 private 静态令牌模式和新 pilot 受控会话模式都不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
 
 ## 目录与历史
 

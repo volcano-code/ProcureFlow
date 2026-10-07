@@ -23,6 +23,8 @@ class Settings:
     auth_tokens: dict = field(default_factory=dict, repr=False)
     web_origins: tuple[str, ...] = field(default_factory=lambda: tuple(
         value.strip() for value in os.getenv("PF_WEB_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if value.strip()))
+    session_ttl_seconds: int = field(default_factory=lambda: int(os.getenv("PF_SESSION_TTL_SECONDS", "1800")))
+    invite_ttl_seconds: int = field(default_factory=lambda: int(os.getenv("PF_INVITE_TTL_SECONDS", "86400")))
     approval_ttl_seconds: int = 3600
     max_upload_bytes: int = 2 * 1024 * 1024
     erp_mode: str = field(default_factory=lambda: os.getenv("PF_ERP_MODE", "mock"))
@@ -35,12 +37,14 @@ class Settings:
     erp_allow_draft_writes: bool = field(default_factory=lambda: os.getenv("ERP_ALLOW_DRAFT_WRITES", "false").lower() == "true")
 
     def __post_init__(self):
-        if self.mode not in {"demo", "private"}:
-            raise ValueError("PF_MODE must be demo or private; public production deployment is not supported yet")
+        if self.mode not in {"demo", "private", "pilot"}:
+            raise ValueError("PF_MODE must be demo, private or pilot; public production deployment is not supported yet")
         tokens = self.auth_tokens or json.loads(os.getenv("PF_AUTH_TOKENS", "{}"))
         if not tokens and self.mode == "demo":
             tokens = {k: dict(v) for k, v in DEMO_IDENTITIES.items()}
-        if not tokens:
+        if self.mode == "pilot" and tokens:
+            raise ValueError("Pilot mode forbids PF_AUTH_TOKENS; use controlled durable identities")
+        if not tokens and self.mode == "private":
             raise ValueError("Private mode requires PF_AUTH_TOKENS; no implicit identity is permitted")
         for token, identity in tokens.items():
             if not token or not all(identity.get(k) for k in ("user_id", "tenant_id", "role")):
@@ -49,10 +53,14 @@ class Settings:
                 raise ValueError("Unknown configured role")
             if self.mode == "private" and (token.startswith("demo-") or len(token) < 32):
                 raise ValueError("Private-mode tokens must be at least 32 characters and not demo tokens")
+        if not 60 <= self.session_ttl_seconds <= 3600:
+            raise ValueError("PF_SESSION_TTL_SECONDS must be between 60 and 3600")
+        if not 60 <= self.invite_ttl_seconds <= 604800:
+            raise ValueError("PF_INVITE_TTL_SECONDS must be between 60 and 604800")
         if self.erp_mode not in {"mock", "erpnext"}:
             raise ValueError("Unknown ERP mode")
-        if self.erp_mode == "erpnext" and self.mode != "private":
-            raise ValueError("ERPNext requires PF_MODE=private and non-demo identities, including read-only access")
+        if self.erp_mode == "erpnext" and self.mode not in {"private", "pilot"}:
+            raise ValueError("ERPNext requires PF_MODE=private or pilot and non-demo identities, including read-only access")
         if self.erp_mode == "mock" and self.erp_allow_draft_writes:
             raise ValueError("ERP_ALLOW_DRAFT_WRITES is only valid with PF_ERP_MODE=erpnext")
         for origin in self.web_origins:
