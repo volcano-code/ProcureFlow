@@ -91,6 +91,42 @@ def test_gate_complete_fixture_is_only_record_consistency(reports):
     assert 'not a new ERP execution' in result['scope']
 
 
+@pytest.mark.parametrize('mapping_order', ['api', 'browser', 'reversed-api', 'alphabetical'])
+@pytest.mark.parametrize('json_order', ['original', 'reversed', 'sorted'])
+def test_pilot_gate_accepts_mapping_order_without_json_order_dependency(reports, mapping_order, json_order):
+    from test_erp_evidence_gate import MAPPING_ORDERS, reverse_json_objects, set_fragment_order
+    directory, values, save = reports
+    for operation in values['roundtrip.json']['operations']:
+        set_fragment_order(operation['provenance'], MAPPING_ORDERS[mapping_order])
+    save()
+    for name, value in values.items():
+        if json_order == 'reversed':
+            value = reverse_json_objects(value)
+        (directory / name).write_text(json.dumps(value, sort_keys=json_order == 'sorted'))
+    assert module('check_pilot_combined_evidence').check(directory)['status'] == 'passed'
+
+
+@pytest.mark.parametrize('operation_index', [0, 1])
+@pytest.mark.parametrize('mutation', ['duplicate', 'missing', 'wrong-document', 'out-of-range'])
+def test_pilot_gate_rejects_invalid_fragment_sets(reports, operation_index, mutation):
+    from test_erp_evidence_gate import MAPPING_ORDERS, set_fragment_order
+    directory, values, save = reports
+    provenance = values['roundtrip.json']['operations'][operation_index]['provenance']
+    set_fragment_order(provenance, MAPPING_ORDERS['browser'])
+    evidence = provenance['field_evidence']['unit_price']
+    if mutation == 'missing':
+        del evidence['fragment_id']
+    elif mutation == 'duplicate':
+        evidence['fragment_id'] = provenance['field_evidence']['supplier_id']['fragment_id']
+    elif mutation == 'wrong-document':
+        evidence['fragment_id'] = 'doc_' + 'f' * 32 + ':f0004'
+    else:
+        evidence['fragment_id'] = provenance['document_id'] + ':f0011'
+    save()
+    with pytest.raises(ValueError, match='INVALID_TABULAR_FIELD_EVIDENCE'):
+        module('check_pilot_combined_evidence').check(directory)
+
+
 @pytest.mark.parametrize('path,value', [
     ('roundtrip.json/fixture', True), ('roundtrip.json/model_used', True),
     ('roundtrip.json/live_erp', False), ('roundtrip.json/browser_verified', False),

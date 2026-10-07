@@ -86,11 +86,20 @@ def require_tabular_provenance(operation: dict) -> None:
     require(isinstance(fields, dict) and set(fields) == set(TABULAR_MAPPING), 'INVALID_TABULAR_FIELD_EVIDENCE')
     raw_values = {**expected, 'currency': '人民币', 'tax_rate': '13%',
                   'tax_mode': '含税' if fixture['tax_mode'] == 'included' else '未税'}
-    for index, (field, column) in enumerate(TABULAR_MAPPING.items()):
+    # map_table assigns fragment IDs in submitted mapping order. JSON object
+    # order is not part of the evidence contract: bind each field to its exact
+    # source coordinates/text, and require the complete unique fragment set.
+    expected_fragments = {f'{document_id}:f{index:04d}' for index in range(len(TABULAR_MAPPING))}
+    fragment_ids = set()
+    for field, column in TABULAR_MAPPING.items():
         evidence = fields[field]
         require(isinstance(evidence, dict), 'INVALID_TABULAR_FIELD_EVIDENCE')
+        fragment_id = evidence.get('fragment_id')
+        require(type(fragment_id) is str and fragment_id in expected_fragments
+                and fragment_id not in fragment_ids, 'INVALID_TABULAR_FIELD_EVIDENCE')
+        fragment_ids.add(fragment_id)
         locator = {'kind': kind, 'document_id': document_id, 'document_sha256': sha,
-            'fragment_id': f'{document_id}:f{index:04d}', 'sheet': sheet, 'row': 5,
+            'fragment_id': fragment_id, 'sheet': sheet, 'row': 5,
             'column': column, 'cell_range': f'{column}5', 'header_row': 3, 'label_cell': f'{column}3'}
         if kind == 'csv':
             locator.update(line_start=6, line_end=6)
@@ -99,6 +108,7 @@ def require_tabular_provenance(operation: dict) -> None:
                         for key, value in locator.items()), 'INVALID_TABULAR_FIELD_EVIDENCE')
         text = evidence.get('text')
         require(text == f'{TABULAR_HEADERS[field]}: {raw_values[field]}', 'INVALID_TABULAR_FIELD_TEXT')
+    require(fragment_ids == expected_fragments, 'INVALID_TABULAR_FIELD_EVIDENCE')
 
 
 def check(directory: Path, backend='sqlite') -> dict:

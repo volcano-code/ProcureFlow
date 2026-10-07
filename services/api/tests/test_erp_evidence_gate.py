@@ -23,8 +23,31 @@ MAPPING = {
     'tax_rate': 'J', 'quantity': 'K', 'uom': 'L',
 }
 
+# Native table-import compactMapping emits fields in UI order, while the HTTP
+# fixture uses column order. Neither order belongs to the evidence schema.
+MAPPING_ORDERS = {
+    'api': tuple(MAPPING),
+    'browser': ('supplier_id', 'sku', 'quantity', 'uom', 'unit_price', 'tax_mode',
+                'tax_rate', 'shipping_cost', 'discount', 'delivery_days', 'currency'),
+    'reversed-api': tuple(reversed(MAPPING)),
+    'alphabetical': tuple(sorted(MAPPING)),
+}
+
 HEADERS = ['币种', '运费', '供应商编码', '税价模式', '物料编码', '折扣金额',
            '单价', '交期天数', '税率', '数量', '单位']
+
+
+def set_fragment_order(provenance, order):
+    for index, field in enumerate(order):
+        provenance['field_evidence'][field]['fragment_id'] = f"{provenance['document_id']}:f{index:04d}"
+
+
+def reverse_json_objects(value):
+    if isinstance(value, dict):
+        return {key: reverse_json_objects(child) for key, child in reversed(value.items())}
+    if isinstance(value, list):
+        return [reverse_json_objects(child) for child in value]
+    return value
 
 
 def tabular_provenance(operation, index):
@@ -116,6 +139,44 @@ def test_valid_consistent_fixture_reports_are_hashed_not_promoted_to_new_executi
     assert len(result['source_sha256']) == 4
     assert result['source_sha256'] == {str(source.relative_to(path)): hashlib.sha256(source.read_bytes()).hexdigest()
         for source in (path / 'input-fixtures').iterdir()}
+
+
+@pytest.mark.parametrize('mapping_order', MAPPING_ORDERS)
+@pytest.mark.parametrize('json_order', ['original', 'reversed', 'sorted'])
+def test_tabular_fragment_assignment_and_json_object_order_are_independent(reports, mapping_order, json_order):
+    gate, path, values, write = reports
+    for operation in values['roundtrip.json']['operations'][4:]:
+        set_fragment_order(operation['provenance'], MAPPING_ORDERS[mapping_order])
+    write()
+    for name, value in values.items():
+        if json_order == 'reversed':
+            value = reverse_json_objects(value)
+        (path / name).write_text(json.dumps(value, sort_keys=json_order == 'sorted'))
+    assert gate.check(path)['status'] == 'passed'
+
+
+@pytest.mark.parametrize('scenario_index', [4, 5, 6, 7])
+@pytest.mark.parametrize('mutation', ['duplicate', 'missing', 'wrong-document', 'out-of-range',
+    'negative', 'noncanonical', 'null', 'boolean', 'number', 'list', 'object'])
+def test_tabular_fragment_ids_require_complete_unique_document_prefixed_set(reports, scenario_index, mutation):
+    gate, path, values, write = reports
+    provenance = values['roundtrip.json']['operations'][scenario_index]['provenance']
+    set_fragment_order(provenance, MAPPING_ORDERS['browser'])
+    evidence = provenance['field_evidence']['unit_price']
+    prefix = provenance['document_id'] + ':'
+    if mutation == 'missing':
+        del evidence['fragment_id']
+    else:
+        evidence['fragment_id'] = {
+            'duplicate': provenance['field_evidence']['supplier_id']['fragment_id'],
+            'wrong-document': 'doc_' + 'f' * 32 + ':f0004',
+            'out-of-range': prefix + 'f0011', 'negative': prefix + 'f-001',
+            'noncanonical': prefix + 'f4', 'null': None, 'boolean': True,
+            'number': 4, 'list': [], 'object': {},
+        }[mutation]
+    write()
+    with pytest.raises(ValueError, match='INVALID_TABULAR_FIELD_EVIDENCE'):
+        gate.check(path)
 
 
 @pytest.mark.parametrize('missing', module().FILES)
@@ -274,15 +335,17 @@ def test_acceptance_requires_all_eight_ordered_scenarios_and_counts(reports, mut
 
 
 @pytest.mark.parametrize('scenario_index', [4, 5, 6, 7])
+@pytest.mark.parametrize('mapping_order', ['api', 'browser'])
 @pytest.mark.parametrize('mutation', ['missing', 'bad-sha', 'bad-import-id', 'bad-quote-id', 'bad-document-id',
     'sheet', 'header', 'boolean-header', 'row', 'duplicate-row', 'mapping', 'extra-mapping',
     'missing-value', 'value', 'price-float', 'boolean-days', 'supplier', 'missing-field', 'extra-field',
     'field-hash', 'field-document', 'field-fragment', 'field-kind', 'field-sheet', 'field-row',
     'field-column', 'field-cell', 'field-header', 'field-label', 'field-lines', 'field-text', 'field-extra'])
-def test_tabular_provenance_fails_closed_on_missing_or_drifted_claims(reports, scenario_index, mutation):
+def test_tabular_provenance_fails_closed_on_missing_or_drifted_claims(reports, scenario_index, mapping_order, mutation):
     gate, path, values, write = reports
     operation = values['roundtrip.json']['operations'][scenario_index]
     provenance = operation['provenance']
+    set_fragment_order(provenance, MAPPING_ORDERS[mapping_order])
     evidence = provenance['field_evidence']['unit_price']
     if mutation == 'missing': del operation['provenance']
     elif mutation == 'bad-sha': provenance['document_sha256'] = 'missing'

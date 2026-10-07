@@ -22,6 +22,7 @@ import erp_tabular_fixtures as fixtures
 from cost_fixtures import ACCEPTANCE_CASES, COST_CASES
 from check_erp_sandbox_evidence import require_tabular_provenance
 from procureflow.tabular import parse_table, map_table
+from test_erp_evidence_gate import MAPPING_ORDERS, reverse_json_objects
 
 DATA = {'supplier': 'PF Synthetic Supplier', 'sku': 'PF-SANDBOX-ITEM',
     'company': 'ProcureFlow Sandbox', 'user': 'pf-integration@example.invalid',
@@ -29,13 +30,13 @@ DATA = {'supplier': 'PF Synthetic Supplier', 'sku': 'PF-SANDBOX-ITEM',
 SCENARIOS = [key for key, case in ACCEPTANCE_CASES.items() if case['input_format'] != 'txt']
 
 
-def parsed_fixture(scenario):
+def parsed_fixture(scenario, mapping_order='api'):
     filename, content = fixtures.source_file(DATA, scenario)
     sha = hashlib.sha256(content).hexdigest()
     kind = ACCEPTANCE_CASES[scenario]['input_format']
     table = parse_table(filename, content)
     parsed = map_table(table, fixtures.SHEETS[kind], fixtures.HEADER_ROW, fixtures.SELECTED_ROW,
-        fixtures.COLUMN_MAPPING, 'doc_' + 'a' * 32, sha)
+        {field: fixtures.COLUMN_MAPPING[field] for field in MAPPING_ORDERS[mapping_order]}, 'doc_' + 'a' * 32, sha)
     mapped = {**parsed, 'id': 'tim_' + 'a' * 32, 'document_sha256': sha}
     quote = {**parsed, 'id': 'quo_' + 'b' * 32, 'document_id': 'doc_' + 'a' * 32, 'document_sha256': sha}
     document = {'id': quote['document_id'], 'sha256': sha, 'fragments': parsed['fragments']}
@@ -43,8 +44,10 @@ def parsed_fixture(scenario):
 
 
 @pytest.mark.parametrize('scenario', SCENARIOS)
-def test_real_csv_xlsx_bytes_select_only_explicit_quote_row_and_exact_evidence(scenario):
-    content, table, mapped, quote, document = parsed_fixture(scenario)
+@pytest.mark.parametrize('mapping_order', MAPPING_ORDERS)
+@pytest.mark.parametrize('json_order', ['original', 'reversed', 'sorted'])
+def test_real_csv_xlsx_bytes_select_only_explicit_quote_row_and_exact_evidence(scenario, mapping_order, json_order):
+    content, table, mapped, quote, document = parsed_fixture(scenario, mapping_order)
     assert content == fixtures.source_file(DATA, scenario)[1]
     assert table['kind'] == ACCEPTANCE_CASES[scenario]['input_format']
     assert table['sheets'][-1]['rows'][3]['cells'][5]['value'] == 'PF-DECOY-ITEM'
@@ -52,6 +55,11 @@ def test_real_csv_xlsx_bytes_select_only_explicit_quote_row_and_exact_evidence(s
         assert len(table['sheets']) == 2 and table['sheets'][0]['name'] == '说明'
     assert any('DUPLICATE_ROW:6:5' in issue for issue in mapped['issues'])
     result = fixtures.assert_provenance(DATA, scenario, content, mapped, quote, document)
+    assert {field: evidence['fragment_id'] for field, evidence in result['field_evidence'].items()} == {
+        field: f"{document['id']}:f{index:04d}" for index, field in enumerate(MAPPING_ORDERS[mapping_order])}
+    if json_order == 'reversed':
+        result = reverse_json_objects(result)
+    result = json.loads(json.dumps(result, sort_keys=json_order == 'sorted'))
     require_tabular_provenance({'scenario': scenario, 'provenance': result})
     assert result['quote_values'] == fixtures.expected_values(DATA, scenario)
     assert result['selected_row'] == 5 and result['header_row'] == 3
@@ -174,11 +182,21 @@ def test_fixture_export_failure_stops_before_erp_network(tmp_path, monkeypatch):
     assert 'PRIVATE_EXPORT_ERROR' not in output.read_text()
 
 
-def test_complete_http_worker_harness_with_offline_erp_double(monkeypatch):
+@pytest.mark.parametrize('mapping_order', ['api', 'browser'])
+def test_complete_http_worker_harness_with_offline_erp_double(monkeypatch, mapping_order):
     # This runs real API + fresh independent Worker processes and API restarts,
     # but the ERP server is a test double. Its output is not published as live evidence.
     spec = importlib.util.spec_from_file_location('pf_tabular_harness', ROOT / 'scripts/verify_erp_sandbox.py')
     runner = importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)
+    def import_with_mapping_order(call, *args):
+        def ordered_call(method, path, **kwargs):
+            if method == 'POST' and path.endswith('/preview'):
+                body = kwargs['json']
+                kwargs['json'] = {**body, 'mapping': {
+                    field: body['mapping'][field] for field in MAPPING_ORDERS[mapping_order]}}
+            return call(method, path, **kwargs)
+        return fixtures.import_tabular_quote(ordered_call, *args)
+    monkeypatch.setattr(runner, 'import_tabular_quote', import_with_mapping_order)
     def raise_test_failure(error):
         raise error
     monkeypatch.setattr(runner, 'safe_failure', raise_test_failure)
@@ -196,4 +214,8 @@ def test_complete_http_worker_harness_with_offline_erp_double(monkeypatch):
     assert result['steps'][-1] == 'api_process_restart_retains_remote_ids'
     for op in result['operations'][4:]:
         require_tabular_provenance(op)
+        provenance = op['provenance']
+        assert {field: evidence['fragment_id'] for field, evidence in provenance['field_evidence'].items()} == {
+            field: f"{provenance['document_id']}:f{index:04d}"
+            for index, field in enumerate(MAPPING_ORDERS[mapping_order])}
         assert op['tabular_provenance_verified'] and op['duplicate_import_reused'] and op['preview_import_restart_verified']
