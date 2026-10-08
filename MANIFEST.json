@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "source-version-evidence-pointer",
-  "status": "unreleased-local-development",
+  "status": "unreleased-development",
   "scope": "Baseline provenance and evidence locations. This is not a current-tree file checksum manifest or a release attestation.",
   "baseline": {
     "commit": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
@@ -11,12 +11,19 @@
   "current_increment": {
     "name": "recovery-diagnostics",
     "documentation": "docs/stage16-recovery-diagnostics.md",
-    "verification": "Local regression, unit, typecheck, build, contract, HTTP and synthetic SQLite recovery checks passed; native browser blocked before UI execution; current live integration gates not run.",
-    "remote_ci": "not claimed for this increment",
-    "published": false,
+    "verification": "Local regression, unit, typecheck, build, contract, HTTP and synthetic SQLite recovery checks passed; native browser was blocked locally. Remote-stage results belong to the accompanying exact-head CI delivery.",
+    "remote_ci": "Exact-head remote verification belongs to the accompanying CI delivery; local and baseline records do not substitute for it.",
+    "published": true,
     "merged": false,
     "deployed": false,
-    "verification_evidence": "docs/evidence/stage16-local-verification.json"
+    "verification_evidence": "docs/evidence/stage16-local-verification.json",
+    "initial_remote_publication": {
+      "commit": "e6afb8b9158fe3a5bbc9f8d2ac41d218b1815c8c",
+      "tree": "523776f91f4c4d6f16cdefb39e029275793db065",
+      "equivalent_local_commit": "6f36d198afea8778690bdc4f25bd6ef8815b6bd6",
+      "ref": "develop/a3-p0-gates",
+      "note": "Initial published tree. Later coverage fixes and exact final head are identified by the accompanying delivery, not a self-referential commit field."
+    }
   },
   "historical_manifest": {
     "path": "docs/history/MANIFEST-0.1.0a2.json",

@@ -27,7 +27,7 @@
 
 本增量从已接收源码基线 `a10f62b65263c9e6bb53219a6296dfb9a67de527`（tree `90ec220e6c35a28add728d47e6cfa851f591808e`）继续。该基线验收包记录 [core/原生 UI/PostgreSQL/Compose CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968155)、[原生全栈容器 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968093)、[SQLite/PostgreSQL + 真实 ERPNext 合成沙箱 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968107) 和 [原生 pilot + 真实 ERPNext 双数据库 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968132) 已完成且成功。包含 push/PR 重复门槛在内，共记录 6 个运行、14 个作业；不能作为 6 套不同业务场景。原始记录位置、文件哈希及完整运行列表见 [基线证据索引](docs/evidence/a10f62b-baseline.json)。这是接收包内的历史结果，不是本增量的新运行或安全认证。
 
-当前增量的本地结果、尚未运行/失败的门槛和远端结果应在交付记录中分开列出。[阶段十六恢复诊断](docs/stage16-recovery-diagnostics.md) 已记录本地回归、前端单元、类型检查和构建通过；原生浏览器因 `CHROMIUM_UNIX_SOCKET_DENIED` 在 UI 执行前被阻断，未取得截图或 UI 验收。本增量未运行实时 PostgreSQL、容器、真实 ERP 或远端 CI，不能沿用上述基线通过结论。真实 ERP 使用一次性合成公司与账户，不是用户生产 ERP，也不是实际人工审批研究。独立安全审查未完成，不宣称通过独立审查或生产准入。
+当前增量的本地结果、尚未运行/失败的门槛和远端结果应在交付记录中分开列出。[阶段十六恢复诊断](docs/stage16-recovery-diagnostics.md) 已记录本地回归、前端单元、类型检查和构建通过；本地原生浏览器因 `CHROMIUM_UNIX_SOCKET_DENIED` 在 UI 执行前被阻断，未取得截图或 UI 验收。本地阶段未运行实时 PostgreSQL、容器或真实 ERP；后续远端验收以随附精确提交交付记录为准，不能沿用上述基线通过结论。真实 ERP 使用一次性合成公司与账户，不是用户生产 ERP，也不是实际人工审批研究。独立安全审查未完成，不宣称通过独立审查或生产准入。
 
 ## 立即运行，不需要模型密钥或 ERPNext
 

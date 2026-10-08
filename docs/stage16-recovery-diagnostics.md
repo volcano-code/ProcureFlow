@@ -1,12 +1,17 @@
 # Stage 16: read-only recovery diagnostics
 
-This is an **unreleased local development increment** from accepted source commit
+This is an **unreleased development increment** from accepted source commit
 `a10f62b65263c9e6bb53219a6296dfb9a67de527`, tree
 `90ec220e6c35a28add728d47e6cfa851f591808e`. Local regression, frontend units and
-build checks passed; native browser execution is blocked by the environment, and
-current-increment live integration gates were not run. The accepted baseline's
-CI is historical evidence, not a passing result for this increment. No publication, merge or deployment is part of
-this work, and independent security review remains incomplete.
+build checks passed. Browser execution was locally blocked by the environment;
+remote-stage integration results are recorded separately. The accepted baseline's
+CI is historical evidence, not a passing result for this increment. Local figures
+below were recorded before publication. The first published commit
+`e6afb8b9158fe3a5bbc9f8d2ac41d218b1815c8c` preserves the exact locally checked
+`6f36d19` tree `523776f91f4c4d6f16cdefb39e029275793db065`. Subsequent
+PostgreSQL gate coverage fixes and final exact-head CI results are recorded in
+the accompanying delivery. No merge or deployment has been performed;
+independent security review remains incomplete.
 
 ## Purpose and authority boundary
 
@@ -182,7 +187,7 @@ These are local results on Python 3.12.14 and Node 24.19.0, not fresh CI results
 | Offline maintenance CLI | Scoped `inspect` succeeded on a fresh migrated, paused synthetic DB; missing tenant rejected; DB unchanged and 0 ERP writes | `cli-acceptance.log` |
 | Synthetic SQLite paired recovery | Passed; 2 source documents verified, 0 external writes, no automatic replay | `recovery-acceptance.json`, `recovery-acceptance.log` |
 | Native browser gate | Blocked before UI execution on both attempts | `frontend/native-gate/`, `frontend/native-gate-escalated/` |
-| Current-increment live PostgreSQL, containers, live ERPNext and remote CI | Not run | No current pass claimed |
+| Local-stage live PostgreSQL, containers and live ERPNext | Not run locally | Remote-stage results belong to the exact-head CI delivery |
 
 The recovery drill additionally verified that diagnostic GETs leave the database
 unchanged, offline inspection works while recovery is paused, restored old
@@ -206,3 +211,12 @@ requires new verification.
 
 No production recovery, encrypted or signed backups, OCR, multi-item procurement,
 real-model quality/cost result or independent security certification is claimed.
+
+## PostgreSQL recovery coverage
+
+The PostgreSQL gate explicitly includes `tests/test_recovery_diagnostics.py`.
+Its held-operation inventory, source faults, read-only reconciliation, tenant
+isolation and mid-read revocation cases use the opt-in PostgreSQL fixture when
+`PF_TEST_BACKEND=postgresql`. A passing SQLite run or an earlier PostgreSQL gate
+that omitted this file cannot certify this additional coverage. Inspect the final
+exact-head PostgreSQL JUnit record; selection alone is not a pass.

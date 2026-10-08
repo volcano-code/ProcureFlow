@@ -31,6 +31,7 @@ def run(output: Path) -> int:
                "tests/test_advice_runs.py", "tests/test_policy_versions.py", "tests/test_policy_adversarial.py",
                "tests/test_table_imports.py", "tests/test_pilot_workflow.py", "tests/test_pilot_auth.py",
                "tests/test_retention.py", "tests/test_maintenance.py", "tests/test_backup_recovery.py",
+               "tests/test_recovery_diagnostics.py",
                "tests/test_advice_grounding.py::test_durable_api_uses_real_adapter_and_persists_source_read_receipt",
                "tests/test_graph_runtime.py::test_durable_api_graph_receipts_are_safe_and_never_replayed",
                "-q", "--junitxml=" + str(output / "postgres.xml")]

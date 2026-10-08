@@ -2,13 +2,15 @@
 
 ## 待发布：恢复后只读诊断与对账
 
+- 初次公开提交 e6afb8b 与本地 6f36d19 源码 tree 相同；后续补齐 PostgreSQL 对新增恢复诊断用例的显式选择，最终远端结果以精确提交验收记录为准
+
 - 新增租户隔离的恢复 hold 队列和本地快照、审批、来源文件完整性详情
 - 只读 ERP 核对呈现明确的预期值／读回值／差异；缺失或失败结果不构成重发许可
 - 保留 RECOVERY、旧会话撤销和永久 hold；无 HTTP resume、hold 释放、自动重放、核对确认或 ERP 写入授权
 - 更新源码证据基线至 `a10f62b65263c9e6bb53219a6296dfb9a67de527`；旧 a2 MANIFEST 原字节归档，基线 CI 与本地增量结果分开
 - 本地 Python 回归 1,782 项通过（含 47 项恢复诊断），15 项未选择；前端单元 56 项、类型检查／构建、合同检查、HTTP smoke 及合成 SQLite 恢复通过，各集合不相加
-- 原生浏览器在 Chromium 启动前因 `CHROMIUM_UNIX_SOCKET_DENIED` 被阻断，两次均未执行 UI 断言；无截图。当前增量未运行实时 PostgreSQL、容器、真实 ERP 或远端 CI
-- 未发布、未合并、未部署，未完成独立安全审查。实施合同、原始记录及验收边界见 [阶段十六](docs/stage16-recovery-diagnostics.md)
+- 本地原生浏览器在 Chromium 启动前因 `CHROMIUM_UNIX_SOCKET_DENIED` 被阻断，两次均未执行 UI 断言；无截图。本地阶段未运行实时 PostgreSQL、容器或真实 ERP；后续远端 CI 结果另行记录
+- 尚未合并或部署，未完成独立安全审查。实施合同、原始记录及验收边界见 [阶段十六](docs/stage16-recovery-diagnostics.md)
 
 ## 待发布：预览归档与成对备份恢复
 
