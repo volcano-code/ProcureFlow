@@ -1,5 +1,6 @@
 """Synthetic-only maintenance fencing and restored no-replay gates."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
 import json
 import os
@@ -8,17 +9,19 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 
 from procureflow.app import create_app
 from procureflow.config import Settings
 from procureflow.contracts import Principal
 from procureflow.db import Database, EventRow, OperationRow, RecoveryHoldRow, SystemStateRow, now
 from procureflow.errors import DomainError
-from procureflow.maintenance import pause_writes, recovery_report, resume_writes
+from procureflow.maintenance import activity_lock, pause_writes, recovery_report, resume_writes
 from procureflow.worker import drain_once, pending_work_query
 from conftest import approved, enqueue, BUYER, OTHER
 
@@ -26,6 +29,29 @@ from conftest import approved, enqueue, BUYER, OTHER
 def resume(db, **extra):
     report = recovery_report(db)
     return resume_writes(db, generation=report['generation'], ledger_sha256=report['ledger_sha256'], **extra)
+
+
+@pytest.mark.parametrize('exclusive', [False, True])
+def test_postgres_activity_lock_namespace_is_bound_without_live_database(exclusive):
+    statements = []
+    class Connection:
+        def execute(self, statement, parameters=None):
+            compiled = statement.compile(dialect=postgresql.dialect())
+            # Exercise SQLAlchemy's required-bind validation, as execute() does.
+            statements.append((str(compiled), compiled.construct_params(parameters)))
+    @contextmanager
+    def transaction():
+        yield Connection()
+    db = SimpleNamespace(sqlite=False, fence_engine=SimpleNamespace(begin=transaction))
+    with activity_lock(db, exclusive=exclusive):
+        assert len(statements) == 2
+    name = 'pg_advisory_xact_lock' if exclusive else 'pg_advisory_xact_lock_shared'
+    assert statements == [
+        ("SET LOCAL lock_timeout = '10s'", {}),
+        (f"SELECT {name}(hashtextextended(current_database() || ':' || "
+         "('system_state'::regclass)::oid::text || %(lock_namespace)s, 0))",
+         {'lock_namespace': ':procureflow-maintenance-v1'}),
+    ]
 
 
 def test_pause_blocks_api_worker_and_direct_transactions_without_erp(system):

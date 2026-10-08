@@ -28,7 +28,8 @@ def activity_lock(db, exclusive=False):
             # search_path may begin with an empty per-user namespace and fall
             # through to the same business tables used by another role.
             connection.execute(text(f"SELECT {name}(hashtextextended(current_database() || ':' || "
-                "('system_state'::regclass)::oid::text || ':procureflow-maintenance-v1', 0))"))
+                "('system_state'::regclass)::oid::text || :lock_namespace, 0))"),
+                {"lock_namespace": ":procureflow-maintenance-v1"})
             yield
         return
     import fcntl
