@@ -98,7 +98,10 @@ All JSON types, nullability, lengths, keys, relational/unique constraints,
 checksums and document references are validated using an isolated in-memory
 schema before any restore directory, target database connection or PostgreSQL schema is
 created. The source executable fingerprint and full schema must match the
-installed recovery code exactly. Do not manually relax version checks to import
+installed recovery code exactly. The stage-16 diagnostic module changes the
+executable fingerprint: a baseline `a10f62b` backup still requires matching
+trusted baseline recovery code. No backward-compatible backup migration is
+introduced by that increment. Do not manually relax version checks to import
 an older release; use the matching trusted release and a separately reviewed
 upgrade procedure.
 
@@ -187,7 +190,11 @@ Resume permits newly authorized work only. Restored-operation holds stay in
 place; this increment intentionally provides no release/replay command. Use the
 existing offline pilot administration workflow to reissue controlled invitations
 after the review. With reviewed, fresh pilot authority, held operations remain
-accessible through the existing ERP verification path, which is GET-only. The
+accessible through the GET-only ERP verification path. The
+[stage 16 diagnostics](stage16-recovery-diagnostics.md) add a held-operation
+queue, evidence detail and explicit comparison results under already-valid
+authority; they do not enable login while `RECOVERY` is active or replace the
+offline review above. The
 synthetic `verify_recovery.py` acceptance drill checks a missing ERP receipt,
 zero external writes and an unchanged held ledger. Never treat this procedure as
 an ERP reconciliation engine or permission to create replacement purchase orders.
@@ -212,6 +219,11 @@ schema, checks preserved ledger values, recovery state and audit sequence
 advancement, and drops only that synthetic test schema in fixture cleanup. It
 never falls back to SQLite. Run `scripts/verify_postgres.py` in the separately
 provisioned CI environment for a required live gate. Local skips must remain
-visible in the verification record. The live PostgreSQL gate was not run in this
-implementation environment because no disposable PostgreSQL server was available;
-local SQLite results do not establish PostgreSQL parity.
+visible in the verification record. The original local stage-15 implementation
+environment had no disposable
+PostgreSQL server, so its local SQLite results did not establish PostgreSQL
+parity. The subsequently accepted `a10f62b` package records a successful live
+PostgreSQL gate for that exact baseline; see the
+[baseline evidence index](evidence/a10f62b-baseline.json). Those historical
+results do not validate
+later changes or replace a current-increment live gate.

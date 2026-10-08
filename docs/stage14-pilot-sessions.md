@@ -93,3 +93,6 @@ python scripts/verify_postgres.py --output evals/reports/local/postgres
 ## 仍未覆盖
 
 企业 SSO、密码／MFA、自助注册或恢复、邀请自动发送、生产反向代理／限流配置、完整运维认证、账户保留清理、备份恢复、OCR、多 SKU 均不在本增量。文件解析仍沿用已有受限进程方案，真实不可信文件和生产部署仍需部署级安全评估。
+
+
+后续增量：本阶段“未包含备份恢复”是阶段十四范围说明；配对备份、隔离恢复和旧会话撤销见 [阶段十五](stage15-recovery.md)，恢复后的只读诊断及其授权边界见 [阶段十六](stage16-recovery-diagnostics.md)。这些功能不建立生产运维认证。

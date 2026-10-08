@@ -80,7 +80,7 @@ def run(output:Path, *, pilot=False)->int:
                 else:raise RuntimeError(name+' readiness timeout')
             junit=Path(tmp)/'pilot-browser.xml' if pilot else output/'next-browser.xml'
             try:
-                command('next-browser',[sys.executable,'-m','pytest',*(['apps/web/e2e/pilot_session_e2e.py'] if pilot else ['apps/web/e2e/workbench_e2e.py', 'apps/web/e2e/retention_e2e.py']),'-q',
+                command('next-browser',[sys.executable,'-m','pytest',*(['apps/web/e2e/pilot_session_e2e.py'] if pilot else ['apps/web/e2e/workbench_e2e.py', 'apps/web/e2e/retention_e2e.py', 'apps/web/e2e/recovery_e2e.py']),'-q',
                          '--junitxml='+str(junit)],env)
             finally:
                 if pilot and junit.is_file():

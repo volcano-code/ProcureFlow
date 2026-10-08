@@ -30,6 +30,7 @@ def run(output):
     from procureflow.errors import DomainError
     from procureflow.maintenance import pause_writes, recovery_report, resume_writes
     from procureflow.retention import RetentionService
+    from procureflow.recovery import offline_recovery_detail
     from procureflow.worker import drain_once
 
     report = {'scope': 'synthetic SQLite paired recovery acceptance', 'status': 'failed',
@@ -100,6 +101,8 @@ def run(output):
                 assert drain_once(restored_app.state.service) == 0 and restored_erp.count() == 0
                 with TestClient(restored_app) as recovered_client:
                     assert recovered_client.post('/api/v1/auth/login', json={'credential': invite['credential']}).status_code == 503
+                    assert recovered_client.get('/api/v1/recovery/operations', headers={
+                        'Authorization': 'Bearer ' + token}).status_code == 401
                 try:
                     IdentityService(recovered, restored_settings).authenticate(token)
                     raise AssertionError('OLD_SESSION_ACCEPTED')
@@ -127,6 +130,10 @@ def run(output):
                 assert inventory['state'] == 'RECOVERY'
                 assert inventory['operations'][0]['hold_restore_id'] == backup['backup_id']
                 assert inventory['operations'][0]['status'] == 'PENDING'
+                offline_detail = offline_recovery_detail(recovered, restored.data_dir / 'documents', 'demo', operation['id'])
+                assert offline_detail['sources'][0]['integrity'] == 'verified'
+                assert offline_detail['replay_permitted'] is False
+                assert recovered.state()['state'] == 'RECOVERY'
                 resume_writes(recovered, generation=inventory['generation'], ledger_sha256=inventory['ledger_sha256'],
                     restore_id=backup['backup_id'], acknowledge_reconciliation=True, acknowledge_credentials=True)
                 assert drain_once(restored_app.state.service) == 0 and restored_erp.count() == 0
@@ -150,6 +157,23 @@ def run(output):
                 after_verify = recovery_report(recovered)['operations'][0]
                 assert after_verify['status'] == 'PENDING' and after_verify['attempts'] == 0
                 assert after_verify['hold_restore_id'] == backup['backup_id']
+                def database_digest():
+                    with recovered.transaction() as session:
+                        return digest({table.name: [dict(row) for row in session.execute(
+                            select(table).order_by(*table.primary_key.columns)).mappings()]
+                            for table in Base.metadata.sorted_tables})
+                before_diagnostics = database_digest()
+                with TestClient(restored_app) as recovered_client:
+                    auth = {'Authorization': 'Bearer ' + fresh_token}
+                    listing = recovered_client.get('/api/v1/recovery/operations', headers=auth)
+                    assert listing.status_code == 200 and listing.json()['total'] == 1
+                    detail = recovered_client.get('/api/v1/recovery/operations/' + operation['id'], headers=auth)
+                    assert detail.status_code == 200 and detail.json()['sources'][0]['integrity'] == 'verified'
+                    readback = recovered_client.get('/api/v1/recovery/operations/' + operation['id'] + '/reconciliation', headers=auth)
+                    assert readback.status_code == 200 and readback.json()['status'] == 'missing'
+                    assert readback.json()['reason'] == 'REMOTE_ABSENCE_NOT_PROOF_OF_NO_COMMIT'
+                    assert readback.json()['replay_permitted'] is False
+                assert database_digest() == before_diagnostics and restored_erp.count() == 0
                 report.update(status='passed', backup_id=backup['backup_id'],
                     source_fingerprint=verified.manifest['source']['fingerprint'],
                     schema_heads=verified.manifest['schema_heads'], documents_verified=len(document_hashes),
@@ -157,6 +181,9 @@ def run(output):
                     old_session_rejected=True, api_writes_paused=True, worker_paused=True,
                     reviewed_resume_keeps_operations_held=True, archived_source_preserved=True,
                     held_operation_read_only_verification=True,
+                    recovery_diagnostics_gets_leave_database_unchanged=True,
+                    offline_diagnostics_while_recovery_paused=True,
+                    restored_credentials_cannot_read_diagnostics=True,
                     source_remains_paused=db.state()['state'] == 'PAUSED',
                     production_backup_or_restore_performed=False)
         return 0

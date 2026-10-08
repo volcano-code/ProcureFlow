@@ -38,3 +38,14 @@ main, .content, .panel, .lower-grid > *, .request-panel > *, .event > div {
 .table-import-result{border-top:1px solid var(--line);margin-top:18px;padding-top:8px}
 .table-import-result td:nth-child(2){min-width:90px}.table-import-result td:nth-child(3){min-width:180px}
 @media(max-width:760px){.table-import-dialog{padding:18px;max-height:92vh}.table-import-selectors,.table-mapping-grid{grid-template-columns:minmax(0,1fr)}.table-import-dialog .form-actions{flex-wrap:wrap}}
+/* Recovery diagnostics remain readable without a selected procurement request. */
+.recovery-panel{margin-bottom:20px}.recovery-panel h3{font-size:13px;margin:18px 0 9px}
+.recovery-panel .binding-grid{margin:14px 0}.recovery-panel td{white-space:normal;overflow-wrap:anywhere;min-width:115px;max-width:300px;vertical-align:top}
+.recovery-panel td p{margin-top:5px}.recovery-panel tr[aria-selected="true"]{background:#edf7f5}
+.recovery-panel details summary{font-size:12px;color:var(--teal);cursor:pointer}
+.recovery-pagination{margin-top:14px}.recovery-detail{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}
+.recovery-source{margin:10px 0;padding:12px;background:var(--soft);border-radius:6px;overflow-wrap:anywhere;font-size:12px}
+.recovery-diagnostics{padding-left:20px;line-height:1.8;font-size:12px;overflow-wrap:anywhere}
+.recovery-reconciliation{border-top:1px solid var(--line);margin-top:18px;padding-top:2px}
+.recovery-panel .stale-notice{display:block;line-height:1.8}.recovery-panel .form-error .secondary{margin:8px}
+@media(max-width:760px){.recovery-panel .decision-content{padding-right:14px;padding-left:14px}.recovery-source .badge{white-space:normal}}

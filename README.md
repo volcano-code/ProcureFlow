@@ -13,7 +13,7 @@
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - 受控 pilot 登录：一次性邀请、短期内存会话、退出／到期／跨进程撤权、用户／租户／角色展示；买方与审批方授权版本在首次 ERP 写入前重验（见 [阶段十四](docs/stage14-pilot-sessions.md)），不自动发放真实账号
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
-- 过期未导入预览的可逆归档与有效配额；数据库＋来源文件的成对备份、校验和新隔离目标恢复。恢复默认暂停写入并永久拦截旧待处理操作重放，见 [预览保留](docs/table-preview-retention.md) 和 [备份恢复](docs/stage15-recovery.md)。归档不回收磁盘，不支持原地覆盖恢复或永久清除
+- 过期未导入预览的可逆归档与有效配额；数据库＋来源文件的成对备份、校验和新隔离目标恢复。恢复默认暂停写入并永久拦截旧待处理操作重放；[恢复诊断工作台](docs/stage16-recovery-diagnostics.md) 提供待处理 hold、证据和只读 ERP 字段差异，不释放 hold 或授权写入。见 [预览保留](docs/table-preview-retention.md) 和 [备份恢复](docs/stage15-recovery.md)。归档不回收磁盘，不支持原地覆盖恢复或永久清除
 - ERPNext Supplier Quotation 草稿和独立读回。支持范围与税/运费/折扣合同以 [费用映射边界](docs/erp-cost-mapping.md) 和 [ERP 说明](integrations/erpnext/README.md) 为准；没有 Submit、Purchase Order、删除或支付功能
 - 原生 Next.js 工作台，以及 FastAPI 提供的轻量静态演示页；锁定 npm 安装、类型检查、生产构建、浏览器与容器验收入口
 - 持久化只读建议：一次性领取、来源读取、过期/中断回执、不自动重放；真实 LangGraph 节点和有界工具白名单。不是逐工具 checkpoint 或跨进程模型恢复
@@ -25,9 +25,9 @@
 
 先看**被测试的确切提交**，再看该提交的 CI 和原始记录。测试命令或 workflow 存在不代表已运行；mock/fixture 不能替代真实服务；不同提交、数据库后端和重叠测试数量不能相加成采购任务数。
 
-基线 `e72adbef5c32767db52ecc21b28e09f12056fed3` 已有完成且成功的 [core/原生 UI/PostgreSQL/Compose CI](https://github.com/volcano-code/ProcureFlow/actions/runs/36813767001)、[原生全栈容器 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/36813767015) 和 [SQLite/PostgreSQL + 真实 ERPNext 合成沙箱 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/36813767007)。这些历史结果不认证此后的修改。
+本增量从已接收源码基线 `a10f62b65263c9e6bb53219a6296dfb9a67de527`（tree `90ec220e6c35a28add728d47e6cfa851f591808e`）继续。该基线验收包记录 [core/原生 UI/PostgreSQL/Compose CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968155)、[原生全栈容器 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968093)、[SQLite/PostgreSQL + 真实 ERPNext 合成沙箱 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968107) 和 [原生 pilot + 真实 ERPNext 双数据库 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968132) 已完成且成功。包含 push/PR 重复门槛在内，共记录 6 个运行、14 个作业；不能作为 6 套不同业务场景。原始记录位置、文件哈希及完整运行列表见 [基线证据索引](docs/evidence/a10f62b-baseline.json)。这是接收包内的历史结果，不是本增量的新运行或安全认证。
 
-当前增量的本地结果、尚未运行/失败的门槛和远端结果应在交付记录中分开列出。真实 ERP 使用一次性合成公司与账户，不是用户生产 ERP，也不是实际人工审批研究。
+当前增量的本地结果、尚未运行/失败的门槛和远端结果应在交付记录中分开列出。[阶段十六恢复诊断](docs/stage16-recovery-diagnostics.md) 已记录本地回归、前端单元、类型检查和构建通过；原生浏览器因 `CHROMIUM_UNIX_SOCKET_DENIED` 在 UI 执行前被阻断，未取得截图或 UI 验收。本增量未运行实时 PostgreSQL、容器、真实 ERP 或远端 CI，不能沿用上述基线通过结论。真实 ERP 使用一次性合成公司与账户，不是用户生产 ERP，也不是实际人工审批研究。独立安全审查未完成，不宣称通过独立审查或生产准入。
 
 ## 立即运行，不需要模型密钥或 ERPNext
 
@@ -85,7 +85,7 @@ npm run build
 npm run dev
 ```
 
-保持后端运行；开发前端默认连接 `http://127.0.0.1:8000`。可通过 `NEXT_PUBLIC_API_BASE_URL` 指定地址；服务端 `PF_WEB_ORIGINS` 限制浏览器 origin，不替代身份验证。包含需求、证据、确认/修正、租户政策/变更历史、历史评估与失效提示、审批/拒绝、执行、独立 ERP 回读、持久化建议和审计。
+保持后端运行；开发前端默认连接 `http://127.0.0.1:8000`。可通过 `NEXT_PUBLIC_API_BASE_URL` 指定地址；服务端 `PF_WEB_ORIGINS` 限制浏览器 origin，不替代身份验证。包含需求、证据、确认/修正、租户政策/变更历史、历史评估与失效提示、审批/拒绝、执行、独立 ERP 回读、持久化建议和审计。恢复诊断入口只在已有有效授权下使用；恢复后应先离线审核并按操作员流程恢复新授权，浏览器不能登录绕过 RECOVERY 或直接恢复写入。
 
 ## 回归与验收
 
@@ -130,7 +130,7 @@ cd services/api
 PYTHONPATH=. python -m alembic upgrade head
 ```
 
-对已有实例先停止相关进程、备份并在副本验证迁移。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
+对已有实例先停止相关进程、备份并在副本验证迁移。 V1 `.pfb` 严格绑定源码指纹；本增量新增模块后，旧 `a10f62b` 备份仍须使用匹配的可信基线代码恢复，不提供旧包兼容迁移或放宽校验，见 [版本兼容边界](docs/stage16-recovery-diagnostics.md#exact-version-backup-compatibility)。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
 
 Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。旧 private 静态令牌模式和新 pilot 受控会话模式都不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
 
@@ -144,4 +144,4 @@ Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没
 - `evals/`：合成 fixtures、评测和历史原始记录
 - `docs/stage*.md`：按阶段保留的实现/验收说明，阶段性否定结论以其时间范围为准
 
-版本元数据中的 `0.1.0a2` 是沿用的 Alpha 标识，不代表后续开发分支增量不存在，也不代表已发布新版本。未合并、未部署的修改只应称为待验收开发增量。
+版本元数据中的 `0.1.0a2` 是沿用的 Alpha 标识，不代表后续开发分支增量不存在，也不代表已发布新版本。根 [MANIFEST.json](MANIFEST.json) 仅指向固定基线和证据；旧 a2 文件清单已按原字节保存在 [历史清单](docs/history/MANIFEST-0.1.0a2.json)，其中哈希不能用于验证当前源码。未合并、未部署的修改只应称为待验收开发增量。

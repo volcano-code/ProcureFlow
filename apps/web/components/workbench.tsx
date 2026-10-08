@@ -7,6 +7,7 @@ import type {Credential} from "@/lib/session.mjs";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
+import RecoveryPanel from "@/components/recovery-panel";
 import {bindingCurrent,staleExplanation,strictestBudget,violationExplanation} from "@/lib/policy.mjs";
 
 const names: Record<string,string> = {DRAFT:"待录入", NEEDS_CONFIRMATION:"待核对", READY_FOR_REVIEW:"待审批",
@@ -368,6 +369,7 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
         {error && <div role="alert" className="form-error">{error}</div>}
         {me && <PolicyPanel key={token.id} token={token} approver={me.role==="approver"} workflowBusy={busy}
           refreshEvent={policyRefresh+events.filter(event=>event.type==="POLICY_CHANGED").length} onRead={onPolicyRead}/>}
+        <RecoveryPanel key={`recovery-${token.id}`} token={token} workflowBusy={busy} onOpenRequest={id=>void act(()=>choose(id))}/>
         <div className="metrics">{[["采购需求",requests.length],["报价版本",quotes.length],["已确认",quotes.filter(q=>q.confirmed_by).length],["审计记录",events.length]].map(([label,count])=>
           <div className="metric" key={label}><label>{label}</label><strong>{count}</strong></div>)}</div>
         {!selected ? <section className="empty panel"><h2>{me ? "创建或选择一项采购需求" : "登录后开始采购核对"}</h2>

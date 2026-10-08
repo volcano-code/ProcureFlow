@@ -38,7 +38,7 @@
 `audit_events`：带租户与 actor 的业务审计。
 `advice_runs`：版本与来源绑定的只读建议运行/结果账本，含一次性领取、中断和过期状态。
 
-Alembic 迁移创建上述业务表及索引/唯一约束，当前 head `5ce3ab9b84a2` 增加 advice_runs。SQLite 与 PostgreSQL 有独立迁移门槛。数据库管理员仍可篡改审计，当前不是密码学不可抵赖的审计系统。
+后续表还包含租户政策及版本、`table_imports`、pilot 身份／会话、`system_state` 和永久 `recovery_holds`。Alembic 迁移创建业务表及索引/唯一约束；接收基线的 head 为 `e731bb62c905`（维护与恢复围栏），部署前仍需执行 `alembic heads` 核对。SQLite 与 PostgreSQL 有独立迁移门槛。数据库管理员仍可篡改审计，当前不是密码学不可抵赖的审计系统。
 
 ## 金额合同
 
@@ -110,5 +110,10 @@ PostgreSQL 使用 aggregate row locking，并有真实 PostgreSQL 并发/迁移/
 同一 revision 的重复确认只读回已有报价；不会重新创建或使过期审批重新有效。
 后续人工纠错仍走带 reason 的不可变报价版本，明确核对后再确认；原有政策、建议、评估、审批和 ERP 快照门禁完全复用。
 原文每个值包含文件 SHA-256、sheet、row、column/cell；未映射、公式、歧义值保持未知，禁止多商品或混币种合并。
-30 分钟预览到期后需重新上传/映射；进程重启不丢预览。同租户最多保留 100 份尚未导入的预览，包括已过期预览；需要运维清理策略，不伪称自动保留管理。
+30 分钟预览到期后需重新上传/映射；进程重启不丢预览。同租户最多保留 100 份有效 `OPEN` 预览；已过期、未导入且未被引用的预览及已归档预览不再占用有效配额，受保护或时间戳异常的项继续占用配额。可按 [预览保留](table-preview-retention.md) 显式可逆归档。归档保留原文件，不回收磁盘；没有自动保留任务。
 详见 [导入协议与安全边界](stage12-tabular-import.md)。
+
+
+## 恢复 hold 与只读诊断（阶段十六）
+
+新隔离恢复保留操作账本并对旧非完成操作施加永久 hold，恢复状态为 `RECOVERY`。恢复队列、证据详情与只读 ERP 字段差异只提供诊断，不变更 operation/outbox、hold 或恢复授权。恢复后旧会话已撤销，必须先使用离线维护报告完成审核；UI/API 不提供登录旁路或 HTTP resume。具体接口、权限及当前验收状态见 [阶段十六](stage16-recovery-diagnostics.md)。

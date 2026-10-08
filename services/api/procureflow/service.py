@@ -18,6 +18,7 @@ from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_
 from .errors import DomainError
 from .tabular import isolated_parse_document as parse_document
 from .table_imports import TableImportServiceMixin
+from .recovery import RecoveryServiceMixin
 
 FROZEN = {"ERP_PENDING", "RECONCILING", "NEEDS_HUMAN", "ERP_CREATED"}
 
@@ -38,7 +39,7 @@ def op_dto(row):
             "created_at": row.created_at}
 
 
-class ProcurementService(TableImportServiceMixin):
+class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
     def __init__(self, db: Database, settings: Settings, erp: ERPPort):
         if (settings.data_dir / ".restore-incomplete").exists() or (settings.data_dir / ".restore-incomplete").is_symlink():
             raise DomainError("RESTORE_INCOMPLETE", "This isolated restore is incomplete; operator inspection is required", 503)

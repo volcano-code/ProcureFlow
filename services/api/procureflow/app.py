@@ -353,6 +353,19 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     def execute(request_id: str, command: ExecuteCommand, principal=Depends(identity)):
         return service.enqueue(principal, request_id, command.snapshot_hash)
 
+    @app.get("/api/v1/recovery/operations")
+    def recovery_operations(after: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
+                            limit: int = Query(default=50, ge=1, le=100), principal=Depends(identity)):
+        return service.recovery_operations(principal, after=after, limit=limit)
+
+    @app.get("/api/v1/recovery/operations/{operation_id}")
+    def recovery_operation(operation_id: str, principal=Depends(identity)):
+        return service.recovery_operation(principal, operation_id)
+
+    @app.get("/api/v1/recovery/operations/{operation_id}/reconciliation")
+    def recovery_reconciliation(operation_id: str, principal=Depends(identity)):
+        return service.reconcile_recovery_operation(principal, operation_id)
+
     @app.get("/api/v1/operations/{operation_id}")
     def operation(operation_id: str, principal=Depends(identity)):
         return service.get_operation(principal, operation_id)

@@ -1,0 +1,207 @@
+{
+  "kind": "historical-baseline-evidence-summary",
+  "baseline_commit": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+  "baseline_tree": "90ec220e6c35a28add728d47e6cfa851f591808e",
+  "accepted_archive": {
+    "filename": "ProcureFlow-a10f62b-01-源码与验收摘要.zip",
+    "sha256": "5b3c6796ffb9b2baed59c2ef33a48143ffca059cc9d8902ad26ccba18ba58374",
+    "part": 1,
+    "total_parts": 5,
+    "package_manifest_sha256": "b51acee3454c6a09fc8b369b1db4d58f4fb32276e317eb43df8ea9a04d05fbc2"
+  },
+  "source_members": {
+    "ci-final/workflows-and-jobs.json": {
+      "bytes": 51065,
+      "sha256": "3af1e241b394d84c67170286f724435055d524aeb5f6f0b5e57121452e6a6d5e"
+    },
+    "ci-final/artifact-verification.json": {
+      "bytes": 4690,
+      "sha256": "20dc244380d397f1879e39e9842cf96da5be929c96e29e97ca95f15fc035c021"
+    },
+    "ci-final/source-and-record-verification.json": {
+      "bytes": 12430,
+      "sha256": "3e874b0d78fad5be9e4dbb91e4795ccd20fb59b105ef4218b2470945bdb69cd4"
+    },
+    "source/source-verification.json": {
+      "bytes": 908,
+      "sha256": "b35ec8bfcebd12735c3294bc6f7c799f240351b21686e5ad0b0ef7c4bd7f47b0"
+    },
+    "验收结果.json": {
+      "bytes": 15770,
+      "sha256": "7c6154dc319fba5157addfc82adf4c552d748ed7b1556bf390e1549911b4ece7"
+    },
+    "source/ProcureFlow-source-a10f62b.zip": {
+      "bytes": 883732,
+      "sha256": "27e3a736b8a2907ac73ac6cf5fbb3897ca7af9ccefcf5c7de4ded68af950b2db"
+    }
+  },
+  "recorded_verification_time_utc": "2026-10-08T13:13:16.295628+00:00",
+  "workflow_runs": [
+    {
+      "id": 37780976889,
+      "name": "native-container-validation",
+      "event": "pull_request",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780976889",
+      "jobs": [
+        {
+          "id": 113323708575,
+          "name": "compose-native-web",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 37780976809,
+      "name": "core-and-native-ui-validation",
+      "event": "pull_request",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780976809",
+      "jobs": [
+        {
+          "id": 113323708288,
+          "name": "compose-postgres",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323708655,
+          "name": "native-next-browser",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323708789,
+          "name": "core-and-static-browser",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323708936,
+          "name": "postgres-integration",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 37780968107,
+      "name": "isolated-real-erpnext-validation",
+      "event": "push",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780968107",
+      "jobs": [
+        {
+          "id": 113323680495,
+          "name": "real-erpnext (postgresql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323680693,
+          "name": "real-erpnext (sqlite)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 37780968093,
+      "name": "native-container-validation",
+      "event": "push",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780968093",
+      "jobs": [
+        {
+          "id": 113323680660,
+          "name": "compose-native-web",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 37780968132,
+      "name": "native-pilot-real-erpnext-validation",
+      "event": "push",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780968132",
+      "jobs": [
+        {
+          "id": 113323680526,
+          "name": "native-pilot-real-erpnext (sqlite)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323681731,
+          "name": "native-pilot-real-erpnext (postgresql)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 37780968155,
+      "name": "core-and-native-ui-validation",
+      "event": "push",
+      "head_sha": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/volcano-code/ProcureFlow/actions/runs/37780968155",
+      "jobs": [
+        {
+          "id": 113323681001,
+          "name": "native-next-browser",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323681164,
+          "name": "compose-postgres",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323681283,
+          "name": "core-and-static-browser",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 113323681361,
+          "name": "postgres-integration",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "local_provenance_checks": {
+    "checked_on_utc_date": "2026-10-08",
+    "selected_member_hashes_match_archive_manifest": true,
+    "source_zip_crc": "passed",
+    "source_zip_git_comment": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+    "git_tree": "90ec220e6c35a28add728d47e6cfa851f591808e",
+    "tracked_source_files_compared": 322,
+    "source_zip_files_equal_baseline_git_tree": true
+  },
+  "limits": [
+    "Workflow statuses are the accepted archive records, not a fresh GitHub query or rerun.",
+    "Part 01 contains source and summaries; complete raw CI artifacts and logs are distributed across other parts.",
+    "The six recorded runs include duplicate push/pull_request gates; test suites overlap.",
+    "This evidence does not cover the subsequent recovery-diagnostics increment.",
+    "Independent security review is incomplete; no security certification, production acceptance, merge or deployment is claimed."
+  ]
+}
