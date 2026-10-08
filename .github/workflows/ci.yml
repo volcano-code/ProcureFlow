@@ -27,6 +27,8 @@ jobs:
         run: python scripts/verify_model_acceptance.py --fixture --output evals/reports/ci/model-acceptance-fixture.json
       - name: Score the frozen 10-case procurement development suite (offline only)
         run: python scripts/evaluate_procurement.py --fixture --output evals/reports/ci/procurement-development.json
+      - name: Paired synthetic backup and fresh paused recovery acceptance
+        run: python scripts/verify_recovery.py --output evals/reports/ci/recovery-acceptance.json
       - run: npm run test:unit --prefix apps/web
       - run: python scripts/web_http_smoke.py --output evals/reports/ci/frontend-http.json
       - run: python scripts/smoke.py --output evals/reports/ci/http-smoke.json

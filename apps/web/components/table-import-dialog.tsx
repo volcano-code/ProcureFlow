@@ -2,7 +2,7 @@
 import type {Credential} from "@/lib/session.mjs";
 import {useEffect,useRef,useState,type FormEvent} from "react";
 import {api,type Quote,type QuoteValues,type TableImportPreview,type TableImportSelection} from "@/lib/api";
-import {TABLE_FIELDS,createImportScope,importExpired,mappingProblems,selectionForSheet,previewBody,type ImportScope} from "@/lib/table-import.mjs";
+import {TABLE_FIELDS,createImportScope,importExpired,importReadOnly,mappingProblems,selectionForSheet,previewBody,type ImportScope} from "@/lib/table-import.mjs";
 
 type Props={token:Credential;requestId:string;requestVersion:number;disabled:boolean;workflowBusy:boolean;onImported:()=>void};
 type DialogProps=Omit<Props,"disabled"|"workflowBusy">&{onClose:()=>void};
@@ -37,6 +37,8 @@ function TableImportDialog({token,requestId,requestVersion,onImported,onClose}:D
     return()=>clearTimeout(timer);
   },[preview,quoteId]);
   const expired=!!preview&&importExpired(preview.expires_at,now);
+  const archived=preview?.status==="ARCHIVED";
+  const readOnly=!!preview&&importReadOnly(preview.status);
   const sheet=preview?.sheets.find(item=>item.name===selection?.sheet);
   const problems=selection?mappingProblems(selection,sheet):[];
   const close=()=>{scope.current?.dispose();onClose();};
@@ -63,7 +65,7 @@ function TableImportDialog({token,requestId,requestVersion,onImported,onClose}:D
     setSelection(next);setReviewedRevision(null);setAcknowledge(false);
   };
   const map=async()=>{
-    if(!preview||!selection||working||blocked||expired||problems.length||quoteId)return;
+    if(!preview||readOnly||!selection||working||blocked||expired||problems.length||quoteId)return;
     const active=scope.current,ticket=active?.begin();if(!active||!ticket)return;
     setWorking("preview");setError("");setReviewedRevision(null);setAcknowledge(false);
     try {
@@ -125,11 +127,11 @@ function TableImportDialog({token,requestId,requestVersion,onImported,onClose}:D
         <h3>表格已导入</h3><p>报价 {quoteId}。本次导入操作只创建待核对报价，不会确认字段、生成审批或 ERP 草稿。报价可能已被其他操作更新；当前状态以回读后的报价列表为准。</p>
         <div className="form-actions"><button className="primary" data-testid="finish-table-import" onClick={close}>返回报价列表</button></div>
       </div>:<>
-        {expired&&<p role="alert" className="stale-notice">此预览已过期，不能导入。请关闭后重新上传；原报价不会自动改变。</p>}
+        {archived?<p role="alert" className="stale-notice" data-testid="table-import-archived">此过期预览已归档，原始文件和映射记录仍保留。请联系操作员取消归档后重新上传并核对映射；取消归档不会恢复导入权限。</p>:expired&&<p role="alert" className="stale-notice">此预览已过期，不能导入。请关闭后重新上传；原报价不会自动改变。</p>}
         <div className="heading-actions table-import-actions"><button className="secondary" data-testid="read-table-import" disabled={!!working} onClick={()=>void read()}>回读已保存状态</button>
           <span className="source-meta">回读会舍弃尚未预览的选择；不会导入或确认报价</span></div>
         {selection&&<>
-          <fieldset disabled={!!working||blocked||expired} className="policy-fields">
+          <fieldset disabled={!!working||blocked||expired||readOnly} className="policy-fields">
             <div className="form-grid table-import-selectors">
               <label className="form-field">工作表 / Sheet<select data-testid="table-sheet" value={selection.sheet} onChange={event=>{
                 const next=preview.sheets.find(item=>item.name===event.target.value);if(next)change(selectionForSheet(next));
@@ -154,11 +156,11 @@ function TableImportDialog({token,requestId,requestVersion,onImported,onClose}:D
             </table></div>
           </details>
           {!!problems.length&&<ul className="violation-list" role="alert">{problems.map(value=><li key={value}>{value}</li>)}</ul>}
-          <div className="form-actions"><button className="secondary" data-testid="preview-table-mapping" disabled={!!working||blocked||expired||!!problems.length} onClick={()=>void map()}>生成映射预览</button></div>
+          <div className="form-actions"><button className="secondary" data-testid="preview-table-mapping" disabled={!!working||blocked||expired||readOnly||!!problems.length} onClick={()=>void map()}>生成映射预览</button></div>
         </>}
         {preview.values&&<section className="table-import-result" data-testid="table-mapped-preview" aria-labelledby="table-mapped-title">
           <h3 id="table-mapped-title">字段与来源核对 · 预览 v{preview.revision}</h3>
-          {reviewedRevision!==preview.revision&&<p className="stale-notice" data-testid="table-preview-dirty">选择尚未生成最新预览，或已回读旧状态。以下仅为上次保存结果；请重新生成映射预览。</p>}
+          {!archived&&reviewedRevision!==preview.revision&&<p className="stale-notice" data-testid="table-preview-dirty">选择尚未生成最新预览，或已回读旧状态。以下仅为上次保存结果；请重新生成映射预览。</p>}
           <div className="table-scroll"><table><thead><tr><th>字段</th><th>映射值</th><th>来源与原文</th></tr></thead><tbody>{TABLE_FIELDS.map(([field,label])=>{
             const value=preview.values![field],source=preview.evidence?.[field];return <tr key={field} data-testid={`table-result-${field}`}><th scope="row">{label}</th>
               <td>{value===null||value==="unknown"?<span className="unknown">未知</span>:String(value)}</td><td><span>{source?.text||source?.reason||"没有可用来源，保持未知"}</span>

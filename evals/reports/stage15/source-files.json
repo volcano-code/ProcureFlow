@@ -1,0 +1,617 @@
+{
+  "base_commit": "7aa118208ad52a405c344b6178477c13c5aaa175",
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "10e3584adf3ff29d47fc403295f44f3743c4003e568239eeb09543666a99e1dc"
+    },
+    {
+      "path": ".github/workflows/erp-sandbox.yml",
+      "sha256": "f1d43931d27922e179761cd00d66ec899ccd3abcae6b6b79cd6745af7ee40615"
+    },
+    {
+      "path": ".github/workflows/native-container.yml",
+      "sha256": "db0a2f6fb561c4d4489f67e3e9f1131c4c61c687f5165a35682060214866ecea"
+    },
+    {
+      "path": ".github/workflows/pilot-erp.yml",
+      "sha256": "6ecdd26239cac58a36ff5653147fac45547204e14fadb4a56f14486ec98f95d2"
+    },
+    {
+      "path": "apps/web/app/layout.tsx",
+      "sha256": "888f690b0707f5360fd5ce43230eefdd66d8b569b981acdce40026d34063fff6"
+    },
+    {
+      "path": "apps/web/app/page.tsx",
+      "sha256": "42397ab24e99bcc197410bb27f8fd2528648517e657d93372e16d4b13dbe557f"
+    },
+    {
+      "path": "apps/web/components/evaluation-panel.tsx",
+      "sha256": "9b581edc24f52ef5938df2133f4dec8c3ca7d0c13b4f4250ef1aae0e069d40db"
+    },
+    {
+      "path": "apps/web/components/policy-panel.tsx",
+      "sha256": "c9509565481ac03ff4f016800cc4aa4447fbfe4e1ecff88a596dc93b2390a2ed"
+    },
+    {
+      "path": "apps/web/components/session-boundary.tsx",
+      "sha256": "5eeb48a9568b704f8ae2ffd35e07b53a554c99d7e043fbde48eee7dd3f8d7634"
+    },
+    {
+      "path": "apps/web/components/table-import-dialog.tsx",
+      "sha256": "7645ce61087db611e947b889577fb3a626f80f6e07a0212183c2fdb94e2933cd"
+    },
+    {
+      "path": "apps/web/components/workbench.tsx",
+      "sha256": "33e4a13aa5a49ff6b9febf5edff433f2f4d5700db11eb18ceb816325c0f4c81a"
+    },
+    {
+      "path": "apps/web/e2e/pilot_combined.py",
+      "sha256": "e37541dc93b7e81af72c9a7ac7d87cedc1bb3dace50fdf3abbc377b9eefd3287"
+    },
+    {
+      "path": "apps/web/e2e/pilot_session_e2e.py",
+      "sha256": "cd0b96eb2e1f7b3dfb54a7719d31c0810c273190a1727b2cce42e5720b9d6ef2"
+    },
+    {
+      "path": "apps/web/e2e/proxy_e2e.py",
+      "sha256": "58b44a720917a07726bc172816998bc8823aa3a534f115239ef6d355c34f4735"
+    },
+    {
+      "path": "apps/web/e2e/retention_e2e.py",
+      "sha256": "851dce2f3cb903c2e61ce25d7fba19de4ef1ffc85c4d0da9ab77f034b664e955"
+    },
+    {
+      "path": "apps/web/e2e/workbench_e2e.py",
+      "sha256": "eac1ee990a88ba2364f5e9f52412eb926dc954835774f4939934032faf56dcf6"
+    },
+    {
+      "path": "apps/web/lib/api.ts",
+      "sha256": "54799fcd26c431b6bd2c8057f3905334a0a8b740e2c1f64dfba69cf915ec3c07"
+    },
+    {
+      "path": "apps/web/lib/policy.d.mts",
+      "sha256": "0a46abaabdc536b6ebe2c57f618f899450e3a754197b66e2ef4db178db0fe7e0"
+    },
+    {
+      "path": "apps/web/lib/policy.mjs",
+      "sha256": "2142e945b48e06eeb8fbebdcad2de851a484db79841f6878a7f51e9a46eaf506"
+    },
+    {
+      "path": "apps/web/lib/session.d.mts",
+      "sha256": "26be97f0259c507303c6e94e9da02db17cdc0a09784d6591f9bbcd4aa2f81206"
+    },
+    {
+      "path": "apps/web/lib/session.mjs",
+      "sha256": "944cbab23c988714e051e46fa9c80073e9d821181e45dfbe19ffd6af0aaec8cf"
+    },
+    {
+      "path": "apps/web/lib/table-import.d.mts",
+      "sha256": "d788f579d16e56b68138273a56789dcf277b76eeab284d313b41c993b4faef15"
+    },
+    {
+      "path": "apps/web/lib/table-import.mjs",
+      "sha256": "987a1555f311404ab194bef64e4989e3bfb0ad80e8181955b122846c2196bdd6"
+    },
+    {
+      "path": "apps/web/lib/transport.d.mts",
+      "sha256": "cf8f23de7ecbaad12fb504a36c15059d50f5f4abd556fce4b25bfbc86a8a909c"
+    },
+    {
+      "path": "apps/web/lib/transport.mjs",
+      "sha256": "5cffc57073fb8ee0038f8c8598c2af67d63e7d10224e268231cbf014aa618e3b"
+    },
+    {
+      "path": "apps/web/next-env.d.ts",
+      "sha256": "879741880b6ab48da99dcc06dcc674d381c9826137b0496bf7bb368f302de9fc"
+    },
+    {
+      "path": "apps/web/next.config.ts",
+      "sha256": "098113143fa40b31654b1bf3c4c78488f98ec32b139004d88794c6d587740dfe"
+    },
+    {
+      "path": "apps/web/package-lock.json",
+      "sha256": "e3168573bfb7f34ed459b643523606e85f5b9ea233aee1c55a1e000d7f9edb9e"
+    },
+    {
+      "path": "apps/web/tests/policy.test.mjs",
+      "sha256": "3c61d6de6a2f7ca87388dff859740507a4910b46b224269630a18e8f2e009236"
+    },
+    {
+      "path": "apps/web/tests/session.test.mjs",
+      "sha256": "e5a5a782af63464641c138fe8f0987ac23f8ad5fdfbc8f5914a77103bb7b7e8a"
+    },
+    {
+      "path": "apps/web/tests/table-import.test.mjs",
+      "sha256": "54618c7f5d70c3f5f8153d414f118063e2b1f5b6486627238f4f788a1e2738db"
+    },
+    {
+      "path": "apps/web/tests/transport.test.mjs",
+      "sha256": "a20c47e46614c69e70522d90db402db586f017bbc545537140718014d6a2d49f"
+    },
+    {
+      "path": "apps/web/tests/workflow.http.test.mjs",
+      "sha256": "113d8d5a331e7b938c8abaa655b8f73a50d80c2b35059846a67c21660a28b68b"
+    },
+    {
+      "path": "compose.erp-sandbox.yaml",
+      "sha256": "2a2f14266a233bbb3824016977caadbda27aff7ee6b376d48da6a1f6f094675a"
+    },
+    {
+      "path": "compose.postgres.yaml",
+      "sha256": "f2af2d2313af699fa903fd93c46756a5117ea9af3c01f73b735e1f8282c4c928"
+    },
+    {
+      "path": "compose.web.yaml",
+      "sha256": "b3ca44ee8c79221d6ae6056f14ff01661fb27b6b338b00bae2290d4e71aa6594"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "8b1876c8fa49425d336a7e4d7b5a7e6a32afab183960da4eb0abd12b895d80b3"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/audit.py",
+      "sha256": "e60b6a02bc8c76720ee30ada21e6bd913ea2ecdc54a0425029bc1eae628166fd"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/cost_audit.py",
+      "sha256": "14f96a15df4ec3fa2d1f950038a8f37404bdb8994c3a5ff75efef9db75430787"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/cost_fixtures.py",
+      "sha256": "3f682ee2c5310982045fb1ae3025c702001e87e7d7b703fd8366fec2e38bce6b"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/lab_permissions.py",
+      "sha256": "145a1e299c95690c59e51a924498c6751a65c18b8d328e1dc5941c26e99a06f1"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/lab_runtime.py",
+      "sha256": "d2ea2bad393f9f9f59322772b67d9991050b44001f75e52b403ebdb58d8574e0"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/pilot_audit.py",
+      "sha256": "d4a2d0708e57c8065839b38b5344a63fbd34f51c71c63f67da606ab7080a58a7"
+    },
+    {
+      "path": "integrations/erpnext/sandbox/seed.py",
+      "sha256": "d63fcbfd269beefd0228a47b094546a8d2ae48848a4238af5f1f9e55d777275c"
+    },
+    {
+      "path": "scripts/check_erp_sandbox_evidence.py",
+      "sha256": "c2ad0842aa2a8575eebe8999b69eab7fe46117389871f86377ddd5018a4c4dff"
+    },
+    {
+      "path": "scripts/check_pilot_combined_evidence.py",
+      "sha256": "586b5e30318fabf3770ceec76886dece885514cb6456dc79eb715b964eb2c653"
+    },
+    {
+      "path": "scripts/compose_smoke.py",
+      "sha256": "3be27dd2009585c47759937b303b33c109053b45104d89e93647c92dd1213f1c"
+    },
+    {
+      "path": "scripts/erp_business_database.py",
+      "sha256": "1c9a5b01311f8ff5f5d161d0f70c37eb00704b9b85a2191a5e2f70f03cbb75e6"
+    },
+    {
+      "path": "scripts/erp_tabular_fixtures.py",
+      "sha256": "29da7b2386294f5632810941f2cfb3560a0fe8293e5f51c67cad9f45c7387d9b"
+    },
+    {
+      "path": "scripts/evaluate_procurement.py",
+      "sha256": "9996adca65cdc6575fbfdb807f12447ea86e3abb6c32f831c80d3dfc85a823db"
+    },
+    {
+      "path": "scripts/export_contracts.py",
+      "sha256": "775e3ba32daed91c2d9b1eada8b905beca3f4c078628770d4ec965dee4a3fea3"
+    },
+    {
+      "path": "scripts/init_erp_sandbox.py",
+      "sha256": "61e567de7d37af261028fa1f29231953c3bc36718cf3f17c21f916b8e8514b95"
+    },
+    {
+      "path": "scripts/init_postgres_env.py",
+      "sha256": "ef924b0dd9ffba203295997dabcfb14824fcb1a093afaae51f9aafd5fed4bdc8"
+    },
+    {
+      "path": "scripts/pilot_gate_contract.py",
+      "sha256": "cdd0862cae251b341d75db6766872c1acbbd0bb96f6e14879dfb04c8dd978804"
+    },
+    {
+      "path": "scripts/preflight.py",
+      "sha256": "1c6e06f987ffdfc81bdf91c2978420c886890cb79cd33547290065a7a4b89e3c"
+    },
+    {
+      "path": "scripts/probe_erp_permissions.py",
+      "sha256": "3a45d1a47f42ed92815162c90449da3cd9531a93453d984c2882667c38b3fb72"
+    },
+    {
+      "path": "scripts/smoke.py",
+      "sha256": "c26f163d57805d1d526fc0e8f9164d65214df8ea6311c2e68fd417c0a4395615"
+    },
+    {
+      "path": "scripts/start.py",
+      "sha256": "423aa0c686f1745b886de6580701f09039df588600894e5bb43a6f75fcc5f375"
+    },
+    {
+      "path": "scripts/test.py",
+      "sha256": "a21e5307d130cf49d3ca7963b1382fb93a11df641b287f680c0b476ae862dbc1"
+    },
+    {
+      "path": "scripts/verify_compose_web.py",
+      "sha256": "08c5862e9f376a5fc283c08d50125062c33e40d09f49279d69c25299aac65fc9"
+    },
+    {
+      "path": "scripts/verify_erp_sandbox.py",
+      "sha256": "3a79c78929b0092a2a6369de6f2d5022c41758fe6ab25c48833c3def029e8971"
+    },
+    {
+      "path": "scripts/verify_integrations.py",
+      "sha256": "a5b079a9332316f0e7e37d889dc1157ff83b2f25b58a229c0fd505348d7671c2"
+    },
+    {
+      "path": "scripts/verify_model_acceptance.py",
+      "sha256": "a23eaf6bd0785ca312e4fc0220dd67c840d40c56692c60127652c26f9bae846e"
+    },
+    {
+      "path": "scripts/verify_next.py",
+      "sha256": "fcbd7a5c8de27e17fbc08ff7e06b8b6a1a46879768246f3ed1063507861fa254"
+    },
+    {
+      "path": "scripts/verify_pilot_combined.py",
+      "sha256": "9fa3ccf6c4d8e0a0328cad13841a9b8817aef177738179272239a1a399cf0cf1"
+    },
+    {
+      "path": "scripts/verify_postgres.py",
+      "sha256": "60a05d81cc4ac6f36a8be9140a426898d997d086cdb838151dd073a8217e678c"
+    },
+    {
+      "path": "scripts/verify_recovery.py",
+      "sha256": "702c4a8e62024c663d64f0ad0b0ab76ee6c53b21b9562f4d60a05307b6841af9"
+    },
+    {
+      "path": "scripts/web_http_smoke.py",
+      "sha256": "4af3c16d28b6d79198bea8b70018f188f099aa937f95d39275e82ee0f9305e2e"
+    },
+    {
+      "path": "services/api/alembic/env.py",
+      "sha256": "f84ddb6217e563f0c6731178fb8d4418ce0dff5589853101215c8b8514e6687c"
+    },
+    {
+      "path": "services/api/alembic/versions/426d852ce82c_initial_procurement_evidence_approval_.py",
+      "sha256": "20acac8c1d1431301e1ff9635c71b5fcf6cc9c40510905b8ea36b0da54ae0135"
+    },
+    {
+      "path": "services/api/alembic/versions/5ce3ab9b84a2_durable_advice_runs.py",
+      "sha256": "ea554a135992c0a05f759a48baea30ad546db144a28197b4d6658e727d68b014"
+    },
+    {
+      "path": "services/api/alembic/versions/a82d71f09c36_tenant_policy_versions.py",
+      "sha256": "c1febc3865a9073cc9a75646988d76ca4427bb519cdb5153fd2c46c02a56ecd6"
+    },
+    {
+      "path": "services/api/alembic/versions/b9134d27c80f_tabular_import_previews.py",
+      "sha256": "0e10589af24a8dce96f25ce5d12c15e1fa6b3ec7f0633af3c40a766661b1bc62"
+    },
+    {
+      "path": "services/api/alembic/versions/d261a40ce712_controlled_pilot_identity_sessions.py",
+      "sha256": "74310a417c5c8857d0d8d76379bb96e4dbed6ba0f31088717c845cdeccd1b351"
+    },
+    {
+      "path": "services/api/alembic/versions/e731bb62c905_maintenance_and_recovery_fences.py",
+      "sha256": "f57ef16f59783a92e83ba84cafde767ce9bceb1335b2e6a9a82e6bdbb6d1f8bf"
+    },
+    {
+      "path": "services/api/procureflow/__init__.py",
+      "sha256": "c6e112152038133f732ab16be55bfa7f74411f241850595856d306761c34f8a0"
+    },
+    {
+      "path": "services/api/procureflow/advice.py",
+      "sha256": "f698c6070e4c038629660084b1ba448ebbcdb3da1092aecbddad2d21e8049d00"
+    },
+    {
+      "path": "services/api/procureflow/agent.py",
+      "sha256": "f230e7090ab037d69fcac86310e1f19ef1c2080125919feda5c3b8bd016cc5e9"
+    },
+    {
+      "path": "services/api/procureflow/app.py",
+      "sha256": "e45898d54390196444bceddf00e06290e746ed32ad85862562a83568ddd4bfcd"
+    },
+    {
+      "path": "services/api/procureflow/auth.py",
+      "sha256": "f2fc8f8728d3d24762ea11e8686f7bf487c36343329df8bd212223d54d5193fe"
+    },
+    {
+      "path": "services/api/procureflow/auth_cli.py",
+      "sha256": "2ce4a488de53ab8d7d41c6d2c28dfb4333ff06cd81cd6549887e7f7acc826daa"
+    },
+    {
+      "path": "services/api/procureflow/backup.py",
+      "sha256": "cb113b693bf21782ed792543408daf02564e62c05ba61367ff1c6e71210dbee9"
+    },
+    {
+      "path": "services/api/procureflow/backup_cli.py",
+      "sha256": "7006a5a38c837b65e1c35c8492c1b9a10eb6a26260476736eae649458fb61541"
+    },
+    {
+      "path": "services/api/procureflow/config.py",
+      "sha256": "6d987ffabbcc5786dd7a011b97c4ed7313dfabd9633236a3361939080aa7f265"
+    },
+    {
+      "path": "services/api/procureflow/contracts.py",
+      "sha256": "b21ab3334013d08a662ac8186e1d45b912a3d5b30d5ee8a8843f5430e51dbd95"
+    },
+    {
+      "path": "services/api/procureflow/database_config.py",
+      "sha256": "80db4a7dfb4a3eb65c432f068bb749bfa1515c0202f8cd397adcc2d0f98a843a"
+    },
+    {
+      "path": "services/api/procureflow/db.py",
+      "sha256": "8ba51b413b22959dd1e3c422b68c664441861e8ec219888fa6f67a3977270c38"
+    },
+    {
+      "path": "services/api/procureflow/domain.py",
+      "sha256": "11e05f36a04b00207e51ec085b309fee08e5907a502409d757e0a06344b4804a"
+    },
+    {
+      "path": "services/api/procureflow/erp.py",
+      "sha256": "73673af395130dd23cc0d7c41af12213e2e52e0d58654b41d920be1ce782be9b"
+    },
+    {
+      "path": "services/api/procureflow/errors.py",
+      "sha256": "d25ddf6c3c4aa700eb483a078f067c801e00ed319de62bd71c0c382a3216a847"
+    },
+    {
+      "path": "services/api/procureflow/evaluation.py",
+      "sha256": "686571cb9a3326a031a9d4c527507593217c579770f1ef8e88d287ce050acdf1"
+    },
+    {
+      "path": "services/api/procureflow/maintenance.py",
+      "sha256": "36b48ed14c26c36b19ffa3f49e1f4c41f181cda872c3921edded5b80bf1ffc4c"
+    },
+    {
+      "path": "services/api/procureflow/maintenance_cli.py",
+      "sha256": "6b03bcd2df1183912e069c5ee7b620a3cfd3fd7e4ea001348fc2ed77a1d49fc7"
+    },
+    {
+      "path": "services/api/procureflow/outbound.py",
+      "sha256": "a0a157953550cd6ec33a43162ed6277bc7d3e7549e4558b28448a78cbdf724cb"
+    },
+    {
+      "path": "services/api/procureflow/parser_worker.py",
+      "sha256": "bdd42e6fa35c7319e3d74acc141a2da0acba944800697bdd54b8b2583b25c34f"
+    },
+    {
+      "path": "services/api/procureflow/parsers.py",
+      "sha256": "e6d4ce68250f5b1dcc65d537a1135101bfd9a7b0cd54b33050684409c60c196c"
+    },
+    {
+      "path": "services/api/procureflow/policies.py",
+      "sha256": "fa72e5ebbd118ed3cb43d36a77c86d103c2ac750484382361a57cdfff635a95e"
+    },
+    {
+      "path": "services/api/procureflow/retention.py",
+      "sha256": "6a43f84f615e8cd093ade6a92e7498caa53d5199cfd2fb83de33f01bdbcb1589"
+    },
+    {
+      "path": "services/api/procureflow/retention_cli.py",
+      "sha256": "0e9ff2528db3718548019c7e195cdb738cb296f5e84a566c62fb46c5e1fa7bad"
+    },
+    {
+      "path": "services/api/procureflow/service.py",
+      "sha256": "db2f8a27a354443d389737dba7a60a26bee45a777135620acb9fdcb023fc7283"
+    },
+    {
+      "path": "services/api/procureflow/table_imports.py",
+      "sha256": "9ccb07ff196b8de5e4dde1fd7e5cefc0aca6f4af3bfd9d4d33ae15031520aa4e"
+    },
+    {
+      "path": "services/api/procureflow/tabular.py",
+      "sha256": "6b00d8fd75ca31db0b636caa34c79ea577adf2127ce5600c8305dc4fb132e26e"
+    },
+    {
+      "path": "services/api/procureflow/worker.py",
+      "sha256": "50833e7a57ab1db93155ce8c708ccf77cbca60345504225eacd1e7a141b0d282"
+    },
+    {
+      "path": "services/api/pyproject.toml",
+      "sha256": "98ac33a10ec9e880d3b906efd977434d8cf21c313918e6a3342d1f36e866e247"
+    },
+    {
+      "path": "services/api/requirements.lock",
+      "sha256": "c006e45cf5a0370d75e095ac0ac361adf5029fe9df49482afe674ecbf371ac63"
+    },
+    {
+      "path": "services/api/tests/conftest.py",
+      "sha256": "d28798c2ba488ea17b80d2c4972dca7486e98b49ba6258bc3acab1f7b1450eea"
+    },
+    {
+      "path": "services/api/tests/helpers/killpoint_worker.py",
+      "sha256": "02e597c6b67ddadce4e946d62f4f624c81c56c388799b4785399bb749359160f"
+    },
+    {
+      "path": "services/api/tests/test_adapters.py",
+      "sha256": "a97bd4fa93c4fa6f017c7c61290ce403370f6a710884cd7950d28fa3dd5f91f8"
+    },
+    {
+      "path": "services/api/tests/test_advice_grounding.py",
+      "sha256": "bcbd2140492c1f63edd6d68131e58e6d4aed3f3661e4fc3d41b821cb2a2c5e10"
+    },
+    {
+      "path": "services/api/tests/test_advice_runs.py",
+      "sha256": "04b42827917629170a1500881d3141b8122d32a6b800c522d950a6e5370d32f8"
+    },
+    {
+      "path": "services/api/tests/test_backup_recovery.py",
+      "sha256": "fe45ff007ccad2193ae5a578d30c36b36acbbdb5f1ebc438931fb3cba4da375f"
+    },
+    {
+      "path": "services/api/tests/test_browser.py",
+      "sha256": "fd27794f714420a0269cf703033dffd61624844669553f4535ccfa67219626c2"
+    },
+    {
+      "path": "services/api/tests/test_container_gate.py",
+      "sha256": "dbba046171c97d3498a474aadcd661a10fc3906bff345c6c8b53f47208cb2389"
+    },
+    {
+      "path": "services/api/tests/test_contract_export.py",
+      "sha256": "f9c3d43201eea20a1b0058748bbb509907a6fec9d5cbb419b2d74e7a05129b4d"
+    },
+    {
+      "path": "services/api/tests/test_database.py",
+      "sha256": "08ad5ae0efcc738535fc3e5749517e0f3ce6ff1ede5657e5ee491520860c670d"
+    },
+    {
+      "path": "services/api/tests/test_domain.py",
+      "sha256": "94746b90412282d629fef19e8ed487bf9e224ddeffc8ad7362f2ba294bbd2fce"
+    },
+    {
+      "path": "services/api/tests/test_erp_acceptance_audit.py",
+      "sha256": "7da0593dd1b25bcdec2b90991941c1df48372f07136c72d13cf7e5dbe43bf3d5"
+    },
+    {
+      "path": "services/api/tests/test_erp_account_reference.py",
+      "sha256": "f4e5616e1be599ce3e288fbfe707073327bc179b9ddee6f29ffb46df8810813c"
+    },
+    {
+      "path": "services/api/tests/test_erp_business_database.py",
+      "sha256": "0e9bac317afbd8a53875cad6126ccc03bfcf967ea678ef7f19a3656ec801c2d5"
+    },
+    {
+      "path": "services/api/tests/test_erp_cost_mapping.py",
+      "sha256": "75d0622ccac667570f1094a16b9c6c86194120b4bbec3fe3f03592f556e1c0fb"
+    },
+    {
+      "path": "services/api/tests/test_erp_evidence_gate.py",
+      "sha256": "858b3420fe2f863561516f19487613a9a7deab2d0ad5c4212ac3d037a7f29425"
+    },
+    {
+      "path": "services/api/tests/test_erp_identifier_case.py",
+      "sha256": "738fb8013893a37f724ff116aa6c8192ea9e691e089bf51b96a9b83a0d437ec9"
+    },
+    {
+      "path": "services/api/tests/test_erp_lab_runtime.py",
+      "sha256": "6638701d059d795dc40205b48795a9afe546429f54b11d49c4130dfcceba987e"
+    },
+    {
+      "path": "services/api/tests/test_erp_permission_probes.py",
+      "sha256": "f5816a3b500a856c51b70c4841d3f9bdb32a89f53557cea7630d3b7ffd282820"
+    },
+    {
+      "path": "services/api/tests/test_erp_preflight.py",
+      "sha256": "6201f74ab1428fcc1c11851ef7e38f696c1e9ee3ab742b8dd04d16c7fe4fb10a"
+    },
+    {
+      "path": "services/api/tests/test_erp_sandbox_diagnostics.py",
+      "sha256": "d1a7b9e1fc324ee00650e4463a094ac5433ec43142ca6a0e22687a2c8159dc1d"
+    },
+    {
+      "path": "services/api/tests/test_erp_sandbox_gate.py",
+      "sha256": "fc79ff6cabe71b3f7a05d4e67dd938588515be6c9622f6b3813650f9edd3517e"
+    },
+    {
+      "path": "services/api/tests/test_erp_seed_bootstrap.py",
+      "sha256": "c81a7a01d41cdb64f7ccd082633c89bd15840030b38f08e281c91014d1572175"
+    },
+    {
+      "path": "services/api/tests/test_erp_tabular_acceptance.py",
+      "sha256": "71221626bbff07431a6efca99beea013afb5ff5ea97d679b7c9bbf2a83ac5098"
+    },
+    {
+      "path": "services/api/tests/test_erp_verification.py",
+      "sha256": "f2699840bdb896b44218bd5dcc2f5f3369bd9b70b54ba44af5279b426d0b9d3a"
+    },
+    {
+      "path": "services/api/tests/test_graph_runtime.py",
+      "sha256": "b654329fdcf464ec0ec9ee38bd7551e7b1650747d49f32f0c670f3a1904f4e05"
+    },
+    {
+      "path": "services/api/tests/test_integration_hardening.py",
+      "sha256": "f0128326de9070afcc1d13d4696f027bfbb35cd2caa5bfc03b8be060244136cc"
+    },
+    {
+      "path": "services/api/tests/test_maintenance.py",
+      "sha256": "b2e4e601831e50326f964952e4b57a0a23494096f6d5fe27209bf03a6241995c"
+    },
+    {
+      "path": "services/api/tests/test_migrations.py",
+      "sha256": "3fc436c07bc824367633c08b1603b4ad4ea860c776dbb034fa1c94da9865e759"
+    },
+    {
+      "path": "services/api/tests/test_model_acceptance.py",
+      "sha256": "3853505bd5dc1d1c3c095020416e32fb86b131857205d5a7221a13d6154866fd"
+    },
+    {
+      "path": "services/api/tests/test_parsers.py",
+      "sha256": "239dd08d982dfaf536d499969043d15585d60714d6da2dcc3c88cfb09a3705f9"
+    },
+    {
+      "path": "services/api/tests/test_pilot_auth.py",
+      "sha256": "2dcca46586cb7e5814f6e46c004631f603e63c2f81bdd9f31adc6a27e54b3132"
+    },
+    {
+      "path": "services/api/tests/test_pilot_combined_gate.py",
+      "sha256": "f738d443b69102d6a1df7d757ebc2ac4e1e9b56f83660621c90d0370f1a7dab3"
+    },
+    {
+      "path": "services/api/tests/test_pilot_native_gate.py",
+      "sha256": "9f1efca6bbb2a96ae21e8b048acb682e86c1b091f2119eb3e8d58a40160f37b6"
+    },
+    {
+      "path": "services/api/tests/test_pilot_workflow.py",
+      "sha256": "6a5ebded556ca073adcfa8567fffdf60feda7c36b7f0f73944ba8a98a08491ca"
+    },
+    {
+      "path": "services/api/tests/test_policy_adversarial.py",
+      "sha256": "d20e024eb0d1de1b2e9e02b51e5d0b6ac9d574fff0aabc2983c3c57b35ab5c24"
+    },
+    {
+      "path": "services/api/tests/test_policy_versions.py",
+      "sha256": "a4757055b53a3b8d0965070e72b9bbc8c2be8b8678067cd0279b489aa2b9a87e"
+    },
+    {
+      "path": "services/api/tests/test_postgres.py",
+      "sha256": "b24c3b69ea9ca26e3da03b28095dba85b407984f4b4a78e0ff40572378489b02"
+    },
+    {
+      "path": "services/api/tests/test_probe_http.py",
+      "sha256": "9a747266df5caa3a7a220270eed0104d1c664867b4566e33b413ba49236eafe4"
+    },
+    {
+      "path": "services/api/tests/test_procurement_evaluation.py",
+      "sha256": "67b38e352188f6ec1dee8dc6d66c0581f1363d25fa24a8d73a482aa047705a13"
+    },
+    {
+      "path": "services/api/tests/test_retention.py",
+      "sha256": "350002c467b77b159a68ee3b413dd04c8c07fdb7c39e5553d44a7c67be410413"
+    },
+    {
+      "path": "services/api/tests/test_stage2_guards.py",
+      "sha256": "957c797c82eef4122554dfd18627584da4133f06d8c8b9570a78e9d3d95c8924"
+    },
+    {
+      "path": "services/api/tests/test_table_imports.py",
+      "sha256": "b8555e8a57713107891aebd88c60c1a2489bfd1472697a37b568830fd0c9b2cc"
+    },
+    {
+      "path": "services/api/tests/test_tabular_parser.py",
+      "sha256": "3338e0fe8ff9735a35d5fc2f12a352ba04036e662a800b137aa4d098c6d5eace"
+    },
+    {
+      "path": "services/api/tests/test_upload_body_budget.py",
+      "sha256": "f10c7de0139bed7f056d150a1e609499d2f477f7f330a61cec9876f49ae519e4"
+    },
+    {
+      "path": "services/api/tests/test_validation_gate.py",
+      "sha256": "ee1d8964ca173b5708b6d5e2f2ec05e3e188fc76bcb6896df16855099bfdaa59"
+    },
+    {
+      "path": "services/api/tests/test_worker_crash.py",
+      "sha256": "b40d034c04c49f4dc9f2cd4b116a3039efec279d2037e5df39daa8b2b4e40e9c"
+    },
+    {
+      "path": "services/api/tests/test_workflow.py",
+      "sha256": "f2737fda4bb89cab7c67753d355144c2ca31591dfe3c58254b0e8dca2121679b"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from .config import Settings
 from .auth import IdentityService
 from .contracts import Principal, QuoteValues
-from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, OutboxRow,
+from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, OutboxRow, RecoveryHoldRow,
                  QuoteRow, QuoteVersionRow, RequestRow, EvaluationRow, TenantPolicyRow, PolicyVersionRow, PilotMembershipRow, PilotSessionRow, audit, now, uid)
 from .domain import digest, offer_check
 from .policies import bootstrap, effective_policy, lock_tenant, policy_versions, publish
@@ -40,29 +40,36 @@ def op_dto(row):
 
 class ProcurementService(TableImportServiceMixin):
     def __init__(self, db: Database, settings: Settings, erp: ERPPort):
+        if (settings.data_dir / ".restore-incomplete").exists() or (settings.data_dir / ".restore-incomplete").is_symlink():
+            raise DomainError("RESTORE_INCOMPLETE", "This isolated restore is incomplete; operator inspection is required", 503)
         self.db, self.settings, self.erp = db, settings, erp
         self.identities = IdentityService(db, settings)
         self.document_dir = settings.data_dir / "documents"
         self.document_dir.mkdir(exist_ok=True)
+        state = self.db.state()
+        if state["required_auth_mode"] and settings.mode != state["required_auth_mode"]:
+            raise DomainError("RECOVERY_PILOT_REQUIRED", "Restored workspaces require fresh controlled pilot credentials", 503)
+        if state["state"] != "ACTIVE":
+            return  # Read-only startup must never bootstrap policies or accounts.
         with self.db.transaction(write=True) as session:
             for tenant in sorted({p["tenant_id"] for p in settings.auth_tokens.values()}):
                 bootstrap(session, tenant)
 
     @contextmanager
-    def transaction(self, principal, write=False):
+    def transaction(self, principal, write=False, consistent=False):
         """Revalidate durable authority inside the business transaction, never a cache.
 
         Pilot writes lock tenant → identity → session before aggregate locks. Revocation
         uses the same order, so either it commits first and this action is denied, or
         this already-authorized action finishes before revocation takes effect.
         """
-        with self.db.transaction(write=write) as session:
-            self.identities.validate_principal(session, principal, lock=write)
+        with self.db.transaction(write=write, consistent=consistent) as session:
+            self.identities.validate_principal(session, principal, lock=write or consistent)
             yield session
             # Time can pass even while revocation is locked out. Roll back local
             # mutations that crossed expiry; external write receipts use their own
             # finalization transaction and are never rolled back by session expiry.
-            self.identities.validate_principal(session, principal, lock=write)
+            self.identities.validate_principal(session, principal, lock=write or consistent)
 
     def _request(self, session, principal, request_id, lock=False):
         if lock:
@@ -350,7 +357,7 @@ class ProcurementService(TableImportServiceMixin):
                 "current": current, "stale_reason": None if current else reason or "EVALUATION_INPUT_CHANGED"}
 
     def evaluations(self, principal, request_id, offset=0, limit=100):
-        with self.transaction(principal, write=True) as session:
+        with self.transaction(principal, consistent=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             try:
                 binding, reason = self._binding(session, request), None
@@ -453,7 +460,7 @@ class ProcurementService(TableImportServiceMixin):
                     "request": self._request_dto(session, principal, request)}
 
     def approvals(self, principal, request_id, offset=0, limit=100):
-        with self.transaction(principal, write=True) as session:
+        with self.transaction(principal, consistent=True) as session:
             request = self._request(session, principal, request_id, lock=True)
             try:
                 current, reason = self._current_snapshot(session, principal, request), None
@@ -546,6 +553,10 @@ class ProcurementService(TableImportServiceMixin):
         An earlier COMPLETED record is historical; this receipt detects later ERP
         drift without rewriting that record. Any workspace reader can verify.
         """
+        with self.db.activity(write=True):
+            return self._verify_operation_active(principal, operation_id)
+
+    def _verify_operation_active(self, principal, operation_id):
         with self.transaction(principal) as session:
             operation = session.scalar(select(OperationRow).where(
                 OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
@@ -657,6 +668,13 @@ class ProcurementService(TableImportServiceMixin):
         return self._process_operation(principal, operation_id, trusted_worker=True)
 
     def _process_operation(self, principal, operation_id, trusted_worker=False):
+        # Keep the maintenance fence across claim, ERP I/O and receipt commit.
+        # Pause can never snapshot in the gap after a remote write but before
+        # its local receipt; crashed/uncertain work remains explicit in ledger.
+        with self.db.activity(write=True):
+            return self._process_operation_active(principal, operation_id, trusted_worker)
+
+    def _process_operation_active(self, principal, operation_id, trusted_worker=False):
         # For a human caller use the live session at each actionable transaction.
         # Do not bypass validation by comparing a user-controlled user_id string.
         transaction = (lambda: self.db.transaction(write=True)) if trusted_worker else (
@@ -665,6 +683,8 @@ class ProcurementService(TableImportServiceMixin):
             operation = session.scalar(select(OperationRow).where(OperationRow.id == operation_id, OperationRow.tenant_id == principal.tenant_id))
             if not operation:
                 raise DomainError("NOT_FOUND", "Operation not found in this workspace", 404)
+            if session.get(RecoveryHoldRow, operation_id) is not None:
+                raise DomainError("RECOVERY_OPERATION_HELD", "Restored operations require separate read-only reconciliation; replay is disabled", 409)
             request = self._request(session, principal, operation.request_id, lock=True)
             session.refresh(operation)
             if operation.status == "COMPLETED":

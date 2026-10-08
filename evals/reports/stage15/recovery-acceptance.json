@@ -1,0 +1,42 @@
+{
+  "scope": "synthetic SQLite paired recovery acceptance",
+  "status": "passed",
+  "real_user_data": false,
+  "live_erp": false,
+  "live_model": false,
+  "external_writes": 0,
+  "automatic_replay": false,
+  "backup_id": "c91cde3e2c7646ca82d6f233d7d0d9ac",
+  "source_fingerprint": "ae75925b66d60b794042e5e5e82de2a7e3b9e3c78de0352b3196c8a520e8cf29",
+  "schema_heads": [
+    "e731bb62c905"
+  ],
+  "documents_verified": 2,
+  "document_sha256": {
+    "doc_7c6e0ad04d9f4139a31fb797721ae4df.txt": "686675f50474aa296574c0a7abce06afd4520186de69b1961eeb2c7cfa9f43d9",
+    "tim_148af8f5b514462b833d712ba59da552.csv": "edfb6a9cecf7b3b9b378f5a1c49f228828efa26c8c5426be0575bff014755a36"
+  },
+  "preserved_table_sha256": {
+    "audit_events": "ee89f9d4bf8f95ddb73f09970d191352e07034501cfeb88b6644da6658391bce",
+    "procurement_requests": "96124efb34e194a685d044ce5045941b292efdf561ca4db758b574eb0949fc75",
+    "tenant_policies": "8f6208a7aa5cbbb752e62f680fa5f585b849fb3d994618059ecbdf5b08c168ab",
+    "advice_runs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "approvals": "c70c5f72df8bf4ecdbd082987e9822b0bbf6b1e6ae1b7fe8162b8da4ce1b48a8",
+    "documents": "8a16c563a5ac621818779ad09a723cfcb53dc59ee43ea868ae0e4da7f10749e5",
+    "evaluations": "e4215c737c9574dcfe177b5e006d00c8cbd7393d09b0016f646fe21f7ee03caa",
+    "policy_versions": "4fc06d91e188e13c7f5df69b1b5842b3bf5af87e27d6d1e9d82a743893a11db0",
+    "quotes": "3fdc397f8d4f00c438145524eec8dbf2c0171f178d0df2a222c92e66ccbc36ad",
+    "external_operations": "2c5a356330630809dd4aa4bd28b77a5d63bd1d439cf79c29b3eec7f7c8ce0a2a",
+    "quote_versions": "76b4c60cacad14989fa098dd9b2c8951162e3194fc3284d988b2322bd84a119e",
+    "table_imports": "3c5a1d00b55c876d0480f2ff95afdba386f13ceab76f1cd9ee436e6183bb7dbc",
+    "outbox": "a510142a50853c013cac2d7315b3f2a8897242725f5c7b8c714ad3b3b0305c94"
+  },
+  "old_session_rejected": true,
+  "api_writes_paused": true,
+  "worker_paused": true,
+  "reviewed_resume_keeps_operations_held": true,
+  "archived_source_preserved": true,
+  "held_operation_read_only_verification": true,
+  "source_remains_paused": true,
+  "production_backup_or_restore_performed": false
+}

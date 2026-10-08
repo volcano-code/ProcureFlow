@@ -41,7 +41,7 @@ def test_advice_migration_preserves_existing_procurement_data(tmp_path):
         assert db.execute("SELECT version, status, data FROM procurement_requests").fetchone() == (
             7, 'APPROVED', '{"title":"Preserve"}')
         assert db.execute("SELECT count(*) FROM advice_runs").fetchone() == (0,)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('d261a40ce712',)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ('e731bb62c905',)
     run('downgrade', '426d852ce82c')
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT id FROM procurement_requests").fetchone() == ('req_existing',)

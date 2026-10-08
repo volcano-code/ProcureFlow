@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createImportScope,importExpired,compactMapping,mappingProblems,selectionForSheet,previewBody} from '../lib/table-import.mjs';
+import {createImportScope,importExpired,importReadOnly,compactMapping,mappingProblems,selectionForSheet,previewBody} from '../lib/table-import.mjs';
 const sheet = {name:'供应商报价',suggested_header_row:2,suggested_mapping:{supplier_id:'A',unit_price:'B'},rows:[
   {row:1,cells:[{column:'A',cell:'A1',value:'报价单'}]},
   {row:2,cells:[{column:'A',cell:'A2',value:'供应商编码'},{column:'B',cell:'B2',value:'单价'}]},
@@ -53,4 +53,9 @@ test('selecting formula row never executes or replaces raw formula client-side',
   assert.equal(sheet.rows[3].cells[1].value,'=1+1');
   assert.equal(sheet.rows[3].cells[1].formula,true);
   assert.equal(previewBody(2,selection).row,4);
+});
+
+test('archived, imported and unknown preview states remain read-only',()=>{
+  assert.equal(importReadOnly('OPEN'),false);
+  for(const status of ['ARCHIVED','IMPORTED','UNKNOWN',''])assert.equal(importReadOnly(status),true);
 });

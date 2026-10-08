@@ -31,6 +31,9 @@ def test_postgres_gate_report_matches_exit_status(tmp_path, monkeypatch, xml, pr
         assert "tests/test_advice_runs.py" in args[0]
         assert "tests/test_policy_versions.py" in args[0]
         assert "tests/test_policy_adversarial.py" in args[0]
+        assert "tests/test_retention.py" in args[0]
+        assert "tests/test_maintenance.py" in args[0]
+        assert "tests/test_backup_recovery.py" in args[0]
         if xml is not None:
             (output / "postgres.xml").write_text(xml)
         return subprocess.CompletedProcess(args[0], process_code)

@@ -69,6 +69,8 @@ class BoundedRequestBody:
 
 def create_app(settings: Settings | None = None, database: Database | None = None, erp=None) -> FastAPI:
     settings = settings or Settings()
+    if os.path.lexists(settings.data_dir / ".restore-incomplete"):
+        raise DomainError("RESTORE_INCOMPLETE", "This isolated restore is incomplete; operator inspection is required", 503)
     db = database or Database(settings.database_url,
         create_schema=settings.mode == "demo" and settings.database_url.startswith("sqlite"))
     if erp is None:
@@ -117,6 +119,12 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            try:
+                db.assert_writable()
+            except DomainError as error:
+                return JSONResponse(status_code=error.status_code,
+                    content={"error": {"code": error.code, "message": error.message}})
         if settings.mode == "pilot" and request.url.path in {"/api/v1/auth/login", "/api/v1/auth/logout"}:
             origin = request.headers.get("origin")
             if origin and origin not in {*settings.web_origins, str(request.base_url).rstrip("/")}:
@@ -171,11 +179,12 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.get("/api/v1/capabilities")
     def capabilities(principal=Depends(identity)):
+        writable = db.state()["state"] == "ACTIVE"
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
                 "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
                 "advice_runtime": RUNTIME, "advice_runtime_version": LANGGRAPH_VERSION,
-                "erp_draft_writes_enabled": erp.mode == "mock" or settings.erp_allow_draft_writes,
+                "erp_draft_writes_enabled": writable and (erp.mode == "mock" or settings.erp_allow_draft_writes),
                 "approval_authority": "business-database", "production_ready": False}
 
     def require_demo(principal):

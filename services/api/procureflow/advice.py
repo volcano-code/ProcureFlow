@@ -120,13 +120,13 @@ class AdviceService:
             return self._dto(row, True, None)
 
     def get(self, principal, run_id):
-        with self.procurement.transaction(principal, write=True) as session:
+        with self.procurement.transaction(principal, consistent=True) as session:
             row = self._run(session, principal, run_id)
             request = self.procurement._request(session, principal, row.request_id, lock=True)
             return self._dto(row, *self._freshness(session, principal, request, row))
 
     def list(self, principal, request_id):
-        with self.procurement.transaction(principal, write=True) as session:
+        with self.procurement.transaction(principal, consistent=True) as session:
             request = self.procurement._request(session, principal, request_id, lock=True)
             rows = list(session.scalars(select(AdviceRunRow).where(AdviceRunRow.tenant_id == principal.tenant_id,
                 AdviceRunRow.request_id == request_id).order_by(AdviceRunRow.created_at.desc(), AdviceRunRow.id).limit(20)))
@@ -142,6 +142,10 @@ class AdviceService:
                     None if row.input_hash == input_hash else reason or "ADVICE_INPUT_CHANGED") for row in rows]
 
     def process(self, principal, run_id, factory):
+        with self.db.activity(write=True):
+            return self._process_active(principal, run_id, factory)
+
+    def _process_active(self, principal, run_id, factory):
         require(principal, "buyer")
         # Lock order is tenant, request, then run, matching policy publication and edits.
         with self.procurement.transaction(principal) as session:

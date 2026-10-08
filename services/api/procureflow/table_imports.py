@@ -4,10 +4,11 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from sqlalchemy import func, select
+from sqlalchemy import select
 from .db import DocumentRow, QuoteRow, QuoteVersionRow, TableImportRow, audit, uid
 from .errors import DomainError
 from .tabular import map_table, parse_table
+from .retention import pending_import_count
 
 PREVIEW_TTL_MINUTES = 30
 MAX_PENDING_IMPORTS_PER_TENANT = 100
@@ -22,6 +23,8 @@ class TableImportServiceMixin:
         return row
 
     def _table_import_open(self, row):
+        if row.status == "ARCHIVED":
+            raise DomainError("TABLE_IMPORT_ARCHIVED", "This expired preview is archived; an operator must unarchive it before a new upload", 410)
         if row.status != "OPEN":
             raise DomainError("IMPORT_ALREADY_CONFIRMED", "This import already created a quote; edit the quote with a correction reason")
         if datetime.fromisoformat(row.expires_at) <= datetime.now(timezone.utc):
@@ -65,6 +68,8 @@ class TableImportServiceMixin:
                 if row:
                     self._verify_document(row)
                     if row.status == "OPEN" and datetime.fromisoformat(row.expires_at) <= datetime.now(timezone.utc):
+                        if pending_import_count(session, principal.tenant_id) >= MAX_PENDING_IMPORTS_PER_TENANT:
+                            raise DomainError("TABLE_IMPORT_LIMIT", "Workspace active preview limit reached; wait for previews to expire", 413)
                         row.revision += 1
                         row.selection, row.parsed = None, None
                         row.request_version = request.version
@@ -74,10 +79,9 @@ class TableImportServiceMixin:
                 if session.scalar(select(DocumentRow.id).where(DocumentRow.tenant_id == principal.tenant_id,
                         DocumentRow.request_id == request_id, DocumentRow.sha256 == sha)):
                     raise DomainError("SOURCE_ALREADY_IMPORTED", "This source already has a quote; edit that quote with a correction reason")
-                count = session.scalar(select(func.count()).select_from(TableImportRow).where(
-                    TableImportRow.tenant_id == principal.tenant_id, TableImportRow.status == "OPEN"))
+                count = pending_import_count(session, principal.tenant_id)
                 if count >= MAX_PENDING_IMPORTS_PER_TENANT:
-                    raise DomainError("TABLE_IMPORT_LIMIT", "Workspace pending-import retention limit reached; operator cleanup is required", 413)
+                    raise DomainError("TABLE_IMPORT_LIMIT", "Workspace active preview limit reached; wait for previews to expire", 413)
                 # O_EXCL avoids overwriting another source. Files are never served statically.
                 with path.open("xb") as target:
                     created_file = True

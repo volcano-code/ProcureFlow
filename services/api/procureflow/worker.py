@@ -7,7 +7,8 @@ from __future__ import annotations
 import argparse
 import time
 from sqlalchemy import and_, or_, select
-from .db import OperationRow, OutboxRow, now
+from .db import OperationRow, OutboxRow, RecoveryHoldRow, now
+from .errors import DomainError
 
 
 def pending_work_query(limit=50):
@@ -18,6 +19,8 @@ def pending_work_query(limit=50):
     """
     return (select(OperationRow.id, OperationRow.tenant_id)
         .join(OutboxRow, OutboxRow.operation_id == OperationRow.id)
+        .where(~select(RecoveryHoldRow.operation_id).where(
+            RecoveryHoldRow.operation_id == OperationRow.id).exists())
         .where(OutboxRow.status == "PENDING", or_(
             OperationRow.status.in_(["PENDING", "RECONCILING"]),
             and_(OperationRow.status == "IN_FLIGHT", or_(
@@ -29,10 +32,23 @@ def drain_once(service=None):
     if service is None:
         from .app import app
         service = app.state.service
+    try:
+        service.db.assert_writable()
+    except DomainError as error:
+        if error.code == "WRITES_PAUSED":
+            return 0
+        raise
     with service.db.transaction() as session:
         work = list(session.execute(pending_work_query()))
     for operation_id, tenant_id in work:
-        result = service.process_pending_operation(tenant_id, operation_id)
+        try:
+            result = service.process_pending_operation(tenant_id, operation_id)
+        except DomainError as error:
+            if error.code == "WRITES_PAUSED":
+                return 0
+            if error.code == "RECOVERY_OPERATION_HELD":
+                continue
+            raise
         print(f"{operation_id[:12]} {result['status']}", flush=True)
     return len(work)
 

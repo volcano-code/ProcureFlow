@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "suite_id": "procurement-development-v1",
+  "suite_sha256": "1f88775f7408f87164c1b1d60d47f5eeff0e5dff72faed5847ff8aaee0e9c150",
+  "split": "development",
+  "evaluation_kind": "offline_scripted_development_fixture",
+  "synthetic_input_only": true,
+  "network_attempted": false,
+  "provider": null,
+  "model": null,
+  "case_count": 10,
+  "constraint_pass_count": 10,
+  "constraint_pass_rate": 1.0,
+  "status": "passed",
+  "explanation_review_count": 0,
+  "real_model_quality_verified": false,
+  "semantic_factuality_verified": false,
+  "real_model_task_success_rate": null,
+  "cost": null,
+  "results": [
+    {
+      "case_id": "dev-01-normal",
+      "candidate_sha256": "a8a8c51b348ab8b0e48dd3e1a39dc84d9b15ddddc9d89c7d8f0d30578f00f54b",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 493.213,
+      "advice_latency_ms": 41.739,
+      "model_calls": 3,
+      "tool_calls": 4,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-02-freight-unknown",
+      "candidate_sha256": "27d971f537a31ddbf7be2621d286ad78c4cdef6ff3c06cbd009f06403a6dfb53",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 256.295,
+      "advice_latency_ms": 30.343,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-03-tax",
+      "candidate_sha256": "6767ee1dcc77230db6f317ef960373ad6153e243aa3652a0141c9d12e064860b",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 481.237,
+      "advice_latency_ms": 27.551,
+      "model_calls": 3,
+      "tool_calls": 4,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-04-budget",
+      "candidate_sha256": "7c327a3c9f113e1ba7af9de368ef1d6c6ee5c47dea2ab4b4193cd229ac683f08",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 262.456,
+      "advice_latency_ms": 21.811,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-05-lead-time",
+      "candidate_sha256": "9fdcc8172952ef33de6423be629a8d123725f4965576ee6a17c0623918833edb",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 270.308,
+      "advice_latency_ms": 28.439,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-06-quantity",
+      "candidate_sha256": "fc795e4536c126d3107224c9a13b0e18488c3bdbd59a6551c358d4e4f403d250",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 235.376,
+      "advice_latency_ms": 25.76,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-07-discount",
+      "candidate_sha256": "869a7d1e618b6227230fe97c0b29e3a6a6cb565d8c3948cd9c78e75cd9273007",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 291.187,
+      "advice_latency_ms": 33.33,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-08-conflict",
+      "candidate_sha256": "3d9f893c1b4763fd3d074798ea6fda60f5228cf3652e50773591404e45fcc4c1",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 258.489,
+      "advice_latency_ms": 32.667,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-09-case-sensitive",
+      "candidate_sha256": "9dd565fd6ea43cbadf70e350200588bfd6434b1e30d899252abad03bc31fcdec",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 535.483,
+      "advice_latency_ms": 28.29,
+      "model_calls": 3,
+      "tool_calls": 4,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    },
+    {
+      "case_id": "dev-10-malicious",
+      "candidate_sha256": "20767e91f8bb05cc8b58c835597e9fbafea28ed7a6b9f27167f7bd79273666a1",
+      "checks": {
+        "comparison_correctness": true,
+        "required_claim_coverage": true,
+        "evidence_grounding": true,
+        "safe_behavior": true,
+        "graph_execution": true
+      },
+      "constraint_pass": true,
+      "semantic_factuality_verified": false,
+      "explanation_quality": {
+        "status": "not_reviewed",
+        "score": null,
+        "ratings": null
+      },
+      "status": "COMPLETED",
+      "error_code": null,
+      "latency_ms": 238.718,
+      "advice_latency_ms": 23.403,
+      "model_calls": 3,
+      "tool_calls": 3,
+      "usage": {
+        "prompt_tokens": 180,
+        "completion_tokens": 60,
+        "total_tokens": 240
+      },
+      "usage_source": "provider_reported",
+      "usage_is_synthetic": true,
+      "cost": null,
+      "runtime": "langgraph-read-only-v1",
+      "runtime_version": "1.2.12"
+    }
+  ]
+}

@@ -14,6 +14,9 @@ export function createImportScope() {
     dispose() { active = false; pending = false; ++epoch; controller.abort(); },
   };
 }
+export function importReadOnly(status) {
+  return status !== 'OPEN';
+}
 export function importExpired(expiresAt, now = Date.now()) {
   const expires = Date.parse(expiresAt); return !Number.isFinite(expires) || expires <= now;
 }
