@@ -921,3 +921,333 @@ def test_native_table_revision_conflict_and_lost_confirmation_require_readback(p
     expect(page.get_by_test_id('quote-row')).to_have_count(1)
     expect(page.get_by_test_id('confirm-quote')).to_be_enabled()
     assert len(confirmed)==1
+
+
+# Multi-item gates use the disposable server's actual persistence and calculations.
+# No response is mocked here, and no model or ERP execution control is invoked.
+def prepare_multi_item(page, title='多物料浏览器验收'):
+    page.goto(URL)
+    page.get_by_test_id('login-demo-buyer').click()
+    expect(page.get_by_test_id('load-demo')).to_be_enabled()
+    page.get_by_role('button', name='＋ 新建采购需求').click()
+    form=page.get_by_test_id('request-form')
+    form.locator('[name="title"]').fill(title)
+    # Legacy scalar names remain until the buyer deliberately adds a line.
+    expect(form.locator('[name="sku"]')).to_have_value('STAND-01')
+    expect(form.locator('[name="quantity"]')).to_have_value('20')
+    page.get_by_test_id('request-line-0-quantity').fill('2')
+    page.get_by_test_id('add-request-line').click()
+    page.get_by_test_id('request-line-1-sku').fill('CABLE-02')
+    page.get_by_test_id('request-line-1-quantity').fill('3')
+    with page.expect_response(lambda response: response.request.method=='POST' and response.url.endswith('/api/v1/requests')) as saved:
+        form.get_by_role('button', name='保存需求').click()
+    assert saved.value.status==201, saved.value.text()
+    request=saved.value.json()
+    expect(form).to_have_count(0)
+    expect(page.get_by_test_id('request-lines')).to_contain_text('CABLE-02 · 3 EA')
+    expect(page.get_by_test_id('open-table-import')).to_be_enabled()
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    return saved.value.url+'/'+request['id'], request
+
+
+def multi_item_csv(*, partial=False):
+    # Mixed tax modes, two absolute discounts and repeated quote-level freight.
+    return ('Supplier ID,SKU,Quantity,Unit,Unit Price,Tax Mode,Tax Rate,Freight,Discount,Delivery Days,Currency\n'
+            + ('SUP-MULTI,STAND-01,2,EA,,included,0.13,7.25,,7,CNY\n' if partial else
+               'SUP-MULTI,STAND-01,2,EA,100.25,included,0.13,7.25,10.00,7,CNY\n')
+            + 'SUP-MULTI,CABLE-02,3,EA,50.10,excluded,0.13,7.25,0.30,9,CNY\n').encode()
+
+
+def preview_multi_item_table(page, *, rows=(2,3), partial=False):
+    upload_table(page,'synthetic-multi-item.csv',multi_item_csv(partial=partial))
+    expect(page.get_by_test_id('table-data-row')).to_have_count(0)
+    expect(page.get_by_test_id('table-data-row-2')).to_be_checked()
+    for number in (2,3):
+        page.get_by_test_id(f'table-data-row-{number}').set_checked(number in rows)
+    with page.expect_response(lambda response: response.request.method=='POST' and '/table-imports/' in response.url and response.url.endswith('/preview')) as saved:
+        page.get_by_test_id('preview-table-mapping').click()
+    assert saved.value.status==200, saved.value.text()
+    expect(page.get_by_test_id('table-import-ack')).to_be_enabled()
+    return saved.value.json()
+
+
+def finish_multi_item_import(page):
+    page.get_by_test_id('table-import-ack').check()
+    with page.expect_response(lambda response: response.request.method=='POST' and '/table-imports/' in response.url and response.url.endswith('/confirm')) as saved:
+        page.get_by_test_id('confirm-table-import').click()
+    assert saved.value.status==200, saved.value.text()
+    expect(page.get_by_test_id('table-import-success')).to_be_visible()
+    page.get_by_test_id('finish-table-import').click()
+    expect(page.get_by_test_id('quote-row')).to_have_count(1)
+    expect(page.get_by_test_id('quote-row')).to_contain_text('待核对')
+    return saved.value.json()
+
+
+def read_multi_item_quotes(page, request_url):
+    result=page.request.get(request_url+'/quotes',headers={'Authorization':'Bearer demo-buyer'})
+    assert result.status==200, result.text()
+    return result.json()
+
+
+def confirm_multi_item_quote(page):
+    page.get_by_test_id('confirm-quote').click()
+    page.get_by_test_id('ack-confirm').check()
+    with page.expect_response(lambda response: response.request.method=='POST' and '/api/v1/quotes/' in response.url and response.url.endswith('/confirm')) as saved:
+        page.get_by_test_id('submit-confirm').click()
+    assert saved.value.status==200, saved.value.text()
+    expect(page.get_by_test_id('submit-confirm')).to_have_count(0)
+    expect(page.get_by_test_id('confirm-quote')).to_be_disabled()
+    return saved.value.json()
+
+
+def test_native_multi_item_create_duplicate_and_twenty_line_boundary(page):
+    page.goto(URL)
+    page.get_by_test_id('login-demo-buyer').click()
+    page.get_by_role('button',name='＋ 新建采购需求').click()
+    form=page.get_by_test_id('request-form')
+    expect(form.locator('[name="sku"]')).to_have_count(1)
+    page.get_by_test_id('add-request-line').click()
+    expect(form.locator('[name="sku"]')).to_have_count(0)
+    expect(form.locator('[name="lines.0.sku"]')).to_have_value('STAND-01')
+    page.get_by_test_id('request-line-1-sku').fill('STAND-01')
+    expect(page.get_by_test_id('request-line-problems')).to_contain_text('重复型号 STAND-01')
+    expect(form.get_by_role('button',name='保存需求')).to_be_disabled()
+    page.get_by_test_id('request-line-1-sku').fill('CABLE-02')
+    for index in range(2,20):
+        page.get_by_test_id('add-request-line').click()
+        page.get_by_test_id(f'request-line-{index}-sku').fill(f'ITEM-{index+1:02d}')
+    expect(page.get_by_test_id('request-line')).to_have_count(20)
+    expect(page.get_by_test_id('add-request-line')).to_be_disabled()
+    expect(form.get_by_role('button',name='保存需求')).to_be_enabled()
+    with page.expect_response(lambda response: response.request.method=='POST' and response.url.endswith('/api/v1/requests')) as saved:
+        form.get_by_role('button',name='保存需求').click()
+    assert saved.value.status==201, saved.value.text()
+    command=saved.value.request.post_data_json
+    assert len(command['lines'])==20 and 'sku' not in command and 'quantity' not in command
+    assert len(saved.value.json()['lines'])==20
+    expect(page.get_by_test_id('request-lines').locator('li')).to_have_count(20)
+    # The server enforces the same boundary if a client bypasses disabled controls.
+    headers={'Authorization':'Bearer demo-buyer'}
+    too_many={**command,'lines':[*command['lines'],{'sku':'ITEM-21','quantity':'1','uom':'EA'}]}
+    rejected=page.request.post(saved.value.url,headers=headers,data=too_many)
+    assert rejected.status==422, rejected.text()
+    duplicate={**command,'lines':[command['lines'][0],command['lines'][0]]}
+    rejected=page.request.post(saved.value.url,headers=headers,data=duplicate)
+    assert rejected.status==422, rejected.text()
+
+
+def test_native_multi_item_csv_selected_rows_line_evidence_and_no_implicit_confirmation(page):
+    request_url,_=prepare_multi_item(page)
+    confirmations=[]
+    page.on('request',lambda request:confirmations.append(request.url) if request.method=='POST' and '/api/v1/quotes/' in request.url and request.url.endswith('/confirm') else None)
+    preview=preview_multi_item_table(page)
+    assert preview['selection']['rows']==[2,3] and 'row' not in preview['selection']
+    assert len(preview['values']['lines'])==2
+    for index,price,cell in ((0,'100.25','E2'),(1,'50.10','E3')):
+        result=page.get_by_test_id(f'table-result-lines.{index}.unit_price')
+        expect(result).to_contain_text(price)
+        expect(result).to_contain_text(cell)
+        assert preview['evidence'][f'lines.{index}.unit_price']['cell_range']==cell
+    expect(page.get_by_test_id('table-result-shipping_cost')).to_contain_text('H2')
+    expect(page.get_by_test_id('table-result-shipping_cost')).to_contain_text('H3')
+    page.get_by_test_id('table-import-ack').check()
+    page.get_by_test_id('table-data-row-3').uncheck()
+    expect(page.get_by_test_id('table-import-ack')).not_to_be_checked()
+    expect(page.get_by_test_id('confirm-table-import')).to_be_disabled()
+    page.get_by_test_id('table-data-row-3').check()
+    page.get_by_test_id('preview-table-mapping').click()
+    expect(page.get_by_test_id('table-preview-dirty')).to_have_count(0)
+    quote=finish_multi_item_import(page)
+    assert quote['confirmed_by'] is None and len(quote['values']['lines'])==2
+    persisted=read_multi_item_quotes(page,request_url)
+    assert len(persisted)==1 and persisted[0]['confirmed_by'] is None
+    assert persisted[0]['evidence']['lines.1.unit_price']['cell_range']=='E3'
+    expect(page.get_by_test_id('quote-line-details').get_by_test_id('quote-line-detail')).to_have_count(2)
+    page.get_by_test_id('line-0-unit_price').click()
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('E2')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('100.25')
+    page.get_by_test_id('line-1-unit_price').click()
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('E3')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('50.10')
+    assert confirmations==[]
+
+
+def test_native_multi_item_partial_unknown_and_duplicate_correction_stays_unconfirmed(page):
+    request_url,_=prepare_multi_item(page,'多物料缺失字段验收')
+    preview=preview_multi_item_table(page,rows=(2,),partial=True)
+    assert preview['values']['lines'][0]['unit_price'] is None
+    expect(page.get_by_test_id('table-result-lines.0.unit_price')).to_contain_text('未知')
+    quote=finish_multi_item_import(page)
+    assert quote['calculation']['coverage']['missing_skus']==['CABLE-02']
+    assert quote['calculation']['total'] is None and not quote['calculation']['eligible']
+    # Explicit confirmation records review, but neither fills nulls nor repairs coverage.
+    confirmed=confirm_multi_item_quote(page)
+    assert confirmed['values']['lines'][0]['unit_price'] is None
+    assert confirmed['values']['lines'][0]['discount'] is None
+    assert confirmed['confirmed_by'] and not confirmed['calculation']['eligible']
+    page.get_by_test_id('analyze').click()
+    expect(page.get_by_test_id('request-status')).to_have_text('规则未通过')
+    expect(page.get_by_test_id('evaluation-violations').first).to_contain_text('NO_ELIGIBLE_QUOTE')
+    page.get_by_test_id('quote-row').get_by_role('button',name='修正字段').click()
+    form=page.get_by_test_id('quote-form')
+    expect(form.locator('[name="lines.0.unit_price"]')).to_have_value('')
+    expect(form.locator('[name="lines.0.discount"]')).to_have_value('')
+    expect(page.get_by_test_id('quote-coverage-problems')).to_contain_text('缺少需求型号：CABLE-02')
+    page.get_by_test_id('add-quote-line').click()
+    form.locator('[name="lines.1.sku"]').fill('STAND-01')
+    form.locator('[name="reason"]').fill('Synthetic partial correction; unknown fields intentionally retained')
+    expect(page.get_by_test_id('quote-coverage-problems')).to_contain_text('重复型号：STAND-01')
+    expect(form.get_by_role('button',name='保存新版本')).to_be_disabled()
+    form.locator('[name="lines.1.sku"]').fill('UNREQUESTED-03')
+    expect(page.get_by_test_id('quote-coverage-problems')).to_contain_text('需求之外的型号：UNREQUESTED-03')
+    expect(page.get_by_test_id('quote-coverage-problems')).to_contain_text('缺少需求型号：CABLE-02')
+    form.locator('[name="lines.1.sku"]').fill('CABLE-02')
+    form.locator('[name="lines.1.quantity"]').fill('3')
+    form.locator('[name="lines.1.uom"]').fill('EA')
+    # Saving an incomplete correction is allowed, but must create an unconfirmed version.
+    with page.expect_response(lambda response: response.request.method=='PUT' and '/api/v1/quotes/' in response.url) as saved:
+        form.get_by_role('button',name='保存新版本').click()
+    assert saved.value.status==200, saved.value.text()
+    command=saved.value.request.post_data_json['values']
+    assert command['lines'][0]['unit_price'] is None and command['lines'][0]['discount'] is None
+    assert command['lines'][1]['unit_price'] is None and command['lines'][1]['tax_mode']=='unknown'
+    expect(form).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_contain_text('待核对')
+    expect(page.get_by_test_id('confirm-quote')).to_be_enabled()
+    current=read_multi_item_quotes(page,request_url)[0]
+    assert current['version']==quote['version']+1 and current['confirmed_by'] is None
+    assert current['values']['lines'][0]['unit_price'] is None
+    assert current['values']['lines'][1]['tax_rate'] is None
+    assert current['calculation']['total'] is None and not current['calculation']['eligible']
+    expect(page.get_by_test_id('execute')).to_have_count(0)
+
+
+def test_native_multi_item_deterministic_line_totals_discount_tax_and_freight_once(page):
+    request_url,_=prepare_multi_item(page,'多物料金額验收')
+    preview_multi_item_table(page)
+    quote=finish_multi_item_import(page)
+    calculation=quote['calculation']
+    assert [(line['goods'],line['discount'],line['added_tax'],line['total']) for line in calculation['lines']]==[
+        ('200.50','10.00','0.00','190.50'),('150.30','0.30','19.50','169.50')]
+    assert {key:calculation[key] for key in ('goods','discount','added_tax','shipping','total')}=={
+        'goods':'350.80','discount':'10.30','added_tax':'19.50','shipping':'7.25','total':'367.25'}
+    detail=page.get_by_test_id('quote-line-details')
+    expect(detail.get_by_test_id('quote-line-detail').nth(0)).to_contain_text('190.50')
+    expect(detail.get_by_test_id('quote-line-detail').nth(1)).to_contain_text('169.50')
+    expect(detail.get_by_test_id('quote-cost-totals')).to_have_text(
+        '商品金额 350.80 · 商品折扣 10.30 · 新增税额 19.50 · 整单含税运费 7.25 · 总价 367.25 CNY')
+    confirmed=confirm_multi_item_quote(page)
+    assert confirmed['calculation']['eligible']
+    page.get_by_test_id('analyze').click()
+    expect(page.get_by_test_id('proposal-line-details').get_by_test_id('quote-line-detail')).to_have_count(2)
+    expect(page.get_by_test_id('proposal-line-details').get_by_test_id('quote-cost-totals')).to_contain_text('总价 367.25 CNY')
+    expect(page.get_by_test_id('multi-erp-boundary')).to_contain_text('真实 ERPNext 草稿当前仅支持')
+    saved=page.request.get(request_url,headers={'Authorization':'Bearer demo-buyer'}).json()
+    assert saved['proposal']['total']=='367.25'
+    assert saved['proposal']['quote_values']['lines']==confirmed['values']['lines']
+    assert saved['proposal']['quote_collection'][0]['calculation']['shipping']=='7.25'
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    output=os.getenv('PF_SCREENSHOT_DIR')
+    if output:page.screenshot(path=str(Path(output)/'next-multi-item-mobile.png'),full_page=True)
+
+
+def test_native_multi_item_request_line_edit_stales_approval_and_preserves_snapshot(page):
+    request_url,_=prepare_multi_item(page,'多物料审批失效验收')
+    preview_multi_item_table(page)
+    finish_multi_item_import(page)
+    confirm_multi_item_quote(page)
+    page.get_by_test_id('analyze').click()
+    expect(page.get_by_test_id('proposal-line-details')).to_be_visible()
+    approve(page)
+    before=page.request.get(request_url,headers={'Authorization':'Bearer demo-buyer'}).json()
+    page.get_by_test_id('edit-request').click()
+    form=page.get_by_test_id('request-form')
+    expect(form.locator('[name="quantity"]')).to_have_count(0)
+    form.locator('[name="lines.1.quantity"]').fill('4')
+    form.get_by_role('button',name='保存需求').click()
+    expect(form).to_have_count(0)
+    expect(page.get_by_test_id('request-status')).to_have_text('审批已失效')
+    expect(page.get_by_test_id('request-lines')).to_contain_text('CABLE-02 · 4 EA')
+    expect(page.get_by_test_id('proposal-stale')).to_be_visible()
+    expect(page.get_by_test_id('execute')).to_have_count(0)
+    page.get_by_test_id('approval-history').locator('summary').first.click()
+    expect(page.get_by_test_id('approval-current').first).to_have_text('已失效，仅供审计')
+    history=page.request.get(request_url+'/approvals',headers={'Authorization':'Bearer demo-buyer'}).json()
+    assert not history[0]['current']
+    assert history[0]['snapshot_hash']==before['proposal']['snapshot_hash']
+    assert history[0]['snapshot']['request']['lines'][1]['quantity']=='3'
+    page.get_by_label('切换演示身份').select_option('demo-approver')
+    expect(page.get_by_test_id('approve')).to_be_disabled()
+
+
+def test_native_multi_item_role_cancel_back_and_mobile_dialog_guards(page):
+    request_url,request=prepare_multi_item(page,'多物料编辑器边界验收')
+    preview_multi_item_table(page)
+    finish_multi_item_import(page)
+    writes=[]
+    page.on('request',lambda value:writes.append((value.method,value.url)) if value.method in ('PUT','POST') and '/api/v1/' in value.url else None)
+    page.set_viewport_size({'width':390,'height':844})
+    page.get_by_test_id('edit-request').click()
+    page.get_by_test_id('add-request-line').click()
+    page.get_by_test_id('request-line-2-sku').fill('UNSAVED-REQUEST')
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    page.get_by_test_id('request-form').get_by_role('button',name='取消',exact=True).click()
+    page.get_by_test_id('edit-request').click()
+    expect(page.get_by_test_id('request-line')).to_have_count(2)
+    page.keyboard.press('Escape')
+    expect(page.get_by_test_id('request-form')).to_have_count(0)
+    page.get_by_test_id('quote-row').get_by_role('button',name='修正字段').click()
+    form=page.get_by_test_id('quote-form')
+    form.locator('[name="lines.0.unit_price"]').fill('999.00')
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    form.get_by_role('button',name='取消',exact=True).click()
+    page.get_by_test_id('quote-row').get_by_role('button',name='修正字段').click()
+    expect(form.locator('[name="lines.0.unit_price"]')).to_have_value('100.25')
+    # Reindexing an unsaved row must preserve its original source, rather than
+    # accidentally revealing the deleted row's price evidence.
+    form.get_by_role('button',name='删除报价物料 1',exact=True).click()
+    expect(form.locator('[name="lines.0.sku"]')).to_have_value('CABLE-02')
+    form.get_by_role('button',name='查看物料 1 单价来源',exact=True).click()
+    expect(page.get_by_test_id('quote-editor-evidence')).to_contain_text('E3')
+    page.keyboard.press('Escape')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('E3')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('50.10')
+    page.get_by_test_id('quote-row').get_by_role('button',name='修正字段').click()
+    form.get_by_role('button',name='删除报价物料 1',exact=True).click()
+    page.get_by_test_id('add-quote-line').click()
+    expect(form.locator('[name="lines.1.unit_price"]')).to_have_value('')
+    form.get_by_role('button',name='查看物料 2 单价来源',exact=True).click()
+    page.keyboard.press('Escape')
+    expect(page.get_by_test_id('evidence-body')).to_contain_text('新增物料尚无已保存的来源')
+    expect(page.get_by_test_id('evidence-body')).not_to_contain_text('100.25')
+    expect(page.get_by_test_id('evidence-body')).not_to_contain_text('50.10')
+    page.evaluate('history.pushState({}, "", "#multi-item-navigation")')
+    page.get_by_test_id('quote-row').get_by_role('button',name='修正字段').click()
+    page.get_by_test_id('add-quote-line').click()
+    page.go_back()
+    expect(form).to_have_count(0)
+    expect(page.get_by_test_id('login-demo-buyer')).to_be_visible()
+    page.go_forward()
+    expect(form).to_have_count(0)
+    expect(page.get_by_test_id('login-demo-buyer')).to_be_visible()
+    page.get_by_test_id('login-demo-buyer').click()
+    expect(page.get_by_test_id('open-table-import')).to_be_enabled()
+    page.get_by_test_id('open-table-import').click()
+    expect(page.get_by_test_id('table-import-dialog')).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    page.keyboard.press('Escape')
+    expect(page.get_by_test_id('table-import-dialog')).to_have_count(0)
+    page.set_viewport_size({'width':1440,'height':1100})
+    page.get_by_label('切换演示身份').select_option('demo-approver')
+    expect(page.get_by_test_id('identity')).to_have_text('approver')
+    for test_id in ('edit-request','open-table-import','analyze','confirm-quote'):
+        expect(page.get_by_test_id(test_id)).to_be_disabled()
+    expect(page.get_by_role('button',name='＋ 新建采购需求')).to_be_disabled()
+    expect(page.get_by_test_id('quote-row').get_by_role('button',name='修正字段')).to_be_disabled()
+    assert writes==[], writes
+    saved=page.request.get(request_url,headers={'Authorization':'Bearer demo-buyer'}).json()
+    assert saved['lines']==request['lines']
+    quote=read_multi_item_quotes(page,request_url)[0]
+    assert quote['version']==1 and quote['confirmed_by'] is None
+    assert len(quote['values']['lines'])==2 and quote['values']['lines'][0]['unit_price']=='100.25'

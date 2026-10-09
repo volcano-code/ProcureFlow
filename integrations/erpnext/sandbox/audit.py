@@ -2,13 +2,14 @@
 import json
 from decimal import Decimal
 from cost_audit import verify_cost_document
+from multi_cost_audit import verify_multi_cost_document
 from pathlib import Path
 import frappe
 import erpnext
 from seed import COMPANY, USER
 from lab_runtime import lab_session, phase, run_stage
 from lab_permissions import verify_account_reference
-from cost_fixtures import ACCEPTANCE_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT
+from cost_fixtures import ACCEPTANCE_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT, acceptance_cases
 
 
 def main():
@@ -18,18 +19,25 @@ def main():
         assert frappe.db.get_single_value('System Settings', 'currency_precision') == '2'
         assert frappe.db.get_single_value('System Settings', 'float_precision') == '6'
         assert frappe.db.get_single_value('System Settings', 'rounding_method') == 'Commercial Rounding'
-        ops=json.loads(Path('/tmp/pf-erp-result.json').read_text())['operations']
-        assert len(ops)==len(ACCEPTANCE_CASES)
-        assert [op['scenario'] for op in ops] == list(ACCEPTANCE_CASES)
+        run=json.loads(Path('/tmp/pf-erp-result.json').read_text())
+        ops=run['operations']
+        cases=acceptance_cases(run.get('include_multi_item', False))
+        assert len(ops)==len(cases)
+        assert [op['scenario'] for op in ops] == list(cases)
         rows=frappe.get_all('Supplier Quotation',fields=['name','docstatus','grand_total','custom_procureflow_operation_key','custom_procureflow_snapshot_hash'])
-        assert len(rows)==len(ACCEPTANCE_CASES) and frappe.db.count('Purchase Order')==0
+        assert len(rows)==len(cases) and frappe.db.count('Purchase Order')==0
         for op in ops:
             matches=[r for r in rows if r.custom_procureflow_operation_key==op['operation_id']]
             assert len(matches)==1
             r=matches[0]
             assert r.name==op['remote_id'] and r.docstatus==0
-            assert Decimal(str(r.grand_total)) == Decimal(ACCEPTANCE_CASES[op['scenario']]['total'])
-            verify_cost_document(frappe.get_doc('Supplier Quotation', r.name).as_dict(), ACCEPTANCE_CASES[op['scenario']])
+            assert Decimal(str(r.grand_total)) == Decimal(cases[op['scenario']]['total'])
+            verify = verify_multi_cost_document if cases[op['scenario']].get('multi_item') else verify_cost_document
+            document = frappe.get_doc('Supplier Quotation', r.name).as_dict()
+            verify(document, cases[op['scenario']])
+            if cases[op['scenario']].get('multi_item'):
+                assert document['supplier'] == op['supplier_id']
+                assert str(document['transaction_date']) == op['transaction_date']
             assert r.custom_procureflow_snapshot_hash==op['snapshot_hash']
         indexes=frappe.db.sql('SHOW INDEX FROM `tabSupplier Quotation`',as_dict=True)
         assert any(r.Column_name=='custom_procureflow_operation_key' and r.Non_unique==0 for r in indexes)
@@ -54,10 +62,12 @@ def main():
         result={'status':'passed','erpnext_version':erpnext.__version__,'frappe_version':frappe.__version__,
             'database_version':frappe.db.sql('SELECT VERSION()')[0][0],
             'currency_precision':'2', 'float_precision':'6', 'rounding_method':'Commercial Rounding',
-            'draft_count':len(ACCEPTANCE_CASES),'purchase_order_count':0,'submitted_count':0,
+            'draft_count':len(cases),'purchase_order_count':0,'submitted_count':0,
             'remote_unique_index_present':True,'duplicate_key_update_rejected_and_rolled_back':True,
             'reference_permissions':reference_permissions, 'cost_reference_permissions':cost_reference_permissions,
             'restricted_permissions':denied,'adapter_readback_independently_checked':True, 'cost_components_independently_checked':True}
+        if run.get('include_multi_item') is True:
+            result.update(multi_item_components_independently_checked=True, multi_item_draft_count=1, multi_item_row_count=2)
         frappe.db.rollback()
         return result
 

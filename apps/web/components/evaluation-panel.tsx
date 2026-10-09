@@ -2,6 +2,7 @@
 import type {Credential} from "@/lib/session.mjs";
 import {useCallback,useEffect,useRef,useState} from "react";
 import {api,type Evaluation,type ApprovalReceipt} from "@/lib/api";
+import QuoteLineDetails from "@/components/quote-line-details";
 import {bindingCurrent,staleExplanation,violationExplanation} from "@/lib/policy.mjs";
 
 export default function EvaluationPanel({token,requestId,policyHash,refreshEvent}:{token:Credential;requestId:string;policyHash:string|null;refreshEvent:string}) {
@@ -47,6 +48,7 @@ export default function EvaluationPanel({token,requestId,policyHash,refreshEvent
             {evaluation.result.quotes.map(quote=><div className="policy-version" key={quote.id}><strong>{quote.values.supplier_id||"未知供应商"} · 报价 v{quote.version}</strong>
               <p>{quote.id} · {quote.version_id}<br/>总价 {quote.calculation.total??"未知"} · {quote.calculation.eligible?"当时合规":"当时未通过"}</p>
               {quote.calculation.effective_limits&&<p>当时限制：预算 ¥{quote.calculation.effective_limits.budget} · 交期 ≤ {quote.calculation.effective_limits.max_delivery_days} 天</p>}
+              <QuoteLineDetails values={quote.values} calculation={quote.calculation}/>
               <ul className="violation-list">{quote.calculation.violations.map(code=><li key={code}>{violationExplanation(code)}（{code}）</li>)}</ul>
             </div>)}
             <details><summary>查看原始不可变输入快照</summary><pre>{JSON.stringify(evaluation.input_snapshot,null,2)}</pre></details>

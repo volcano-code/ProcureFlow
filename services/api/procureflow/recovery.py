@@ -20,14 +20,14 @@ from sqlalchemy import func, select
 from .db import (ApprovalRow, DocumentRow, OperationRow, OutboxRow, QuoteRow,
                  QuoteVersionRow, RecoveryHoldRow, RequestRow, SystemStateRow, now)
 from .domain import digest
-from .erp import ERPRejected, cost_mapping, remote_matches
+from .erp import ERPRejected, cost_mapping, remote_matches, expected_mock_cost_values
 from .errors import DomainError
 
 MAX_SOURCE_BYTES = 16 * 1024 * 1024  # Same upper bound as recovery bundles.
 _DECIMALS = {"quantity", "unit_price", "total", "tax_rate", "shipping_cost", "discount",
     "rate", "tax_amount", "tax_amount_after_discount_amount", "discount_amount",
     "additional_discount_percentage", "net_total", "total_taxes_and_charges",
-    "goods_total", "item_goods_total", "item_net_total", "conversion_rate",
+    "goods_total", "item_goods_total", "item_net_total", "conversion_rate", "goods", "added_tax", "shipping",
     "item_discount_amount", "item_discount_percentage", "price_list_rate", "item_net_rate"}
 
 
@@ -48,9 +48,20 @@ def expected_record(payload, operation_id, remote_id=None):
         total=_safe_scalar(payload.get("total")), company=_safe_scalar(payload.get("erp_company")),
         transaction_date=_safe_scalar(payload.get("transaction_date")), docstatus=0,
         simulated=payload.get("erp_mode") == "mock")
+    if values.get("lines") is not None:
+        for key in ("sku", "quantity", "unit_price", "uom"):
+            result.pop(key, None)
+        result["lines"] = _safe_lines(values.get("lines"))
     if remote_id is not None:
         result["name"] = remote_id
     return result
+
+
+def _safe_lines(lines):
+    if not isinstance(lines, list) or not 1 <= len(lines) <= 20 or any(not isinstance(line, dict) for line in lines):
+        return "[invalid line collection]"
+    return sorted(({key: _safe_scalar(line.get(key)) for key in ("sku", "quantity", "unit_price", "uom")}
+                   for line in lines), key=lambda line: str(line["sku"]))
 
 
 def _source_integrity(directory: Path, key, expected_hash):
@@ -173,6 +184,8 @@ def offline_recovery_detail(db, document_dir, tenant_id, operation_id):
 
 
 def _equal(field, actual, expected):
+    if actual is None or expected is None:
+        return actual is expected
     if type(actual) is bool or type(expected) in (bool, int):
         return type(actual) is type(expected) and actual == expected
     if field in _DECIMALS:
@@ -187,7 +200,7 @@ def _equal(field, actual, expected):
 def comparison(remote, payload, operation_id, remote_id):
     """Bounded allowlisted differences, including cost components with equal totals."""
     expected = expected_record(payload, operation_id, remote_id)
-    observed = {key: _safe_scalar(remote.get(key)) for key in expected}
+    observed = {key: _safe_lines(remote.get(key)) if key == "lines" else _safe_scalar(remote.get(key)) for key in expected}
     if "name" not in observed:
         observed["name"] = _safe_scalar(remote.get("name"))
     differences = []
@@ -195,18 +208,18 @@ def comparison(remote, payload, operation_id, remote_id):
         differences.append({"field": field, "expected": _safe_scalar(wanted),
                             "observed": _safe_scalar(actual), "reason": reason})
     for key, value in expected.items():
-        if not _equal(key, remote.get(key), value):
+        if key != "lines" and not _equal(key, remote.get(key), value):
             diff(key, value, remote.get(key))
     if not isinstance(remote.get("name"), str) or not remote["name"] or len(remote["name"]) > 120:
         diff("name", "non-empty ERP document ID (at most 120 characters)", remote.get("name"), "INVALID_REMOTE_ID")
     # Cost proof keys come only from the trusted local mapping. Unknown upstream
     # fields are counted, never echoed as free-form paths or document prose.
     if payload["erp_mode"] == "mock":
-        wanted_costs = {key: payload["quote_values"].get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}
+        wanted_costs = expected_mock_cost_values(payload)
         cost_key = "cost_values"
     else:
         _, wanted_costs = cost_mapping(payload)
-        cost_key = "cost_proof"
+        cost_key = "multi_cost_proof" if payload["quote_values"].get("lines") is not None else "cost_proof"
     def costs(path, wanted, actual):
         if isinstance(wanted, dict):
             if not isinstance(actual, dict):
@@ -223,6 +236,8 @@ def comparison(remote, payload, operation_id, remote_id):
                 costs(f"{path}[{index}]", value, actual[index] if isinstance(actual, list) and index < len(actual) else None)
         elif not _equal(path.rsplit(".", 1)[-1], actual, wanted):
             diff(path, wanted, actual)
+    if "lines" in expected:
+        costs("lines", expected["lines"], observed["lines"])
     costs(cost_key, wanted_costs, remote.get(cost_key))
     return expected, observed, differences
 

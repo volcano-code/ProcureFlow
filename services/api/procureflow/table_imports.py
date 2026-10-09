@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import select
 from .db import DocumentRow, QuoteRow, QuoteVersionRow, TableImportRow, audit, uid
 from .errors import DomainError
-from .tabular import map_table, parse_table
+from .tabular import map_table, map_table_rows, parse_table
 from .retention import pending_import_count
 
 PREVIEW_TTL_MINUTES = 30
@@ -119,15 +119,27 @@ class TableImportServiceMixin:
             if command.expected_revision != row.revision:
                 raise DomainError("VERSION_CONFLICT", "Refresh the import before changing its mapping")
             self._verify_document(row)
-            selection = command.model_dump(exclude={"expected_revision"})
-            parsed = map_table(row.table, document_id="doc_" + row.id[4:], sha=row.sha256, **selection)
-            # An explicit row cannot smuggle a different purchase through a chosen mapping.
+            selection = command.model_dump(exclude={"expected_revision"}, exclude_none=True)
+            arguments = {"document_id": "doc_" + row.id[4:], "sha": row.sha256, **selection}
+            if "rows" in selection or request.data.get("lines") is not None:
+                if "rows" not in arguments:
+                    arguments["rows"] = [arguments.pop("row")]
+                parsed = map_table_rows(row.table, **arguments)
+            else:
+                parsed = map_table(row.table, **arguments)
+            # An explicit selection cannot smuggle a different purchase through
+            # its mapping. Partial coverage remains visible but ineligible later.
             values = parsed["values"]
-            if values.get("sku") is not None and values["sku"] != request.data["sku"]:
-                raise DomainError("IMPORT_SKU_MISMATCH", "The selected quote SKU must match the single-SKU request", 422)
-            for field, expected in (("currency", "CNY"), ("uom", "EA")):
-                if values.get(field) is not None and values[field] != expected:
+            request_skus = ({line["sku"] for line in request.data["lines"]} if request.data.get("lines") is not None
+                            else {request.data["sku"]})
+            lines = values.get("lines") if values.get("lines") is not None else [values]
+            for line in lines:
+                if line.get("sku") is not None and line["sku"] not in request_skus:
+                    raise DomainError("IMPORT_SKU_MISMATCH", "Every selected quote SKU must belong to the request", 422)
+                if line.get("uom") is not None and line["uom"] != "EA":
                     raise DomainError("IMPORT_UNSUPPORTED_UNIT", "Only CNY and EA quotes are supported", 422)
+            if values.get("currency") is not None and values["currency"] != "CNY":
+                raise DomainError("IMPORT_UNSUPPORTED_UNIT", "Only CNY and EA quotes are supported", 422)
             row.selection, row.parsed = selection, parsed
             row.revision += 1
             row.request_version = request.version
@@ -152,7 +164,7 @@ class TableImportServiceMixin:
             self._mutable(request)
             self._table_import_open(row)
             if not row.parsed:
-                raise DomainError("IMPORT_NOT_PREVIEWED", "Choose a worksheet, row and column mapping and preview it first")
+                raise DomainError("IMPORT_NOT_PREVIEWED", "Choose a worksheet, quote rows and column mapping and preview it first")
             if row.request_version != request.version:
                 raise DomainError("IMPORT_REQUEST_STALE", "Request inputs changed; preview the mapping again before importing")
             if session.scalar(select(DocumentRow.id).where(DocumentRow.tenant_id == principal.tenant_id,

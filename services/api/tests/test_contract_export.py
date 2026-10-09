@@ -65,16 +65,33 @@ def test_shared_request_and_quote_schemas_remain_strict(generated):
     schema = json.loads(generated["openapi.json"])
     request = json.loads(generated["request.schema.json"])
     quotation = json.loads(generated["quotation.schema.json"])
-    assert request == RequestCreate.model_json_schema() == schema["components"]["schemas"]["RequestCreate"]
+    assert request == RequestCreate.model_json_schema()
+    # Nested models use standalone $defs and OpenAPI components. Compare the
+    # complete request structure after only this reference/default normalization.
+    def openapi_shape(value):
+        if isinstance(value, list):
+            return [openapi_shape(item) for item in value]
+        if isinstance(value, dict):
+            return {key: openapi_shape(item) for key, item in value.items()
+                    if key != "$defs" and not (key == "default" and item is None)}
+        return value.replace("#/$defs/", "#/components/schemas/") if isinstance(value, str) else value
+    assert openapi_shape(request) == schema["components"]["schemas"]["RequestCreate"]
+    for name, definition in request.get("$defs", {}).items():
+        assert openapi_shape(definition) == schema["components"]["schemas"][name]
     assert quotation == QuoteValues.model_json_schema()
     # FastAPI removes null defaults from OpenAPI; the standalone schema retains
     # them. Check each against its own generator rather than flattening either.
     assert schema["components"]["schemas"]["QuoteValues"]["properties"].keys() == quotation["properties"].keys()
     for model in schema["components"]["schemas"].values():
         if model.get("title") in {"RequestCreate", "RequestUpdate", "QuoteEdit", "QuoteValues",
-                                 "QuoteConfirm", "ApprovalCommand", "ExecuteCommand", "AnalyzeCommand", "PolicyVersionCreate"}:
+                                 "QuoteConfirm", "ApprovalCommand", "ExecuteCommand", "AnalyzeCommand", "PolicyVersionCreate",
+                                 "RequestLine", "QuoteLineValues", "TableImportPreview", "TableImportConfirm"}:
             assert model["additionalProperties"] is False
-    assert request["required"] == ["title", "sku", "quantity", "budget"]
+    assert request["required"] == ["title", "budget"]
+    for exported in (request, quotation):
+        line_array = next(branch for branch in exported["properties"]["lines"]["anyOf"] if branch.get("type") == "array")
+        assert line_array["minItems"] == 1 and line_array["maxItems"] == 20
+    assert request["$defs"]["RequestLine"]["required"] == ["sku", "quantity"]
     assert schema["components"]["schemas"]["ExecuteCommand"]["properties"]["snapshot_hash"]["pattern"] == r"^[a-f0-9]{64}$"
 
 

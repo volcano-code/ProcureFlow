@@ -1,6 +1,7 @@
 """Check all disposable ERP gate records; not an independent execution or attestation."""
 from __future__ import annotations
 import argparse
+from datetime import date
 import hashlib
 import json
 from pathlib import Path
@@ -10,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/erpnext/sandbox'))
 from probe_erp_permissions import require_probe_evidence, PROBES, REQUIRED_TRUE as PROBE_REQUIRED_TRUE
 from lab_permissions import require_select_only
-from cost_fixtures import ACCEPTANCE_CASES
+from cost_fixtures import ACCEPTANCE_CASES, acceptance_cases, MULTI_ITEM_SCENARIO
+from erp_multi_item_fixtures import require_multi_item_provenance
 
 FILES = ('seed.json', 'roundtrip.json', 'database-audit.json', 'image-digests.json', 'permission-probes.json')
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -111,7 +113,9 @@ def require_tabular_provenance(operation: dict) -> None:
     require(fragment_ids == expected_fragments, 'INVALID_TABULAR_FIELD_EVIDENCE')
 
 
-def check(directory: Path, backend='sqlite') -> dict:
+def check(directory: Path, backend='sqlite', include_multi_item=False) -> dict:
+    cases = acceptance_cases(include_multi_item)
+    expected_steps = STEPS[:-1] + ([MULTI_ITEM_SCENARIO + '_independent_worker_draft_readback_and_replay'] if include_multi_item else []) + STEPS[-1:]
     records, digests, source_digests = {}, {}, {}
     for name in FILES:
         with (directory / name).open('rb') as stream:
@@ -120,20 +124,25 @@ def check(directory: Path, backend='sqlite') -> dict:
         records[name] = json.loads(raw, object_pairs_hook=unique_object)
         digests[name] = hashlib.sha256(raw).hexdigest()
     seed, run, audit, images, probes = (records[name] for name in FILES)
-    require_probe_evidence(probes)
+    require_probe_evidence(probes, include_multi_item=include_multi_item)
+    require(run.get('include_multi_item', False) is include_multi_item, 'MULTI_ITEM_SELECTION_MISMATCH')
     require(backend in {'sqlite', 'postgresql'}, 'INVALID_EXPECTED_BACKEND')
     require(all(isinstance(x, dict) and x.get('status') == 'passed' for x in (seed, run, audit)), 'INCOMPLETE_STAGES')
     require(seed.get('stage') == 'seed' and seed.get('synthetic_only') is True, 'INVALID_SEED')
     require(seed.get('integration_user_type') == 'System User', 'INVALID_INTEGRATION_USER_TYPE')
     require(all(record.get('currency_precision') == '2' and record.get('float_precision') == '6' and record.get('rounding_method') == 'Commercial Rounding'
                 for record in (seed, audit)), 'UNVERIFIED_COST_PRECISION')
+    if include_multi_item:
+        require(count_is(seed.get('synthetic_item_count'), 2) and seed.get('multi_skus') == ['PF-SANDBOX-ITEM','PF-SANDBOX-ITEM-2'], 'MULTI_ITEM_SEED_MISSING')
+        require(audit.get('multi_item_components_independently_checked') is True
+                and count_is(audit.get('multi_item_draft_count'), 1) and count_is(audit.get('multi_item_row_count'), 2), 'MULTI_ITEM_DATABASE_AUDIT_MISSING')
     permissions = seed.get('permissions', {})
     require(all(permissions.get(p) is True for p in ('read', 'create', 'write')) and
             all(permissions.get(p) is False for p in ('submit', 'cancel', 'delete')), 'UNSAFE_SEED_PERMISSIONS')
     require(run.get('synthetic_only') is True and all(run.get(k) is False for k in
         ('real_user_account_used', 'human_approval_measured', 'model_used')), 'INVALID_SCOPE')
-    require(run.get('steps') == STEPS, 'MISSING_OR_REPEATED_STEPS')
-    require(count_is(run.get('post_attempts'), len(ACCEPTANCE_CASES)) and count_is(run.get('real_erpnext_drafts_verified'), len(ACCEPTANCE_CASES)), 'INVALID_WRITE_COUNTS')
+    require(run.get('steps') == expected_steps, 'MISSING_OR_REPEATED_STEPS')
+    require(count_is(run.get('post_attempts'), len(cases)) and count_is(run.get('real_erpnext_drafts_verified'), len(cases)), 'INVALID_WRITE_COUNTS')
     require(run.get('api_business_database') == {'sqlite': 'SQLite', 'postgresql': 'PostgreSQL'}[backend]
             and run.get('real_erp_database') == 'MariaDB', 'INVALID_DATABASE_SCOPE')
     if backend == 'postgresql':
@@ -141,7 +150,7 @@ def check(directory: Path, backend='sqlite') -> dict:
         require(business.get('status') == 'passed' and business.get('database') == 'PostgreSQL', 'BUSINESS_AUDIT_MISSING')
         require(all(business.get(key) is True for key in ('isolated_schema', 'migration_current',
             'operation_identity_matches', 'read_only_audit', 'after_api_restart')), 'BUSINESS_AUDIT_INCOMPLETE')
-        require(all(count_is(business.get(key), len(ACCEPTANCE_CASES)) for key in ('operation_count', 'completed_operation_count',
+        require(all(count_is(business.get(key), len(cases)) for key in ('operation_count', 'completed_operation_count',
             'outbox_count', 'done_outbox_count', 'verified_receipt_count')), 'BUSINESS_AUDIT_INVALID_COUNTS')
         require(isinstance(business.get('server_version_num'), str)
             and re.fullmatch('[0-9]{5,6}', business['server_version_num']) is not None, 'POSTGRES_VERSION_MISSING')
@@ -150,19 +159,33 @@ def check(directory: Path, backend='sqlite') -> dict:
             and preflight.get('write_probe_performed') is False,
             'IDENTITY_NOT_VERIFIED')
     operations = run.get('operations')
-    require(isinstance(operations, list) and len(operations) == len(ACCEPTANCE_CASES) and all(isinstance(x, dict) for x in operations),
+    require(isinstance(operations, list) and len(operations) == len(cases) and all(isinstance(x, dict) for x in operations),
             'INVALID_OPERATIONS')
-    require([x.get('scenario') for x in operations] == list(ACCEPTANCE_CASES), 'INVALID_SCENARIOS')
+    require([x.get('scenario') for x in operations] == list(cases), 'INVALID_SCENARIOS')
     for op in operations:
         require(isinstance(op.get('operation_id'), str) and bool(op['operation_id']), 'INVALID_OPERATION_ID')
         require(isinstance(op.get('remote_id'), str) and bool(op['remote_id']) and not op['remote_id'].startswith('MOCK-'),
                 'INVALID_REMOTE_ID')
         require(isinstance(op.get('snapshot_hash'), str) and re.fullmatch('[0-9a-f]{64}', op['snapshot_hash']) is not None,
                 'INVALID_SNAPSHOT_HASH')
-        fixture = ACCEPTANCE_CASES[op['scenario']]
+        fixture = cases[op['scenario']]
         require(op.get('expected_total') == fixture['total'] and op.get('cost_components_verified') is True, 'INVALID_EXPECTED_TOTAL')
         require(op.get('input_format') == fixture['input_format'], 'INVALID_INPUT_FORMAT')
-        if fixture['input_format'] in {'csv', 'xlsx'}:
+        if fixture.get('multi_item'):
+            require(op.get('multi_item') is True and count_is(op.get('item_count'), 2)
+                    and count_is(op.get('shipping_count'), 1) and all(op.get(key) is True for key in
+                    ('multi_item_provenance_verified', 'duplicate_import_reused', 'preview_import_restart_verified',
+                     'independent_readback_verified', 'lost_receipt_reconciled', 'idempotent_replay_verified',
+                     'single_post_verified', 'source_rows_verified')), 'MULTI_ITEM_CHECKS_MISSING')
+            require_multi_item_provenance(op)
+            require(op.get('contract_version') == 'multi-sku-v1'
+                    and op.get('erp_cost_mapping_version') == 'multi-line-zero-tax-costs-v1'
+                    and op.get('supplier_id') == op['provenance']['quote_values']['supplier_id']
+                    and isinstance(op.get('transaction_date'), str)
+                    and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', op['transaction_date']) is not None,
+                    'MULTI_ITEM_SNAPSHOT_BINDING_MISSING')
+            date.fromisoformat(op['transaction_date'])
+        elif fixture['input_format'] in {'csv', 'xlsx'}:
             require(all(op.get(key) is True for key in ('tabular_provenance_verified',
                 'duplicate_import_reused', 'preview_import_restart_verified')), 'TABULAR_CHECKS_MISSING')
             require_tabular_provenance(op)
@@ -172,7 +195,7 @@ def check(directory: Path, backend='sqlite') -> dict:
     # The CI artifact retains the original upload bytes. Recompute their hashes
     # without parsing them or treating matching reports as a new ERP execution.
     for operation in operations:
-        fixture = ACCEPTANCE_CASES[operation['scenario']]
+        fixture = cases[operation['scenario']]
         if fixture['input_format'] == 'txt':
             continue
         filename = f"input-fixtures/synthetic-{operation['scenario']}.{fixture['input_format']}"
@@ -183,9 +206,9 @@ def check(directory: Path, backend='sqlite') -> dict:
         source_digests[filename] = hashlib.sha256(source).hexdigest()
         require(source_digests[filename] == operation['provenance']['document_sha256'],
                 'SOURCE_FIXTURE_HASH_MISMATCH')
-    require(len({x['operation_id'] for x in operations}) == len(ACCEPTANCE_CASES) and len({x['remote_id'] for x in operations}) == len(ACCEPTANCE_CASES),
+    require(len({x['operation_id'] for x in operations}) == len(cases) and len({x['remote_id'] for x in operations}) == len(cases),
             'DUPLICATE_OPERATION_OR_DRAFT')
-    require(audit.get('stage') == 'database-audit' and count_is(audit.get('draft_count'), len(ACCEPTANCE_CASES)) and
+    require(audit.get('stage') == 'database-audit' and count_is(audit.get('draft_count'), len(cases)) and
             count_is(audit.get('purchase_order_count'), 0) and count_is(audit.get('submitted_count'), 0), 'INVALID_DATABASE_COUNTS')
     require_select_only(seed.get('reference_permissions'))
     require_select_only(audit.get('reference_permissions'))
@@ -204,7 +227,7 @@ def check(directory: Path, backend='sqlite') -> dict:
         re.fullmatch(r'frappe/erpnext@sha256:[0-9a-f]{64}', x) for x in images), 'IMAGE_DIGEST_MISSING')
     return {'status': 'passed', 'record_sha256': digests, 'source_sha256': source_digests, 'synthetic_only': True,
         'normal_and_lost_receipt_checked': True, 'database_audit_checked': True,
-        'tabular_import_evidence_checked': True,
+        'tabular_import_evidence_checked': True, 'multi_item_evidence_checked': include_multi_item,
         'api_business_database': run['api_business_database'], 'negative_rest_permissions_checked': True,
         'business_database_audit_checked': backend == 'postgresql',
         'scope': 'Consistency check of CI records, not a new ERP execution or cryptographic attestation'}
@@ -212,11 +235,12 @@ def check(directory: Path, backend='sqlite') -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--include-multi-item', action='store_true')
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--business-database', choices=('sqlite', 'postgresql'), default='sqlite')
     args = parser.parse_args(argv)
     try:
-        result = check(args.directory, args.business_database)
+        result = check(args.directory, args.business_database, args.include_multi_item)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         # Never echo malformed record content or paths into public CI output.
         print(json.dumps({'status': 'failed', 'reason': 'ERP_EVIDENCE_INCOMPLETE_OR_INVALID'}))

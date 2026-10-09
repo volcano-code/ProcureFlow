@@ -49,3 +49,11 @@ main, .content, .panel, .lower-grid > *, .request-panel > *, .event > div {
 .recovery-reconciliation{border-top:1px solid var(--line);margin-top:18px;padding-top:2px}
 .recovery-panel .stale-notice{display:block;line-height:1.8}.recovery-panel .form-error .secondary{margin:8px}
 @media(max-width:760px){.recovery-panel .decision-content{padding-right:14px;padding-left:14px}.recovery-source .badge{white-space:normal}}
+/* Bounded multi-item requests and quote lines retain keyboard access and mobile scrolling. */
+.procurement-editor{width:min(1000px,94vw)}.procurement-editor h3{font-size:14px;margin:18px 0 8px}.procurement-editor p{font-size:12px;line-height:1.7}
+.line-editor{min-width:0;border:1px solid var(--line);border-radius:7px;padding:14px;margin:16px 0}.line-editor legend{font-size:13px;font-weight:600;padding:0 6px}
+.line-editor .form-grid>div{min-width:0}.line-editor .source-meta{display:block;overflow-wrap:anywhere;white-space:normal;max-height:5em;overflow:auto;margin:5px 0 10px}
+.quote-line-row>td{padding:0 18px 18px;white-space:normal}.quote-lines{min-width:0;max-width:100%}.quote-lines p{font-size:12px;line-height:1.8;margin:12px 0;white-space:normal;overflow-wrap:anywhere}
+.quote-lines th,.quote-lines td{font-size:11px;min-width:65px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}.quote-lines .violation-list{min-width:130px}
+.request-lines{font-size:12px;line-height:1.8;list-style:none;padding:0;margin:8px 0}.request-lines li{overflow-wrap:anywhere}
+@media(max-width:760px){.procurement-editor{padding:18px;max-height:92vh}.line-editor .form-grid{grid-template-columns:minmax(0,1fr)}.procurement-editor .form-actions{flex-wrap:wrap}.quote-line-row>td{padding:0 10px 14px}}

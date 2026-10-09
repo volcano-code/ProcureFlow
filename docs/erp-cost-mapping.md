@@ -53,3 +53,15 @@ The mappings were checked against tagged ERPNext v16.36.0 code, not inferred fro
 - [Purchase tax/charge semantics](https://docs.frappe.io/erpnext/purchase-taxes-and-charges-template) and [valuation versus total](https://docs.frappe.io/erpnext/difference-in-total-and-valuation-in-tax-and-charges)
 
 These sources establish intended semantics; only the updated disposable integration run can establish the real roundtrip result for this commit.
+
+## Local multi-item increment
+
+The single-item mapping above remains unchanged. The unpublished stage-17
+multi-item adapter adds a separate `multi-line-zero-tax-costs-v1` contract:
+1–20 unique CNY/EA lines, integral quantities, uniform explicit tax mode,
+zero tax rates and zero per-line discounts, header freight counted once and
+1,000,000 CNY amount caps. Nonzero taxes/discounts, mixed modes and fractional
+quantities reject before networking. All lines and commercial terms are checked
+on independent readback, including an unchanged total that hides line drift.
+The new contract has synthetic transport coverage only, not live ERP acceptance.
+See [stage 17](stage17-multi-item-procurement.md) for the full scope and evidence.

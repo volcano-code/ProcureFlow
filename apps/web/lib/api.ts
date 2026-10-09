@@ -14,11 +14,16 @@ export interface Evaluation {id:string;request_id:string;request_version:number;
   current:boolean;stale_reason:string|null;[key:string]:unknown}
 export interface ApprovalReceipt {id:string;request_id:string;approver_id:string;snapshot_hash:string;snapshot:Proposal|null;
   status:string;stored_status:string;note:string;created_at:string;expires_at:string;current:boolean;stale_reason:string|null}
-export interface ProcurementRequest {id:string;title:string;sku:string;quantity:string;uom:string;budget:string;max_delivery_days:number;currency:string;version:number;status:string;proposal:Proposal|null;proposal_current:boolean;proposal_stale_reason:string|null}
-export interface QuoteValues {supplier_id:string|null;sku:string|null;quantity:string|null;uom:string|null;unit_price:string|null;tax_mode:"included"|"excluded"|"unknown";tax_rate:string|null;shipping_cost:string|null;discount:string|null;delivery_days:number|null;currency:string|null}
-export interface EvidenceRef {kind:string;fragment_id?:string;text?:string;reason?:string;page?:number;line?:number;row?:number;sheet?:string;cell_range?:string;document_sha256?:string}
+export interface RequestLine {sku:string;quantity:string;uom:string}
+export interface ProcurementRequest {id:string;title:string;sku:string|null;quantity:string|null;uom:string|null;lines?:RequestLine[]|null;budget:string;max_delivery_days:number;currency:string;version:number;status:string;proposal:Proposal|null;proposal_current:boolean;proposal_stale_reason:string|null}
+export interface QuoteLineValues {sku:string|null;quantity:string|null;uom:string|null;unit_price:string|null;tax_mode:"included"|"excluded"|"unknown";tax_rate:string|null;discount:string|null;delivery_days:number|null}
+export type QuoteScalarField = Exclude<keyof QuoteValues,"lines">;
+export interface QuoteValues {lines?:QuoteLineValues[]|null;supplier_id:string|null;sku:string|null;quantity:string|null;uom:string|null;unit_price:string|null;tax_mode:"included"|"excluded"|"unknown";tax_rate:string|null;shipping_cost:string|null;discount:string|null;delivery_days:number|null;currency:string|null}
+export interface EvidenceRef {sources?:EvidenceRef[];kind:string;fragment_id?:string;text?:string;reason?:string;page?:number;line?:number;row?:number;sheet?:string;cell_range?:string;document_sha256?:string}
 export interface DocumentEvidence {id:string;filename:string;sha256:string;trust:string;fragments:{id:string;text:string;locator:EvidenceRef}[]}
-export interface Quote {id:string;request_id:string;document_id:string;filename:string;version:number;version_id:string;values:QuoteValues;evidence:Record<string,EvidenceRef>;confirmed_by:string|null;calculation:{total:string|null;violations:string[];eligible:boolean;effective_limits?:{budget:string;max_delivery_days:number}}}
+export interface LineCalculation {sku:string|null;total:string|null;goods?:string|null;discount?:string|null;added_tax?:string|null;violations?:string[];missing?:string[];errors?:string[]}
+export interface QuoteCalculation {total:string|null;violations:string[];eligible:boolean;goods?:string|null;discount?:string|null;added_tax?:string|null;shipping?:string|null;lines?:LineCalculation[];coverage?:{requested_skus:string[];quoted_skus:string[];missing_skus:string[];unexpected_skus:string[];complete:boolean};effective_limits?:{budget:string;max_delivery_days:number}}
+export interface Quote {id:string;request_id:string;document_id:string;filename:string;version:number;version_id:string;values:QuoteValues;evidence:Record<string,EvidenceRef>;confirmed_by:string|null;calculation:QuoteCalculation}
 export interface AuditEvent {id:number;type:string;actor_id:string;created_at:string;payload:Record<string,unknown>}
 export interface Operation {id:string;status:string;remote_id:string|null;error:string|null}
 export interface RecoveryOperation extends Operation {request_id:string;request_title:string;attempts:number;snapshot_hash:string;
@@ -51,9 +56,9 @@ export function api<T>(path:string,token:Credential,method="GET",body?:unknown,s
 }
 
 export interface TableImportCell {column:string;cell:string;value:string|null;formula?:boolean}
-export interface TableImportSheet {name:string;rows:{row:number;cells:TableImportCell[]}[];suggested_header_row:number|null;suggested_mapping:Partial<Record<keyof QuoteValues,string>>}
-export interface TableImportSelection {sheet:string;header_row:number;row:number;mapping:Partial<Record<keyof QuoteValues,string>>}
+export interface TableImportSheet {name:string;rows:{row:number;cells:TableImportCell[]}[];suggested_header_row:number|null;suggested_mapping:Partial<Record<QuoteScalarField,string>>}
+export interface TableImportSelection {sheet:string;header_row:number;row?:number;rows?:number[];mapping:Partial<Record<QuoteScalarField,string>>}
 export interface TableImportPreview {id:string;request_id:string;revision:number;status:"OPEN"|"IMPORTED"|"ARCHIVED";expires_at:string;
   filename:string;document_sha256:string;sheets:TableImportSheet[];selection:TableImportSelection|null;
-  suggested_mapping:Partial<Record<keyof QuoteValues,string>>;values:QuoteValues|null;evidence:Record<string,EvidenceRef>|null;
+  suggested_mapping:Partial<Record<QuoteScalarField,string>>;values:QuoteValues|null;evidence:Record<string,EvidenceRef>|null;
   issues:string[];can_confirm:boolean;quote_id:string|null}

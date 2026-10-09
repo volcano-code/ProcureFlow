@@ -2120,6 +2120,154 @@
         ],
         "title": "QuoteEdit"
       },
+      "QuoteLineValues": {
+        "properties": {
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 3,
+                "gt": 0,
+                "le": "1000000",
+                "max_digits": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 2,
+                "ge": 0,
+                "le": "1000000000",
+                "max_digits": 15
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "tax_mode": {
+            "type": "string",
+            "enum": [
+              "included",
+              "excluded",
+              "unknown"
+            ],
+            "title": "Tax Mode",
+            "default": "unknown"
+          },
+          "tax_rate": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": 0,
+                "le": 1,
+                "max_digits": 7
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Rate"
+          },
+          "discount": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 2,
+                "ge": 0,
+                "le": "1000000000",
+                "max_digits": 15
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount"
+          },
+          "delivery_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 365.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "QuoteLineValues"
+      },
       "QuoteValues": {
         "properties": {
           "supplier_id": {
@@ -2311,6 +2459,22 @@
               }
             ],
             "title": "Currency"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/QuoteLineValues"
+                },
+                "type": "array",
+                "maxItems": 20,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           }
         },
         "additionalProperties": false,
@@ -2326,32 +2490,62 @@
             "title": "Title"
           },
           "sku": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Sku"
           },
           "quantity": {
             "anyOf": [
               {
-                "type": "number"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 3,
+                "gt": 0,
+                "le": "1000000",
+                "max_digits": 10
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "null"
               }
             ],
-            "title": "Quantity",
-            "decimal_places": 3,
-            "gt": 0,
-            "le": "1000000",
-            "max_digits": 10
+            "title": "Quantity"
           },
           "uom": {
             "type": "string",
             "const": "EA",
             "title": "Uom",
             "default": "EA"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RequestLine"
+                },
+                "type": "array",
+                "maxItems": 20,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           },
           "budget": {
             "anyOf": [
@@ -2387,20 +2581,12 @@
         "type": "object",
         "required": [
           "title",
-          "sku",
-          "quantity",
           "budget"
         ],
         "title": "RequestCreate"
       },
-      "RequestUpdate": {
+      "RequestLine": {
         "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Title"
-          },
           "sku": {
             "type": "string",
             "maxLength": 80,
@@ -2428,6 +2614,81 @@
             "const": "EA",
             "title": "Uom",
             "default": "EA"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sku",
+          "quantity"
+        ],
+        "title": "RequestLine"
+      },
+      "RequestUpdate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "decimal_places": 3,
+                "gt": 0,
+                "le": "1000000",
+                "max_digits": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "uom": {
+            "type": "string",
+            "const": "EA",
+            "title": "Uom",
+            "default": "EA"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RequestLine"
+                },
+                "type": "array",
+                "maxItems": 20,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           },
           "budget": {
             "anyOf": [
@@ -2468,8 +2729,6 @@
         "type": "object",
         "required": [
           "title",
-          "sku",
-          "quantity",
           "budget",
           "expected_version"
         ],
@@ -2516,10 +2775,35 @@
             "title": "Header Row"
           },
           "row": {
-            "type": "integer",
-            "maximum": 10000.0,
-            "minimum": 1.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Row"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer",
+                  "maximum": 10000.0,
+                  "minimum": 1.0
+                },
+                "type": "array",
+                "maxItems": 20,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
           },
           "mapping": {
             "additionalProperties": {
@@ -2537,7 +2821,6 @@
           "expected_revision",
           "sheet",
           "header_row",
-          "row",
           "mapping"
         ],
         "title": "TableImportPreview"

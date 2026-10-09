@@ -1,29 +1,22 @@
 {
   "schema_version": 1,
   "kind": "source-version-evidence-pointer",
-  "status": "unreleased-development",
+  "status": "unreleased-local-development",
   "scope": "Baseline provenance and evidence locations. This is not a current-tree file checksum manifest or a release attestation.",
   "baseline": {
-    "commit": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
-    "tree": "90ec220e6c35a28add728d47e6cfa851f591808e",
-    "evidence": "docs/evidence/a10f62b-baseline.json"
+    "commit": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
+    "tree": "4a0a151a09afef085df55d2c284d5f291462370f",
+    "evidence": "docs/evidence/fc9750e-baseline.json"
   },
   "current_increment": {
-    "name": "recovery-diagnostics",
-    "documentation": "docs/stage16-recovery-diagnostics.md",
-    "verification": "Local regression, unit, typecheck, build, contract, HTTP and synthetic SQLite recovery checks passed; native browser was blocked locally. Remote-stage results belong to the accompanying exact-head CI delivery.",
-    "remote_ci": "Exact-head remote verification belongs to the accompanying CI delivery; local and baseline records do not substitute for it.",
-    "published": true,
+    "name": "multi-item-procurement",
+    "documentation": "docs/stage17-multi-item-procurement.md",
+    "verification": "Local Python 2662 passed (15 deselected), web unit82, typecheck/build/contracts, HTTP, offline fixtures and synthetic multi-item/recovery passed. Native browser blocked before assertions. Expanded nine-case real-ERP CI source is executable but actual ERP/PostgreSQL/containers and remote CI are unrun.",
+    "remote_ci": "not run for this local increment",
+    "published": false,
     "merged": false,
     "deployed": false,
-    "verification_evidence": "docs/evidence/stage16-local-verification.json",
-    "initial_remote_publication": {
-      "commit": "e6afb8b9158fe3a5bbc9f8d2ac41d218b1815c8c",
-      "tree": "523776f91f4c4d6f16cdefb39e029275793db065",
-      "equivalent_local_commit": "6f36d198afea8778690bdc4f25bd6ef8815b6bd6",
-      "ref": "develop/a3-p0-gates",
-      "note": "Initial published tree. Later coverage fixes and exact final head are identified by the accompanying delivery, not a self-referential commit field."
-    }
+    "verification_evidence": "docs/evidence/stage17-local-verification.json"
   },
   "historical_manifest": {
     "path": "docs/history/MANIFEST-0.1.0a2.json",
@@ -31,5 +24,10 @@
     "sha256": "bb7c42b9eb29b3514d28b0cf89abeac6ed96f9f11fb2d7f3b6fffd21d07196ca",
     "preservation": "byte-identical to MANIFEST.json in the baseline Git tree; listed file hashes describe that historical a2 package only"
   },
-  "version_note": "Package 0.1.0a2 strings are retained Alpha metadata, not current evidence. The baseline commit above is fixed provenance, not the current checkout identity. Record the final commit/tree externally when packaging a delivery; do not embed a self-referential current commit hash."
+  "version_note": "Package 0.1.0a2 strings are retained Alpha metadata, not current evidence. The baseline commit above is fixed provenance, not the current checkout identity. Record the final commit/tree externally when packaging a delivery; do not embed a self-referential current commit hash.",
+  "prior_increment_manifest": {
+    "path": "docs/history/MANIFEST-fc9750e.json",
+    "sha256": "7a4b3fffc31d6c9239d88ab088cc5bcb82f4732dd68da3bc4750acf75290976b",
+    "preservation": "Exact MANIFEST.json bytes from fc9750e baseline."
+  }
 }

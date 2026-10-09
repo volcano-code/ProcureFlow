@@ -30,6 +30,8 @@ export function staleExplanation(reason) {
   return reasons[reason] || '绑定的需求、报价、策略或来源已变化，旧结果仅供历史查阅';
 }
 export function violationExplanation(code) {
+  const line=/^LINE_(\d+)_(.+)$/.exec(code);
+  if(line)return `物料 ${line[1]}：${violationExplanation(line[2])}`;
   const reasons = {
     FIELDS_NOT_CONFIRMED: '报价尚未人工确认；请逐项核对原始文件后确认',
     BUDGET_EXCEEDED: '含税总价超过需求预算与策略预算上限中较严格的一项',
@@ -39,6 +41,8 @@ export function violationExplanation(code) {
     MINIMUM_VALID_QUOTES_NOT_MET: '合规且已确认的报价数量不足，不能生成可审批方案',
     INSUFFICIENT_VALID_QUOTES: '不同供应商的合规且已确认报价数量不足，不能生成可审批方案',
     NO_ELIGIBLE_QUOTE: '没有同时满足全部规则的报价，不能生成可审批方案',
+    MISSING_REQUEST_LINES: '报价未覆盖全部需求物料，不能跨供应商拼单',
+    UNEXPECTED_QUOTE_LINES: '报价包含需求之外的物料，须核对型号和来源',
     SKU_MISMATCH: '报价型号与采购需求不一致',
     UOM_MISMATCH: '报价计量单位与采购需求不一致',
     QUANTITY_MISMATCH: '报价数量与采购需求不一致',

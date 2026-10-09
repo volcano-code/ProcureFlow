@@ -216,3 +216,28 @@ def test_native_recovery_uncertainty_binding_failure_and_auth_denials(page):
     expect(page.get_by_test_id('recovery-panel')).to_have_count(0)
     expect(page.get_by_test_id('login-demo-buyer')).to_be_visible()
     assert all(method == 'GET' for method, _ in calls)
+
+
+def test_native_recovery_multi_item_values_and_differences_stay_read_only(page):
+    """Display-only synthetic multi-line receipt; no live ERP behavior is claimed."""
+    expected = {'lines': [{'sku': 'A', 'quantity': '2', 'unit_price': '10.00', 'uom': 'EA'},
+                          {'sku': 'B', 'quantity': '3', 'unit_price': '20.00', 'uom': 'EA'}], 'docstatus': 0}
+    observed = {'lines': [{**expected['lines'][0], 'quantity': '4'}, expected['lines'][1]], 'docstatus': 0}
+    def read_detail(route, identifier):
+        fulfill(route, {**detail(identifier), 'expected': expected})
+    def reconcile(route, identifier):
+        fulfill(route, receipt(identifier, 'mismatch', expected=expected, observed=observed,
+            differences=[{'field': 'lines[0].quantity', 'expected': '2', 'observed': '4', 'reason': 'VALUE_MISMATCH'}]))
+    calls = mock_workspace(page, reconcile, detail_handler=read_detail)
+    page.get_by_test_id('open-recovery-detail').first.click()
+    page.get_by_test_id('recovery-detail').get_by_text('查看原始预期字段', exact=True).click()
+    expect(page.get_by_test_id('recovery-line-values')).to_contain_text('A')
+    expect(page.get_by_test_id('recovery-line-values')).to_contain_text('20.00')
+    page.get_by_test_id('reconcile-recovery').click()
+    expect(page.get_by_test_id('recovery-result-status')).to_contain_text('远端记录与原快照不一致')
+    expect(page.get_by_test_id('recovery-differences')).to_contain_text('lines[0].quantity：预期 2；观测 4')
+    expect(page.get_by_test_id('recovery-panel')).not_to_contain_text('[object Object]')
+    expect(page.get_by_test_id('recovery-panel')).to_contain_text('禁止重放')
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    assert calls and all(method == 'GET' for method, _ in calls)

@@ -14,7 +14,7 @@ from .db import (ApprovalRow, Database, DocumentRow, EventRow, OperationRow, Out
                  QuoteRow, QuoteVersionRow, RequestRow, EvaluationRow, TenantPolicyRow, PolicyVersionRow, PilotMembershipRow, PilotSessionRow, audit, now, uid)
 from .domain import digest, offer_check
 from .policies import bootstrap, effective_policy, lock_tenant, policy_versions, publish
-from .erp import COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
+from .erp import COST_MAPPING_VERSION, MULTI_COST_MAPPING_VERSION, ERPPort, ERPRejected, ERPUnknown, remote_matches
 from .errors import DomainError
 from .tabular import isolated_parse_document as parse_document
 from .table_imports import TableImportServiceMixin
@@ -266,9 +266,18 @@ class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
             if command.expected_version != quote.current_version:
                 raise DomainError("VERSION_CONFLICT", "Refresh the quote before editing")
             values = command.values.model_dump(mode="json")
-            evidence = dict(old.evidence)
-            for key, value in values.items():
-                if value != old.values.get(key):
+            def fields(data):
+                result = {key: value for key, value in data.items() if key != "lines"}
+                for index, line in enumerate(data.get("lines") or []):
+                    result.update({f"lines.{index}.{key}": value for key, value in line.items()})
+                return result
+            flat_values, old_values = fields(values), fields(old.values)
+            evidence = {key: value for key, value in old.evidence.items() if key in flat_values}
+            for key, value in flat_values.items():
+                line_identity_changed = (key.startswith("lines.") and
+                    flat_values.get(".".join(key.split(".")[:2]) + ".sku") !=
+                    old_values.get(".".join(key.split(".")[:2]) + ".sku"))
+                if line_identity_changed or value != old_values.get(key):
                     evidence[key] = {"kind": "manual", "actor_id": principal.user_id,
                                      "reason": command.reason, "recorded_at": now(), "previous_version_id": old.id}
             quote.current_version += 1
@@ -332,7 +341,7 @@ class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
         checked = offer_check(request.data, version.values, bool(version.confirmed_by), policy)
         if not checked["eligible"] or self._valid_quote_count(binding) < policy["minimum_valid_quotes"]:
             raise DomainError("PROPOSAL_BLOCKED", "Selected quote or valid supplier count no longer satisfies policy")
-        body = {"contract_version": "single-sku-v2", "tenant_id": request.tenant_id, "request_id": request.id,
+        body = {"contract_version": "multi-sku-v1" if version.values.get("lines") is not None else "single-sku-v2", "tenant_id": request.tenant_id, "request_id": request.id,
                 "request_version": request.version, "request": deepcopy(request.data), "quote_id": quote.id,
                 "quote_version_id": version.id, "quote_version": version.version, "quote_values": deepcopy(version.values),
                 "confirmed_by": version.confirmed_by, "evidence_hash": digest(version.evidence),
@@ -342,7 +351,7 @@ class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
                 "quote_collection_hash": binding["quote_collection_hash"], "input_hash": digest(binding),
                 "valid_quote_count": self._valid_quote_count(binding),
                 "erp_mode": self.erp.mode, "erp_company": self.settings.erp_company,
-                "erp_cost_mapping_version": COST_MAPPING_VERSION,
+                "erp_cost_mapping_version": MULTI_COST_MAPPING_VERSION if version.values.get("lines") is not None else COST_MAPPING_VERSION,
                 "erp_cost_accounts": {"tax": self.settings.erp_tax_account, "freight": self.settings.erp_freight_account},
                 "erp_target_fingerprint": digest({"mode": self.erp.mode, "url": self.settings.erp_url}),
                 "transaction_date": request.created_at[:10]}
@@ -541,9 +550,11 @@ class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
 
     def _execution_target_matches(self, payload):
         """Recovery must not consult another ERP or trust a modified stored snapshot."""
-        return (payload.get("erp_mode") == self.erp.mode
+        return (isinstance(payload, dict) and isinstance(payload.get("quote_values"), dict)
+                and payload.get("erp_mode") == self.erp.mode
                 and payload.get("erp_company") == self.settings.erp_company
-                and payload.get("erp_cost_mapping_version") == COST_MAPPING_VERSION
+                and payload.get("erp_cost_mapping_version") == (MULTI_COST_MAPPING_VERSION
+                    if payload.get("quote_values", {}).get("lines") is not None else COST_MAPPING_VERSION)
                 and payload.get("erp_cost_accounts") == {"tax": self.settings.erp_tax_account, "freight": self.settings.erp_freight_account}
                 and payload.get("erp_target_fingerprint") == digest({"mode": self.erp.mode, "url": self.settings.erp_url})
                 and payload.get("snapshot_hash") == digest({k: v for k, v in payload.items() if k != "snapshot_hash"}))

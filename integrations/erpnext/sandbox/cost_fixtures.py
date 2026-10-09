@@ -28,3 +28,21 @@ for _format in ('csv', 'xlsx'):
 
 TAX_ACCOUNT = 'PF Synthetic Goods Tax - PFL'
 FREIGHT_ACCOUNT = 'PF Synthetic Gross Freight - PFL'
+
+# Explicitly selected ninth case; historical eight-case evidence remains readable.
+MULTI_ITEM_SCENARIO = 'multi-item-zero-tax-lost-receipt'
+MULTI_ITEM_CASE = dict(input_format='csv', multi_item=True, lose_receipt=True,
+    goods='41.80', net='41.80', shipping_cost='5.25', discount='0.00',
+    tax_before='0.00', tax_after='0.00', tax_mode='included', tax_rate='0', total='47.05',
+    lines=[
+        dict(sku='PF-SANDBOX-ITEM', quantity='2', uom='EA', unit_price='10.25',
+             tax_mode='included', tax_rate='0', discount='0', delivery_days=3, goods='20.50', net='20.50'),
+        dict(sku='PF-SANDBOX-ITEM-2', quantity='3', uom='EA', unit_price='7.10',
+             tax_mode='included', tax_rate='0', discount='0', delivery_days=4, goods='21.30', net='21.30'),
+    ])
+
+
+def acceptance_cases(include_multi_item=False):
+    if type(include_multi_item) is not bool:
+        raise ValueError('INVALID_MULTI_ITEM_SELECTION')
+    return {**ACCEPTANCE_CASES, **({MULTI_ITEM_SCENARIO: MULTI_ITEM_CASE} if include_multi_item else {})}

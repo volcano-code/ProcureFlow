@@ -27,8 +27,11 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from erp_business_database import business_database, postgres_test_url, audit_business_database
 sys.path.insert(0, str(ROOT / 'integrations/erpnext/sandbox'))
-from cost_fixtures import ACCEPTANCE_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT
+from cost_fixtures import ACCEPTANCE_CASES, TAX_ACCOUNT, FREIGHT_ACCOUNT, acceptance_cases
 from erp_tabular_fixtures import expected_values, import_tabular_quote, save_source_files
+from erp_multi_item_fixtures import import_multi_item_quote, save_source_file as save_multi_source
+from multi_cost_audit import verify_multi_cost_document
+from cost_fixtures import MULTI_ITEM_CASE
 TARGET='http://127.0.0.1:18080'
 
 
@@ -109,6 +112,17 @@ def document_contract_observation(expected, response):
         record = response.json().get('data')
         if not isinstance(record, dict) or not isinstance(record.get('items'), list):
             return {'document_shape_valid': False}
+        if len(expected.get('items', [])) == 2:
+            try:
+                verify_multi_cost_document(record, MULTI_ITEM_CASE)
+                complete = True
+            except (AssertionError, ValueError, TypeError, KeyError):
+                complete = False
+            return {'document_shape_valid': len(record['items']) == 2,
+                'multi_item_cost_contract_matches': complete,
+                **{field + '_matches': record.get(field) == expected.get(field) for field in
+                   ('supplier', 'company', 'currency', 'transaction_date',
+                    'custom_procureflow_operation_key', 'custom_procureflow_snapshot_hash')}}
         if len(record['items']) != 1 or not isinstance(record['items'][0], dict):
             return {'document_shape_valid': False}
         item, wanted = record['items'][0], expected['items'][0]
@@ -207,9 +221,12 @@ def fault_proxy():
         server.shutdown();server.server_close();thread.join(timeout=5);upstream.close()
 
 
-def exercise(data, backend='sqlite'):
+def exercise(data, backend='sqlite', include_multi_item=False):
+    cases = acceptance_cases(include_multi_item)
     report={'scope':'disposable real ERPNext draft roundtrip','status':'running','synthetic_only':True,
         'real_user_account_used':False,'human_approval_measured':False,'model_used':False,'steps':[]}
+    if include_multi_item:
+        report['include_multi_item'] = True
     with tempfile.TemporaryDirectory(prefix='pf-real-erp-') as tmp, business_database(backend, tmp) as database_url, fault_proxy() as (erp_url,wire):
         tokens={role:secrets.token_hex(32) for role in ('buyer','approver','self','other','auditor')}
         identities={tokens[role]:{'tenant_id':'lab' if role!='other' else 'other','user_id':'buyer' if role=='self' else role,
@@ -256,9 +273,15 @@ def exercise(data, backend='sqlite'):
                     nonlocal p
                     stop(p); p = start()
                 def prepare(title, scenario='normal'):
-                    fixture = ACCEPTANCE_CASES[scenario]
-                    req=call('POST','/requests',expected=201,json={'title':title,'sku':data['sku'],'quantity':'20','budget':'30000.00','max_delivery_days':14})
-                    if fixture['input_format'] == 'txt':
+                    fixture = cases[scenario]
+                    req=call('POST','/requests',expected=201,json={'title':title,'budget':'30000.00','max_delivery_days':14,
+                        **({'lines': [{key: line[key] for key in ('sku','quantity','uom')} for line in fixture['lines']]}
+                           if fixture.get('multi_item') else {'sku':data['sku'],'quantity':'20'})})
+                    if fixture.get('multi_item'):
+                        before_posts = len(wire['posts'])
+                        q, provenance = import_multi_item_quote(call, req['id'], data, restart)
+                        assert len(wire['posts']) == before_posts
+                    elif fixture['input_format'] == 'txt':
                         values = expected_values(data, scenario)
                         text='\n'.join(f'{k}: {v}' for k,v in values.items()).encode()
                         q=call('POST',f"/requests/{req['id']}/documents",expected=201,files={'file':('synthetic.txt',text)})
@@ -326,7 +349,7 @@ def exercise(data, backend='sqlite'):
                 report['steps'].append('tabular_preview_import_and_stale_quote_policy_writes_denied')
                 verified=[]
                 import_replays=[]
-                for label, fixture in ACCEPTANCE_CASES.items():
+                for label, fixture in cases.items():
                     lose = fixture['lose_receipt']
                     phase=label
                     req,proposal,quote,provenance=prepare('Synthetic '+label, label);approve(req,proposal);op=enqueue(req,proposal)
@@ -345,6 +368,12 @@ def exercise(data, backend='sqlite'):
                     call('POST',f"/operations/{op['id']}/verify",role='other',expected=404)
                     assert enqueue(req,proposal)['id']==op['id'];worker()
                     assert len([x for x in wire['posts'] if x['key']==op['id']])==1
+                    if fixture.get('multi_item'):
+                        provenance.update(item_count=2, independent_readback_verified=True,
+                            lost_receipt_reconciled=True, idempotent_replay_verified=True,
+                            single_post_verified=True, source_rows_verified=True, shipping_count=1,
+                            transaction_date=proposal['transaction_date'], supplier_id=proposal['quote_values']['supplier_id'],
+                            contract_version=proposal['contract_version'], erp_cost_mapping_version=proposal['erp_cost_mapping_version'])
                     verified.append({'operation_id':op['id'],'snapshot_hash':proposal['snapshot_hash'],
                         'remote_id':final['remote_id'],'expected_total':fixture['total'],'scenario':label,
                         'cost_components_verified': True, **provenance})
@@ -381,6 +410,7 @@ def exercise(data, backend='sqlite'):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--ephemeral-test',action='store_true')
+    p.add_argument('--include-multi-item',action='store_true')
     p.add_argument('--business-database', choices=('sqlite', 'postgresql'), default='sqlite')
     p.add_argument('--credentials',type=Path,default=Path('.data/erp-sandbox.json'))
     p.add_argument('--env-file',type=Path,default=Path('.env.erp-sandbox'))
@@ -392,6 +422,8 @@ def main(argv=None):
     elif a.ephemeral_test:
         try:
             data=validate_lab(a.credentials,a.env_file)
+            if a.include_multi_item and data.get('multi_skus') != ['PF-SANDBOX-ITEM','PF-SANDBOX-ITEM-2']:
+                raise ValueError('LAB_CONFIGURATION_MISMATCH')
             if a.business_database == 'postgresql':
                 postgres_test_url()
         except (OSError,ValueError,KeyError,TypeError):
@@ -400,8 +432,11 @@ def main(argv=None):
             network_started = False
             try:
                 save_source_files(a.output.parent, data)
+                if a.include_multi_item:
+                    save_multi_source(a.output.parent, data)
                 network_started = True
-                report=exercise(data) if a.business_database == 'sqlite' else exercise(data, 'postgresql')
+                report=(exercise(data, a.business_database, True) if a.include_multi_item else
+                        exercise(data) if a.business_database == 'sqlite' else exercise(data, 'postgresql'))
                 code=0 if report.get('status')=='passed' else 1
             except Exception as error:
                 report={'status':'failed','network_attempted':network_started,'reason':safe_failure(error)}

@@ -20,7 +20,8 @@ from urllib.parse import quote
 import httpx
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integrations/erpnext/sandbox'))
-from cost_fixtures import ACCEPTANCE_CASES
+from cost_fixtures import ACCEPTANCE_CASES, acceptance_cases, MULTI_ITEM_SCENARIO, MULTI_ITEM_CASE
+from multi_cost_audit import verify_multi_cost_document
 
 TARGET = 'http://127.0.0.1:18080'
 MAX_INPUT_BYTES = 1024 * 1024
@@ -97,9 +98,12 @@ def validate_inputs(credentials, env_file, roundtrip):
     require(valid_identifier(data.get('supplier')), 'LAB_CONFIGURATION_MISMATCH')
     require(run.get('status') == 'passed' and run.get('synthetic_only') is True
             and run.get('real_user_account_used') is False, 'ROUNDTRIP_NOT_VERIFIED')
+    cases = acceptance_cases(run.get('include_multi_item', False))
+    if run.get('include_multi_item') is True:
+        require(data.get('multi_skus') == ['PF-SANDBOX-ITEM', 'PF-SANDBOX-ITEM-2'], 'LAB_CONFIGURATION_MISMATCH')
     operations = run.get('operations')
-    require(isinstance(operations, list) and len(operations) == len(ACCEPTANCE_CASES), 'ROUNDTRIP_NOT_VERIFIED')
-    require([op.get('scenario') if isinstance(op, dict) else None for op in operations] == list(ACCEPTANCE_CASES),
+    require(isinstance(operations, list) and len(operations) == len(cases), 'ROUNDTRIP_NOT_VERIFIED')
+    require([op.get('scenario') if isinstance(op, dict) else None for op in operations] == list(cases),
             'ROUNDTRIP_NOT_VERIFIED')
     for operation in operations:
         require(isinstance(operation, dict) and valid_identifier(operation.get('remote_id'))
@@ -107,10 +111,10 @@ def validate_inputs(credentials, env_file, roundtrip):
                 and valid_identifier(operation.get('operation_id'))
                 and isinstance(operation.get('snapshot_hash'), str)
                 and re.fullmatch(r'[0-9a-f]{64}', operation['snapshot_hash']) is not None
-                and operation.get('scenario') in ACCEPTANCE_CASES
-                and operation.get('expected_total') == ACCEPTANCE_CASES[operation['scenario']]['total'], 'ROUNDTRIP_NOT_VERIFIED')
-    require(len({op['remote_id'] for op in operations}) == len(ACCEPTANCE_CASES)
-            and len({op['operation_id'] for op in operations}) == len(ACCEPTANCE_CASES), 'ROUNDTRIP_NOT_VERIFIED')
+                and operation.get('scenario') in cases
+                and operation.get('expected_total') == cases[operation['scenario']]['total'], 'ROUNDTRIP_NOT_VERIFIED')
+    require(len({op['remote_id'] for op in operations}) == len(cases)
+            and len({op['operation_id'] for op in operations}) == len(cases), 'ROUNDTRIP_NOT_VERIFIED')
     return data, operations
 
 
@@ -146,14 +150,14 @@ def denial_observation(probe, response):
     return observed
 
 
-def require_probe_evidence(record):
+def require_probe_evidence(record, *, include_multi_item=False):
     """Shared fail-closed contract for the aggregate evidence checker."""
     require(isinstance(record, dict) and record.get('stage') == 'permission-probes'
             and record.get('status') == 'passed', 'PERMISSION_PROBES_NOT_PASSED')
     require(all(record.get(key) is True for key in REQUIRED_TRUE)
             and record.get('real_user_account_used') is False
             and type(record.get('draft_documents_checked')) is int
-            and record['draft_documents_checked'] == len(ACCEPTANCE_CASES), 'PERMISSION_PROBE_CONTEXT_INVALID')
+            and record['draft_documents_checked'] == len(acceptance_cases(include_multi_item)), 'PERMISSION_PROBE_CONTEXT_INVALID')
     observed = record.get('probes')
     require(isinstance(observed, list) and len(observed) == len(PROBES), 'PERMISSION_PROBES_INCOMPLETE')
     for row, (name, method, endpoint) in zip(observed, PROBES, strict=True):
@@ -177,6 +181,15 @@ def draft_snapshot(client, data, operation):
     require(all(doc.get(k) == v for k, v in expected.items()) and type(doc.get('docstatus')) is int
             and doc['docstatus'] == 0, 'DRAFT_FIXTURE_NOT_VERIFIED')
     items = doc.get('items')
+    if operation['scenario'] == MULTI_ITEM_SCENARIO:
+        try:
+            verify_multi_cost_document(doc, MULTI_ITEM_CASE)
+        except (AssertionError, ValueError, InvalidOperation, TypeError, KeyError):
+            raise ValueError('DRAFT_FIXTURE_NOT_VERIFIED') from None
+        datetime.date.fromisoformat(doc['transaction_date'])
+        fields = (*expected, 'docstatus', 'transaction_date', 'grand_total', 'modified', 'items',
+                  'taxes', 'discount_amount', 'apply_discount_on', 'net_total', 'total_taxes_and_charges')
+        return {field: doc.get(field) for field in fields}
     require(isinstance(items, list) and len(items) == 1 and isinstance(items[0], dict),
             'DRAFT_FIXTURE_NOT_VERIFIED')
     item = items[0]
@@ -255,7 +268,7 @@ def exercise(data, operations, *, transport=None):
             after = [draft_snapshot(client, data, op) for op in operations]
             require(before == after, 'DRAFTS_CHANGED')
             report.update(status='passed', drafts_unchanged=True)
-            require_probe_evidence(report)
+            require_probe_evidence(report, include_multi_item=any(op["scenario"] == MULTI_ITEM_SCENARIO for op in operations))
     except Exception as error:
         reason = 'ERP_TRANSPORT_FAILED' if isinstance(error, httpx.HTTPError) else str(error)
         report.update(status='failed', phase=phase,

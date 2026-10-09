@@ -15,7 +15,7 @@ from .errors import DomainError
 
 # These deterministic invariants are versioned into each immutable policy body.
 CLAUSES = [
-    {"id": "P-01", "text": "Only CNY, identical SKU, EA unit and identical requested quantity can be compared."},
+    {"id": "P-01", "text": "Only CNY, complete identical SKU coverage, EA units and identical per-SKU requested quantities can be compared."},
     {"id": "P-02", "text": "Shipping and discounts must be explicit; unknown is not zero. Tax status must be known."},
     {"id": "P-03", "text": "The total and delivery must satisfy both request limits and any tenant caps."},
     {"id": "P-04", "text": "A different authorized approver must approve an unchanged complete quote collection and effective policy before a draft write."},

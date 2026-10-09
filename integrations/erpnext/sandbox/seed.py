@@ -65,8 +65,9 @@ def main():
             'supplier_type':'Company','supplier_group':'Local'}).insert()
         supplier = frappe.db.get_value('Supplier', {'supplier_name':'PF Synthetic Supplier'}, 'name')
         phase('item')
-        frappe.get_doc({'doctype':'Item','item_code':'PF-SANDBOX-ITEM','item_name':'Synthetic Test Item',
-            'item_group':'Products','stock_uom':'EA','is_stock_item':0,'is_purchase_item':1}).insert()
+        for sku in ('PF-SANDBOX-ITEM', 'PF-SANDBOX-ITEM-2'):
+            frappe.get_doc({'doctype':'Item','item_code':sku,'item_name':'Synthetic Test Item',
+                'item_group':'Products','stock_uom':'EA','is_stock_item':0,'is_purchase_item':1}).insert()
         phase('custom-fields')
         create_custom_fields({'Supplier Quotation':[
             {'fieldname':'custom_procureflow_operation_key','label':'ProcureFlow operation', 'fieldtype':'Data','unique':1,'no_copy':1},
@@ -115,8 +116,9 @@ def main():
         with os.fdopen(fd,'w') as f:
             json.dump({'site':SITE,'nonce':os.environ['PF_EPHEMERAL_NONCE'],
                 'api_key':key,'api_secret':secret,'company':COMPANY,'user':USER,
-                'supplier':supplier,'sku':'PF-SANDBOX-ITEM','permissions':permissions},f)
+                'supplier':supplier,'sku':'PF-SANDBOX-ITEM','multi_skus':['PF-SANDBOX-ITEM','PF-SANDBOX-ITEM-2'],'permissions':permissions},f)
         return {'synthetic_only': True, 'permissions': permissions,
+            'synthetic_item_count': 2, 'multi_skus': ['PF-SANDBOX-ITEM', 'PF-SANDBOX-ITEM-2'],
             'reference_permissions': reference_permissions, 'cost_reference_permissions': cost_reference_permissions,
             'credentials_written_privately': True, 'site_context': 'bench-sites',
             'integration_user_type': 'System User',

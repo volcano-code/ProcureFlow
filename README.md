@@ -8,7 +8,7 @@
 
 ## 当前能力与边界
 
-- 单 SKU、CNY、EA；保留 TXT/CSV/文本 PDF/XLSX 固定键值布局，并支持普通 CSV/XLSX 的工作表/报价行选择、显式列映射和持久预览（见 [阶段十二](docs/stage12-tabular-import.md)）。普通表格到隔离真实 ERP 的严格验收合同见 [阶段十三](docs/stage13-tabular-erp-acceptance.md)。没有 OCR、多商品合并或任意单位/币种换算
+- CNY、EA，单物料兼容，以及最多 20 个唯一 SKU 的完整供应商报价篮子：多行需求、CSV/XLSX 显式多行映射、逐行来源/修正/确认、逐行税折扣与整单运费、完整覆盖比较/审批/草稿/读回。缺行、额外行或数量不符不参与推荐；不跨供应商拼单、不自动合并重复 SKU、不做 OCR 或单位/币种换算。原生 Next 支持多物料；轻量静态 demo 保持单物料。详见 [阶段十七](docs/stage17-multi-item-procurement.md)
 - 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - 受控 pilot 登录：一次性邀请、短期内存会话、退出／到期／跨进程撤权、用户／租户／角色展示；买方与审批方授权版本在首次 ERP 写入前重验（见 [阶段十四](docs/stage14-pilot-sessions.md)），不自动发放真实账号
@@ -25,9 +25,9 @@
 
 先看**被测试的确切提交**，再看该提交的 CI 和原始记录。测试命令或 workflow 存在不代表已运行；mock/fixture 不能替代真实服务；不同提交、数据库后端和重叠测试数量不能相加成采购任务数。
 
-本增量从已接收源码基线 `a10f62b65263c9e6bb53219a6296dfb9a67de527`（tree `90ec220e6c35a28add728d47e6cfa851f591808e`）继续。该基线验收包记录 [core/原生 UI/PostgreSQL/Compose CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968155)、[原生全栈容器 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968093)、[SQLite/PostgreSQL + 真实 ERPNext 合成沙箱 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968107) 和 [原生 pilot + 真实 ERPNext 双数据库 CI](https://github.com/volcano-code/ProcureFlow/actions/runs/37780968132) 已完成且成功。包含 push/PR 重复门槛在内，共记录 6 个运行、14 个作业；不能作为 6 套不同业务场景。原始记录位置、文件哈希及完整运行列表见 [基线证据索引](docs/evidence/a10f62b-baseline.json)。这是接收包内的历史结果，不是本增量的新运行或安全认证。
+当前本地多物料增量基于已核对的 `fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf`，远端 PR #1 在开始工作时指向相同提交。基线与之前阶段的 CI 仅是历史证据，不能证明本增量通过。当前结果和未运行门槛见 [阶段十七](docs/stage17-multi-item-procurement.md) 与 [本地证据索引](docs/evidence/stage17-local-verification.json)。当前改动尚未推送、合并或部署，独立安全审查未完成。
 
-当前增量的本地结果、尚未运行/失败的门槛和远端结果应在交付记录中分开列出。[阶段十六恢复诊断](docs/stage16-recovery-diagnostics.md) 已记录本地回归、前端单元、类型检查和构建通过；本地原生浏览器因 `CHROMIUM_UNIX_SOCKET_DENIED` 在 UI 执行前被阻断，未取得截图或 UI 验收。本地阶段未运行实时 PostgreSQL、容器或真实 ERP；后续远端验收以随附精确提交交付记录为准，不能沿用上述基线通过结论。真实 ERP 使用一次性合成公司与账户，不是用户生产 ERP，也不是实际人工审批研究。独立安全审查未完成，不宣称通过独立审查或生产准入。
+多物料真实 ERPNext 费用映射在本阶段严格限定为显式零税率、零行折扣、相同税价模式、整数 EA 与受限金额；多行税/折扣比较和 MockERP 已实现，但不能据此声称真实 ERP 支持同等范围。只运行合成 transport 测试，不是实时 ERP 验收。
 
 ## 立即运行，不需要模型密钥或 ERPNext
 
@@ -99,6 +99,7 @@ python scripts/web_http_smoke.py
 python scripts/verify_model_acceptance.py --fixture
 python scripts/evaluate_procurement.py --fixture --output evals/reports/local/procurement-development.json
 python scripts/verify_recovery.py --output evals/reports/local/recovery-acceptance.json
+python scripts/verify_multi_item.py --output evals/reports/local/multi-item-acceptance.json
 ```
 
 安装 Chromium 后运行严格浏览器门槛：
@@ -130,7 +131,7 @@ cd services/api
 PYTHONPATH=. python -m alembic upgrade head
 ```
 
-对已有实例先停止相关进程、备份并在副本验证迁移。 V1 `.pfb` 严格绑定源码指纹；本增量新增模块后，旧 `a10f62b` 备份仍须使用匹配的可信基线代码恢复，不提供旧包兼容迁移或放宽校验，见 [版本兼容边界](docs/stage16-recovery-diagnostics.md#exact-version-backup-compatibility)。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
+对已有实例先停止相关进程、备份并在副本验证迁移。 V1 `.pfb` 严格绑定源码指纹；本增量修改源码后，旧版本（包括 `fc9750e`）备份仍须使用匹配的可信基线代码恢复，不提供旧包兼容迁移或放宽校验，见 [版本兼容边界](docs/stage16-recovery-diagnostics.md#exact-version-backup-compatibility)。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
 
 Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。旧 private 静态令牌模式和新 pilot 受控会话模式都不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
 

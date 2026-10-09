@@ -17,6 +17,13 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "test_native_multi_item_create_duplicate_and_twenty_line_boundary",
+    "test_native_multi_item_csv_selected_rows_line_evidence_and_no_implicit_confirmation",
+    "test_native_multi_item_partial_unknown_and_duplicate_correction_stays_unconfirmed",
+    "test_native_multi_item_deterministic_line_totals_discount_tax_and_freight_once",
+    "test_native_multi_item_request_line_edit_stales_approval_and_preserves_snapshot",
+    "test_native_multi_item_role_cancel_back_and_mobile_dialog_guards",
+
     "test_native_table_csv_maps_source_unknown_freight_and_never_auto_confirms",
     "test_native_table_xlsx_sheet_header_row_formula_and_cancel_navigation",
     "test_native_table_cancelled_upload_ignores_late_result",

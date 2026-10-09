@@ -117,3 +117,14 @@ PostgreSQL 使用 aggregate row locking，并有真实 PostgreSQL 并发/迁移/
 ## 恢复 hold 与只读诊断（阶段十六）
 
 新隔离恢复保留操作账本并对旧非完成操作施加永久 hold，恢复状态为 `RECOVERY`。恢复队列、证据详情与只读 ERP 字段差异只提供诊断，不变更 operation/outbox、hold 或恢复授权。恢复后旧会话已撤销，必须先使用离线维护报告完成审核；UI/API 不提供登录旁路或 HTTP resume。具体接口、权限及当前验收状态见 [阶段十六](stage16-recovery-diagnostics.md)。
+
+## Multi-item extension (local stage 17)
+
+Request and quote JSON aggregates can now carry up to 20 unique case-sensitive
+SKU lines. A quotation must cover the complete requested SKU/quantity set from
+one supplier; partial baskets cannot be selected or written. Existing scalar
+contracts and the single-line mapping remain supported. Multi-row source
+provenance, per-line Decimal costs, freight-once semantics, approval invalidation,
+strict draft/readback contracts and exact-version recovery boundaries are defined
+in [stage 17](stage17-multi-item-procurement.md). This local increment does not
+broaden currencies, units, model authority or recovery replay permission.

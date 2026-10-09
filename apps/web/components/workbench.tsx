@@ -1,24 +1,23 @@
 "use client";
-import {useCallback, useEffect, useRef, useState, type FormEvent} from "react";
+import {Fragment, useCallback, useEffect, useRef, useState, type FormEvent} from "react";
 import {API, api, loadDemo, watchAudit, type Capabilities, type ProcurementRequest,
-  type Quote, type QuoteValues, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
+  type Quote, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
 import SessionBoundary,{type AuthenticatedProps} from "@/components/session-boundary";
 import type {Credential} from "@/lib/session.mjs";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
 import RecoveryPanel from "@/components/recovery-panel";
+import {RequestEditor,QuoteEditor} from "@/components/procurement-editors";
+import QuoteLineDetails from "@/components/quote-line-details";
+import {FIELD_LABELS,HEADER_FIELDS} from "@/lib/procurement-lines.mjs";
 import {bindingCurrent,staleExplanation,strictestBudget,violationExplanation} from "@/lib/policy.mjs";
 
 const names: Record<string,string> = {DRAFT:"待录入", NEEDS_CONFIRMATION:"待核对", READY_FOR_REVIEW:"待审批",
   APPROVED:"已批准", APPROVAL_STALE:"审批已失效", ERP_PENDING:"执行已预留", ERP_CREATED:"草稿已创建",
   RECONCILING:"待核对结果", NEEDS_HUMAN:"需要人工处理", BLOCKED:"规则未通过", REJECTED:"已拒绝"};
-const labels: Record<keyof QuoteValues,string> = {supplier_id:"供应商编码", sku:"型号", quantity:"数量", uom:"单位",
-  unit_price:"单价", tax_mode:"税价模式", tax_rate:"税率", shipping_cost:"最终含税运费", discount:"商品折扣额",
-  delivery_days:"交期天数", currency:"币种"};
-const fields = Object.keys(labels) as (keyof QuoteValues)[];
-const requestFields = [["title","需求名称","研发工位支架采购"], ["sku","型号","STAND-01"],
-  ["quantity","数量","20"], ["budget","预算","30000.00"], ["max_delivery_days","最长交期","14"]] as const;
+const labels = FIELD_LABELS;
+const fields = Object.keys(labels) as (keyof typeof labels)[];
 type VerificationReceipt = {status:string; verified_at:string; remote_id:string|null; reason?:string; simulated:boolean};
 const isFrozen = (r:ProcurementRequest|null) => !!r && ["ERP_PENDING","ERP_CREATED","RECONCILING","NEEDS_HUMAN"].includes(r.status);
 
@@ -220,11 +219,11 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
   const businessEvent = events.reduce((latest,event)=>["REQUEST_CHANGED","QUOTE_IMPORTED","QUOTE_CONFIRMED","QUOTE_VERSION_CREATED","POLICY_CHANGED","POLICY_CHECK_COMPLETED","PROPOSAL_PREPARED","ANALYSIS_BLOCKED","APPROVAL_APPROVED","APPROVAL_REJECTED"].includes(event.type) ? Math.max(latest,event.id) : latest,0);
   const freshnessEvent = `${selected?.version}:${selected?.status}:${businessEvent}:${policy?.policy_hash||"unknown"}`;
 
-  const act = useCallback(async(fn:()=>Promise<void>) => {
+  const act = useCallback(async(fn:()=>Promise<void>,rethrow=false) => {
     if (mutationLock.current || !token.active) return;
     mutationLock.current = true; setBusy(true); setError("");
     try { await fn(); }
-    catch (e) { if(token.active)setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { if(token.active)setError(e instanceof Error ? e.message : String(e)); if(rethrow)throw e; }
     finally { mutationLock.current = false; if(token.active)setBusy(false); }
   },[token]);
   const clearContext = useCallback(() => {
@@ -298,26 +297,22 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
     return()=>{clearTimeout(timer);controller.abort();};
   },[cap.mode,operation,token,refresh,selected?.id]);
 
-  const saveRequest = async(event:FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget), target = requestForm;
+  const saveRequest = async(body:Record<string,unknown>) => {
+    const target=requestForm;
     await act(async()=>{
-      const body = {title:form.get("title"), sku:form.get("sku"), quantity:form.get("quantity"),
-        budget:form.get("budget"), max_delivery_days:Number(form.get("max_delivery_days")), uom:"EA", currency:"CNY"};
       const r = target && target !== "new"
         ? await api<ProcurementRequest>(`/requests/${target.id}`,token,"PUT",{...body,expected_version:target.version})
         : await api<ProcurementRequest>("/requests",token,"POST",body);
       setRequestForm(null); await refresh(r.id);
-    });
+    },true);
   };
-  const saveQuote = async(event:FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (!editing) return;
-    const q = editing, form = new FormData(event.currentTarget);
-    const values = Object.fromEntries(fields.map(key=>[key,form.get(key) === "" ? null : key === "delivery_days" ? Number(form.get(key)) : form.get(key)]));
+  const saveQuote = async(values:Record<string,unknown>,reason:string) => {
+    if (!editing) return;
+    const q = editing;
     await act(async()=>{
-      await api(`/quotes/${q.id}`,token,"PUT",{expected_version:q.version,values,reason:form.get("reason")});
+      await api(`/quotes/${q.id}`,token,"PUT",{expected_version:q.version,values,reason});
       setEditing(null); await refresh(q.request_id);
-    });
+    },true);
   };
   const confirm = async(event:FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!confirming) return;
@@ -376,7 +371,8 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
           <p>{cap.mode==="demo"?"演示环境采用合成数据与独立身份，不会写入真实 ERP。":"受控工作区中的操作受当前租户与角色权限约束。"}已配置模型仅在显式生成只读建议时调用。</p>
         </section> : <>
           <section className="panel request-panel"><div><div className="eyebrow">{selected.id}</div><h2>{selected.title}</h2>
-            <p data-testid="request-meta">{selected.sku} · {selected.quantity} {selected.uom} · 预算 ¥{selected.budget} · ≤ {selected.max_delivery_days} 天 · v{selected.version}</p>
+            <p data-testid="request-meta">{selected.lines?.length?`${selected.lines.length} 项物料`: `${selected.sku} · ${selected.quantity} ${selected.uom}`} · 预算 ¥{selected.budget} · ≤ {selected.max_delivery_days} 天 · v{selected.version}</p>
+            {!!selected.lines?.length&&<ul data-testid="request-lines" className="request-lines">{selected.lines.map((line,index)=><li key={line.sku}>{index+1}. {line.sku} · {line.quantity} {line.uom}</li>)}</ul>}
             {policy&&<p data-testid="effective-limits">当前策略 v{policy.version} · 实际预算 ≤ ¥{strictestBudget(selected.budget,policy.budget_cap)} · 实际交期 ≤ {Math.min(selected.max_delivery_days,policy.max_delivery_days??selected.max_delivery_days)} 天 · 至少 {policy.minimum_valid_quotes} 家合规供应商</p>}</div>
             <div className="heading-actions"><span className="badge" data-testid="request-status">{!frozen&&selected.proposal&&!proposalCurrent&&selected.status==="APPROVED"?"审批已失效":names[selected.status]||selected.status}</span>
               <button className="secondary" disabled={busy} onClick={()=>void act(async()=>{setPolicyRefresh(value=>value+1);await refresh(selected.id);})}>刷新状态</button>
@@ -388,14 +384,14 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
               const file=e.target.files?.[0]; e.target.value="";
               if (file) void act(async()=>{const form=new FormData();form.append("file",file);await api(`/requests/${selected.id}/documents`,token,"POST",form);await refresh(selected.id);});
             }}/><button className="secondary" disabled={!buyer||frozen||busy} onClick={()=>uploadRef.current?.click()}>上传报价</button>
-              <TableImportButton key={token+"\n"+selected.id} token={token} requestId={selected.id} requestVersion={selected.version} disabled={!buyer||frozen} workflowBusy={busy} onImported={()=>{
+              <TableImportButton key={token+"\n"+selected.id} token={token} requestId={selected.id} requestVersion={selected.version} multiItem={!!selected.lines?.length} disabled={!buyer||frozen} workflowBusy={busy} onImported={()=>{
                 const scope=token+"\n"+selected.id;if(activeScope.current===scope)void act(()=>refresh(selected.id));
               }}/>
               <button className="primary" data-testid="analyze" disabled={!buyer||frozen||busy||!policy} onClick={()=>void act(async()=>{await api(`/requests/${selected.id}/analyze`,token,"POST",{});await refresh(selected.id);})}>校验并生成方案</button>
             </div></div>
             <div className="table-scroll"><table><thead><tr><th>供应商</th><th>单价</th><th>税价</th><th>运费</th><th>统一总价</th><th>核对状态</th><th>操作</th></tr></thead>
-              <tbody data-testid="quote-body">{quotes.map(q=><tr key={q.id} data-testid="quote-row"><td><strong>{q.values.supplier_id||"未知供应商"}</strong><small>{q.filename} · v{q.version}</small></td>
-                {(["unit_price","tax_mode","shipping_cost"] as const).map(key=><td key={key}><button className="field-link" data-testid={`field-${key}`} onClick={()=>{++evidenceReadEpoch.current;setEvidence(q.evidence[key]||{kind:"unknown"});}}>{q.values[key]??"未知"}</button></td>)}
+              <tbody data-testid="quote-body">{quotes.map(q=><Fragment key={q.id}><tr data-testid="quote-row"><td><strong>{q.values.supplier_id||"未知供应商"}</strong><small>{q.filename} · v{q.version}</small></td>
+                {(["unit_price","tax_mode","shipping_cost"] as const).map(key=><td key={key}>{q.values.lines?.length&&key!=="shipping_cost"?<span>{key==="unit_price"?`${q.values.lines.length} 项明细`:"逐项税价"}</span>:<button className="field-link" data-testid={`field-${key}`} onClick={()=>{++evidenceReadEpoch.current;setEvidence(q.evidence[key]||{kind:"unknown"});}}>{q.values[key]??"未知"}</button>}</td>)}
                 <td><strong>{q.calculation.total??"未知"}</strong></td><td><span className="badge">{q.confirmed_by?"已确认":"待核对"}</span>
                   <details><summary className="table-action">{q.calculation.violations.length?`${q.calculation.violations.length} 项未通过`:"查看版本与限制"}</summary>
                     <div className="source-meta">报价 {q.id} · 版本 ID {q.version_id}</div>
@@ -403,16 +399,19 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
                     <ul className="violation-list">{q.calculation.violations.map(code=><li key={code}>{violationExplanation(code)}（{code}）</li>)}</ul></details></td><td><div className="row-actions">
                     <button className="secondary" disabled={!buyer||frozen||busy} onClick={()=>setEditing(q)}>修正字段</button>
                     <button className="secondary" data-testid="confirm-quote" disabled={!buyer||frozen||busy||!!q.confirmed_by} onClick={()=>setConfirming(q)}>确认字段</button>
-                  </div></td></tr>)}</tbody></table></div>
+                  </div></td></tr>{(!!q.values.lines?.length||!!selected.lines?.length)&&<tr className="quote-line-row"><td colSpan={7}><QuoteLineDetails forceLines={!!selected.lines?.length} values={q.values} calculation={q.calculation} evidence={q.evidence} onEvidence={source=>{++evidenceReadEpoch.current;setEvidence(source);}}/></td></tr>}</Fragment>)}</tbody></table></div>
           </section>
           <div className="lower-grid"><section className="panel"><div className="section-head"><h2>字段证据</h2></div><div id="evidence-body" className="evidence-body" data-testid="evidence-body">
             {evidence ? <><pre>{evidence.text||evidence.reason||"该字段没有原文支持，保持未知。"}</pre>
-              <div className="source-meta">{evidence.page?`第 ${evidence.page} 页 / 行 ${evidence.line}`:evidence.cell_range?`${evidence.sheet}!${evidence.cell_range}`:evidence.line?`文本第 ${evidence.line} 行`:evidence.kind}<br/>{evidence.document_sha256}</div></>
+              <div className="source-meta">{evidence.page?`第 ${evidence.page} 页 / 行 ${evidence.line}`:evidence.cell_range?`${evidence.sheet}!${evidence.cell_range}`:evidence.line?`文本第 ${evidence.line} 行`:evidence.kind}<br/>{evidence.document_sha256}</div>
+              {evidence.sources?.map((source,index)=><div key={index} className="source-meta">{source.text||source.reason||"未知"} · {source.sheet}{source.cell_range?`!${source.cell_range}`:source.row?` 第 ${source.row} 行`:""}</div>)}</>
               : <p className="subtle-empty">选择一项报价字段</p>}
           </div></section>
           <section className="panel"><div className="section-head"><h2>方案与审批</h2></div><div className="decision-content" data-testid="proposal-body">
             {selected.proposal ? <><div className="decision-label">{selected.proposal.quote_values.supplier_id}</div><div className="decision-amount">¥ {selected.proposal.total}</div>
-              <p>报价版本 v{selected.proposal.quote_version} · 数量 {selected.proposal.quote_values.quantity} · {selected.proposal.quote_values.uom}</p>
+              <p>报价版本 v{selected.proposal.quote_version} · {selected.proposal.quote_values.lines?.length?`${selected.proposal.quote_values.lines.length} 项物料，完整整单`: `数量 ${selected.proposal.quote_values.quantity} · ${selected.proposal.quote_values.uom}`}</p>
+              <QuoteLineDetails forceLines={!!selected.lines?.length} values={selected.proposal.quote_values} calculation={selected.proposal.quote_collection.find(quote=>quote.id===selected.proposal!.quote_id)?.calculation} testId="proposal-line-details"/>
+              {!!selected.proposal.quote_values.lines?.length&&<p className="stale-notice" data-testid="multi-erp-boundary">多物料比较和模拟 ERP 支持逐项税额与折扣。真实 ERPNext 草稿当前仅支持整数量 EA、CNY 总额不超过 100 万、零税率、零商品折扣、各项税价模式一致且明确的报价；超出边界会被服务端拒绝。</p>}
               <div className="hash">{selected.proposal.snapshot_hash}</div>
               <p data-testid="proposal-policy-binding">策略 v{selected.proposal.policy_version} · 报价 {selected.proposal.quote_id} v{selected.proposal.quote_version}</p>
               <details><summary>查看方案完整绑定</summary><dl className="binding-grid"><dt>策略哈希</dt><dd>{selected.proposal.policy_hash}</dd><dt>报价集合哈希</dt><dd>{selected.proposal.quote_collection_hash}</dd></dl><pre>{JSON.stringify({policy:selected.proposal.policy,quote_collection:selected.proposal.quote_collection},null,2)}</pre></details>
@@ -453,22 +452,14 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
         <footer>ProcureFlow v0.1.0a2<span>Next.js 源码 / 非生产系统</span></footer>
       </section>
     </main>
-    {requestForm && <dialog open aria-labelledby="request-form-title"><div className="modal-head"><h2 id="request-form-title">{requestForm === "new" ? "创建采购需求" : "修改需求：旧审批将失效"}</h2>
-      <button aria-label="关闭需求表单" disabled={busy} onClick={()=>setRequestForm(null)}>×</button></div>
-      <form data-testid="request-form" onSubmit={saveRequest}><div className="form-grid">{requestFields.map(([name,label,value])=><label className="form-field" key={name}>{label}
-        <input name={name} defaultValue={requestForm === "new" ? value : String(requestForm[name])} required/></label>)}</div>
-        <div className="form-actions"><button type="submit" className="primary" disabled={busy}>保存需求</button></div></form></dialog>}
-    {editing && <dialog open aria-labelledby="quote-form-title"><div className="modal-head"><h2 id="quote-form-title">报价 v{editing.version} · 修改后需重新确认</h2>
-      <button aria-label="关闭报价表单" disabled={busy} onClick={()=>setEditing(null)}>×</button></div><form onSubmit={saveQuote}><div className="form-grid">
-        {fields.map(key=><label className="form-field" key={key}>{labels[key]}{key === "tax_mode" ? <select name={key} defaultValue={editing.values[key]}>
-          <option value="included">含税</option><option value="excluded">未税</option><option value="unknown">未知</option></select>
-          : <input name={key} defaultValue={editing.values[key]??""}/>}</label>)}
-        <label className="form-field full">修改依据<textarea name="reason" minLength={5} maxLength={500} required/></label></div>
-        <div className="form-actions"><button className="primary" disabled={busy}>保存新版本</button></div></form></dialog>}
+    {requestForm && <RequestEditor key={requestForm==="new"?"new":`${requestForm.id}:${requestForm.version}`} request={requestForm} busy={busy} onClose={()=>setRequestForm(null)} onSave={saveRequest}/>}
+    {editing && selected && <QuoteEditor key={`${editing.id}:${editing.version}`} quote={editing} request={selected} busy={busy} onClose={()=>setEditing(null)} onSave={saveQuote} onEvidence={source=>{++evidenceReadEpoch.current;setEvidence(source);}}/>}
     {confirming && <dialog open aria-labelledby="confirm-title"><div className="modal-head"><h2 id="confirm-title">核对 {confirming.values.supplier_id} · v{confirming.version}</h2>
       <button aria-label="关闭确认表单" disabled={busy} onClick={()=>setConfirming(null)}>×</button></div>
       <form onSubmit={confirm}><p>请逐项检查原始报价。确认只记录核对人，不会把未知运费、税率等变成零。</p>
-        <div className="confirm-values">{fields.map(key=><div key={key}><strong>{labels[key]}：</strong>{confirming.values[key]??"未知"}</div>)}</div>
+        <div className="confirm-values">{(confirming.values.lines?.length?HEADER_FIELDS:fields).map(key=><div key={key}><strong>{labels[key]}：</strong>{confirming.values[key]??"未知"}</div>)}</div>
+        <QuoteLineDetails forceLines={!!selected?.lines?.length} values={confirming.values} calculation={confirming.calculation}/>
+        {!!confirming.calculation.violations.length&&<ul className="violation-list" data-testid="confirm-violations">{confirming.calculation.violations.map(code=><li key={code}>{violationExplanation(code)}（{code}）</li>)}</ul>}
         <label className="ack-label"><input type="checkbox" name="acknowledge" required data-testid="ack-confirm"/>我已核对展示的报价版本，保留所有未知字段。</label>
         <div className="form-actions"><button type="submit" className="primary" data-testid="submit-confirm" disabled={busy}>确认此版本</button></div>
       </form></dialog>}

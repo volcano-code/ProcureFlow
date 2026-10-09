@@ -16,7 +16,7 @@ const stateLabels:Record<string,string>={ACTIVE:"服务已启用",PAUSED:"写入
 const integrityLabels={verified:"原始文件完整性已核验",missing:"原始文件缺失",mismatch:"原始文件哈希不符",unavailable:"无法核验原始文件"};
 const fieldLabels:Record<string,string>={operation_key:"操作幂等键",snapshot_hash:"审批快照哈希",supplier_id:"供应商编码",sku:"型号",
   quantity:"数量",unit_price:"单价",total:"总额",currency:"币种",uom:"单位",company:"ERP 公司",transaction_date:"单据日期",docstatus:"单据状态（0 为草稿）",
-  simulated:"模拟模式",name:"远端单据 ID",cost_contract:"费用映射约定"};
+  simulated:"模拟模式",name:"远端单据 ID",cost_contract:"费用映射约定",lines:"物料明细",multi_cost_proof:"多物料费用证明"};
 const diagnostics:Record<string,string>={RECOVERY_HOLD_PERMANENT:"恢复隔离保持有效",OBSERVATION_NEVER_AUTHORIZES_REPLAY:"任何观测结果都不授予重放权限",
   APPROVER_AUTHORITY_NOT_CURRENT:"原审批人的权限已失效",APPROVER_AUTHORITY_NOT_EVALUATED_OFFLINE:"离线诊断未核验原审批人当前权限",
   APPROVAL_EXPIRED:"原审批已到期",APPROVAL_NOT_CURRENT:"原审批状态或快照已失效",APPROVAL_MISSING:"原审批记录缺失",
@@ -161,7 +161,7 @@ export default function RecoveryPanel({token,workflowBusy,onOpenRequest}:Props) 
               {result.observed===null&&<p>没有可供比较的远端字段；预期值不能替代远端观测。</p>}
               <div className="table-scroll"><table><thead><tr><th>字段</th><th>原快照预期</th><th>远端观测</th></tr></thead><tbody>
                 {[...new Set([...Object.keys(result.expected),...Object.keys(result.observed||{})])].map(key=><tr key={key}>
-                  <td>{fieldLabels[key]||key}</td><td>{value(result.expected[key])}</td><td>{value(result.observed?.[key])}</td></tr>)}
+                  <td>{fieldLabels[key]||key}</td><td><RecoveryValue name={key} item={result.expected[key]}/></td><td><RecoveryValue name={key} item={result.observed?.[key]}/></td></tr>)}
               </tbody></table></div>
               {!!result.differences.length&&<><h3>字段差异</h3><ul className="recovery-diagnostics" data-testid="recovery-differences">{result.differences.map((difference,index)=><li key={index}>
                 {fieldLabels[difference.field]||difference.field}：预期 {value(difference.expected)}；观测 {value(difference.observed)}。{explain(difference.reason)}
@@ -174,4 +174,10 @@ export default function RecoveryPanel({token,workflowBusy,onOpenRequest}:Props) 
   </section>;
 }
 
-function Field({name,item}:{name:string;item:unknown}) {return <><dt>{fieldLabels[name]||name}</dt><dd>{value(item)}</dd></>;}
+function RecoveryValue({name,item}:{name:string;item:unknown}) {
+  if(name!=="lines"||!Array.isArray(item))return <>{value(item)}</>;
+  return <ol className="recovery-line-values" data-testid="recovery-line-values">{item.map((line,index)=><li key={index}>
+    {line&&typeof line==="object"?<dl className="binding-grid">{Object.entries(line).map(([field,entry])=><Field key={field} name={field} item={entry}/>)}</dl>:value(line)}
+  </li>)}</ol>;
+}
+function Field({name,item}:{name:string;item:unknown}) {return <><dt>{fieldLabels[name]||name}</dt><dd><RecoveryValue name={name} item={item}/></dd></>;}

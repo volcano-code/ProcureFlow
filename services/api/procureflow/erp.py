@@ -68,10 +68,12 @@ class MockERP:
             raise ERPRejected("UNKNOWN_SUPPLIER")
         record = {"name": "MOCK-SQ-" + operation_key[:12].upper(), "docstatus": 0,
                   "snapshot_hash": payload["snapshot_hash"], "operation_key": operation_key, "supplier_id": v["supplier_id"],
-                  "sku": v["sku"], "quantity": v["quantity"], "unit_price": v["unit_price"],
+                  "sku": v.get("sku"), "quantity": v.get("quantity"), "unit_price": v.get("unit_price"),
                   "transaction_date": payload["transaction_date"], "total": payload["total"],
-                  "currency": v["currency"], "uom": v["uom"], "company": payload["erp_company"], "simulated": True,
-                  "cost_values": {key: v.get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}}
+                  "currency": v["currency"], "uom": v.get("uom"), "company": payload["erp_company"], "simulated": True,
+                  "cost_values": expected_mock_cost_values(payload)}
+        if v.get("lines") is not None:
+            record["lines"] = quote_item_values(payload)
         payload_hash = digest(payload)
         with self._connect() as connection:
             connection.execute("INSERT OR IGNORE INTO drafts(operation_key,payload_hash,data) VALUES (?,?,?)",
@@ -86,6 +88,8 @@ class MockERP:
 
 
 COST_MAPPING_VERSION = "single-line-costs-v1"
+MULTI_COST_MAPPING_VERSION = "multi-line-zero-tax-costs-v1"
+MAX_ERP_LINES = 20
 MAX_ERP_AMOUNT = Decimal("1000000.00")
 TAX_DESCRIPTION = "ProcureFlow goods tax"
 FREIGHT_DESCRIPTION = "ProcureFlow gross freight"
@@ -105,6 +109,8 @@ def cost_mapping(payload: dict) -> tuple[dict, dict]:
     """
     try:
         v = QuoteValues.model_validate(payload["quote_values"])
+        if v.lines is not None:
+            return multi_cost_mapping(payload, v)
         calculated = calculate(v)
         if (not calculated["comparable"] or v.tax_rate is None or v.uom != "EA"
                 or not v.supplier_id or not v.sku):
@@ -179,28 +185,125 @@ def cost_mapping(payload: dict) -> tuple[dict, dict]:
         raise ERPRejected("ERP_PAYLOAD_INVALID") from error
 
 
+def quote_item_values(payload: dict) -> list[dict]:
+    """A complete bounded identity set, in case-sensitive SKU order."""
+    values = payload["quote_values"]
+    rows = values.get("lines")
+    if (not isinstance(rows, list) or not 1 <= len(rows) <= MAX_ERP_LINES
+            or any(not isinstance(row, dict) or not isinstance(row.get("sku"), str)
+                   or not row["sku"] for row in rows)
+            or len({row["sku"] for row in rows}) != len(rows)):
+        raise ERPRejected("ERP_ITEM_SET_INVALID")
+    return [{key: row.get(key) for key in ("sku", "quantity", "uom", "unit_price")}
+            for row in sorted(rows, key=lambda row: row["sku"])]
+
+
+def expected_mock_cost_values(payload: dict) -> dict:
+    """Keep every synthetic cost/delivery component, without borrowing real-ERP limits."""
+    raw = payload["quote_values"]
+    if raw.get("lines") is None:
+        return {key: raw.get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}
+    try:
+        values = QuoteValues.model_validate(raw)
+        quote_item_values(payload)
+        calculated = calculate(values)
+        if not calculated["comparable"] or Decimal(str(payload["total"])) != Decimal(calculated["total"]):
+            raise ERPRejected("ERP_PAYLOAD_TOTAL_MISMATCH")
+        return {"shipping_cost": raw.get("shipping_cost"),
+                "lines": [{key: row.get(key) for key in
+                           ("sku", "tax_mode", "tax_rate", "discount", "delivery_days")}
+                          for row in sorted(raw["lines"], key=lambda row: row["sku"])],
+                "calculated": calculated}
+    except ERPRejected:
+        raise
+    except (ValueError, TypeError, ArithmeticError, KeyError, AttributeError) as error:
+        raise ERPRejected("ERP_PAYLOAD_INVALID") from error
+
+
+def multi_line_description(line) -> str:
+    """Persist bounded commercial terms in a standard, independently read field."""
+    return "ProcureFlow line terms: " + canonical({key: getattr(line, key) for key in
+        ("tax_mode", "tax_rate", "discount", "delivery_days")})
+
+
+def multi_cost_mapping(payload: dict, values: QuoteValues) -> tuple[dict, dict]:
+    """Offline-contract-only, bounded zero-tax/zero-discount multi-item mapping.
+
+    Supports CNY/EA integral quantities, one common explicit tax mode and zero
+    tax rates/discounts. Freight is one final gross Actual row. Positive/mixed
+    goods tax and line discounts need a separately validated mapping; they are
+    rejected before any network I/O rather than silently redistributed.
+    """
+    calculated = calculate(values)
+    lines = values.lines
+    quote_item_values(payload)
+    if (not calculated["comparable"] or not values.supplier_id
+            or any(line.uom != "EA" or line.tax_rate is None or line.tax_rate != 0
+                   or line.discount != 0 or not line.sku for line in lines)
+            or len({line.tax_mode for line in lines}) != 1):
+        raise ERPRejected("ERP_MULTI_COST_MAPPING_UNSUPPORTED")
+    if (any(line.quantity != line.quantity.to_integral_value()
+            or line.unit_price > MAX_ERP_AMOUNT for line in lines)
+            or values.shipping_cost > MAX_ERP_AMOUNT
+            or any(Decimal(calculated[key]) > MAX_ERP_AMOUNT for key in ("goods", "total"))):
+        raise ERPRejected("ERP_COST_MAPPING_BOUNDS_EXCEEDED")
+    if Decimal(str(payload["total"])) != Decimal(calculated["total"]):
+        raise ERPRejected("ERP_PAYLOAD_TOTAL_MISMATCH")
+    freight_account = payload.get("erp_cost_accounts", {}).get("freight", "")
+    if values.shipping_cost and (not isinstance(freight_account, str)
+            or not freight_account.strip() or len(freight_account) > 140):
+        raise ERPRejected("ERP_COST_ACCOUNT_REQUIRED")
+    taxes = []
+    if values.shipping_cost:
+        taxes.append({"category": "Total", "add_deduct_tax": "Add", "charge_type": "Actual",
+            "account_head": freight_account, "description": FREIGHT_DESCRIPTION, "rate": "0",
+            "tax_amount": str(values.shipping_cost), "included_in_print_rate": 0,
+            "row_id": "", "dont_recompute_tax": 0})
+    body = {"taxes": taxes, "apply_discount_on": "Grand Total" if lines[0].tax_mode == "included" else "Net Total",
+            "discount_amount": "0", "additional_discount_percentage": "0", "disable_rounded_total": 1,
+            "conversion_rate": "1", "taxes_and_charges": "", "shipping_rule": "", "tax_category": ""}
+    cents = lambda amount: amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    proof = {"mapping_version": MULTI_COST_MAPPING_VERSION,
+        "taxes": [{**row, "tax_amount_after_discount_amount": str(values.shipping_cost),
+                   "total": calculated["total"]} for row in taxes],
+        **{key: value for key, value in body.items() if key != "taxes"},
+        "goods_total": calculated["goods"], "net_total": calculated["goods"],
+        "total_taxes_and_charges": str(values.shipping_cost), "pricing_rules": "",
+        "lines": [{"sku": line.sku, "quantity": str(line.quantity), "uom": line.uom,
+                   "unit_price": str(line.unit_price), "line_terms": multi_line_description(line),
+                   "item_tax_template": "", "item_pricing_rules": "",
+                   "item_discount_amount": "0", "item_discount_percentage": "0",
+                   "price_list_rate": str(line.unit_price), "item_net_rate": str(line.unit_price),
+                   "item_goods_total": str(cents(line.quantity * line.unit_price)),
+                   "item_net_total": str(cents(line.quantity * line.unit_price))}
+                  for line in sorted(lines, key=lambda line: line.sku)]}
+    return body, proof
+
+
 def cost_proof_matches(observed, expected):
     """Compare every persisted component, not merely a compensating grand total."""
-    if not isinstance(observed, dict) or set(observed) != set(expected):
-        return False
-    try:
-        for key, wanted in expected.items():
-            actual = observed[key]
-            if key == "taxes":
-                if not isinstance(actual, list) or len(actual) != len(wanted):
-                    return False
-                for a, w in zip(actual, wanted, strict=True):
-                    if not cost_proof_matches(a, w):
-                        return False
-            elif key in {"rate", "tax_amount", "tax_amount_after_discount_amount", "discount_amount",
-                         "additional_discount_percentage", "net_total", "total_taxes_and_charges",
-                         "goods_total", "item_goods_total", "item_net_total", "total", "conversion_rate",
-                         "item_discount_amount", "item_discount_percentage", "price_list_rate", "item_net_rate"}:
-                if isinstance(actual, bool) or Decimal(str(actual)) != Decimal(str(wanted)):
-                    return False
-            elif type(actual) is not type(wanted) or actual != wanted:
+    numeric = {"rate", "tax_amount", "tax_amount_after_discount_amount", "discount_amount",
+               "additional_discount_percentage", "net_total", "total_taxes_and_charges",
+               "goods_total", "item_goods_total", "item_net_total", "total", "conversion_rate",
+               "item_discount_amount", "item_discount_percentage", "price_list_rate", "item_net_rate",
+               "quantity", "unit_price", "tax_rate", "discount", "shipping_cost", "goods", "added_tax", "shipping"}
+
+    def match(actual, wanted, key=None):
+        if isinstance(wanted, dict):
+            return (isinstance(actual, dict) and set(actual) == set(wanted)
+                    and all(match(actual[k], value, k) for k, value in wanted.items()))
+        if isinstance(wanted, list):
+            return (isinstance(actual, list) and len(actual) == len(wanted)
+                    and all(match(a, w) for a, w in zip(actual, wanted, strict=True)))
+        if key in numeric and wanted is not None:
+            if isinstance(actual, bool):
                 return False
-        return True
+            left, right = Decimal(str(actual)), Decimal(str(wanted))
+            return left.is_finite() and right.is_finite() and left == right
+        return type(actual) is type(wanted) and actual == wanted
+
+    try:
+        return isinstance(observed, dict) and isinstance(expected, dict) and match(observed, expected)
     except (ValueError, TypeError, ArithmeticError):
         return False
 
@@ -238,8 +341,9 @@ def erp_numeric_json(body: dict) -> bytes:
 class ERPNextClient:
     """REST adapter; live deployment must be separately tested.
 
-    No submit/delete/payment tool exists. Bounded single-line CNY/EA cost mapping
-    requires explicit rates and accounts, checked against independent readback.
+    No submit/delete/payment tool exists. Bounded CNY/EA cost mappings require
+    explicit rates/accounts and independent readback. Multi-item zero-tax terms
+    are an offline adapter contract, not evidence of a live ERPNext round trip.
     """
     mode = "erpnext"
     key_field = "custom_procureflow_operation_key"
@@ -290,28 +394,66 @@ class ERPNextClient:
         if not isinstance(record, dict) or not isinstance(record.get("items"), list):
             raise ERPUnknown("ERP_MALFORMED_DOCUMENT")
         items = record["items"]
-        if len(items) != 1:
+        if not 1 <= len(items) <= MAX_ERP_LINES:
             raise ERPRejected("ERP_ITEM_COUNT_MISMATCH")
-        if not isinstance(items[0], dict) or not isinstance(record.get("name"), str) or not record["name"]:
+        if (any(not isinstance(item, dict) for item in items)
+                or not isinstance(record.get("name"), str) or not record["name"]):
             raise ERPUnknown("ERP_MALFORMED_DOCUMENT")
-        if type(record.get("docstatus")) is not int:
-            raise ERPUnknown("ERP_MALFORMED_DOCSTATUS")
         if expected_key is not None and record.get(self.key_field) != expected_key:
             raise ERPRejected("ERP_REMOTE_OPERATION_KEY_MISMATCH")
+        skus = [item.get("item_code") for item in items]
+        if (any(not isinstance(sku, str) or not sku or len(sku) > 80 for sku in skus)
+                or len(set(skus)) != len(skus)):
+            raise ERPRejected("ERP_ITEM_SET_INVALID")
+        if type(record.get("docstatus")) is not int:
+            raise ERPUnknown("ERP_MALFORMED_DOCSTATUS")
         try:
-            numbers = [Decimal(str(value)) for value in (items[0].get("qty"), items[0].get("rate"), record.get("grand_total"))]
-            if not all(number.is_finite() for number in numbers) or numbers[0] <= 0 or any(n < 0 for n in numbers[1:]):
-                raise ValueError("invalid amounts")
+            total = Decimal(str(record.get("grand_total")))
+            if not total.is_finite() or total < 0:
+                raise ValueError("invalid total")
+            for item in items:
+                quantity, price = (Decimal(str(item.get(key))) for key in ("qty", "rate"))
+                if not quantity.is_finite() or not price.is_finite() or quantity <= 0 or price < 0:
+                    raise ValueError("invalid item amounts")
         except (ArithmeticError, ValueError, TypeError) as error:
             raise ERPUnknown("ERP_MALFORMED_AMOUNTS") from error
-        return {"name": record["name"], "docstatus": record.get("docstatus"),
+        multi_proof = self._multi_cost_proof(record)
+        result = {"name": record["name"], "docstatus": record.get("docstatus"),
                 "snapshot_hash": record.get(self.hash_field), "operation_key": record.get(self.key_field),
-                "unit_price": str(items[0].get("rate")), "transaction_date": record.get("transaction_date"),
-                "supplier_id": record.get("supplier"),
-                "sku": items[0].get("item_code"), "quantity": str(items[0].get("qty")),
+                "transaction_date": record.get("transaction_date"), "supplier_id": record.get("supplier"),
                 "total": str(record.get("grand_total")), "currency": record.get("currency"),
-                "company": record.get("company"), "uom": items[0].get("uom"), "simulated": False,
-                "cost_proof": self._cost_proof(record)}
+                "company": record.get("company"), "simulated": False,
+                "lines": [{"sku": item["item_code"], "quantity": str(item.get("qty")),
+                           "uom": item.get("uom"), "unit_price": str(item.get("rate"))}
+                          for item in sorted(items, key=lambda item: item["item_code"])],
+                # A one-line multi contract is distinct from a legacy scalar
+                # contract. find() cannot infer that intent from the row count.
+                "multi_cost_proof": multi_proof,
+                "cost_proof": self._cost_proof(record) if len(items) == 1 else multi_proof}
+        if len(items) == 1:
+            result.update(sku=items[0].get("item_code"), quantity=str(items[0].get("qty")),
+                          uom=items[0].get("uom"), unit_price=str(items[0].get("rate")))
+        return result
+
+    @staticmethod
+    def _multi_cost_proof(record):
+        # Reuse only the independently observed header/tax rows. The legacy
+        # extraction's first item is removed and replaced with every SKU below.
+        header = ERPNextClient._cost_proof(record)
+        proof = {key: value for key, value in header.items()
+                 if not key.startswith("item_") and key != "price_list_rate"}
+        proof["mapping_version"] = MULTI_COST_MAPPING_VERSION
+        proof["lines"] = [{"sku": item.get("item_code"), "quantity": str(item.get("qty")),
+            "uom": item.get("uom"), "unit_price": str(item.get("rate")),
+            "line_terms": item.get("description"),
+            "item_tax_template": optional_text(item.get("item_tax_template")),
+            "item_pricing_rules": optional_text(item.get("pricing_rules")),
+            "item_discount_amount": item.get("discount_amount"),
+            "item_discount_percentage": item.get("discount_percentage"),
+            "price_list_rate": item.get("price_list_rate"), "item_net_rate": item.get("net_rate"),
+            "item_goods_total": item.get("amount"), "item_net_total": item.get("net_amount")}
+            for item in sorted(record["items"], key=lambda item: item["item_code"])]
+        return proof
 
     @staticmethod
     def _cost_proof(record):
@@ -396,9 +538,7 @@ class ERPNextClient:
                 "remote_database_uniqueness_tested": False, "live_draft_roundtrip_verified": False}
 
     def _checked_result(self, remote, operation_key, payload):
-        if (remote.get("operation_key") != operation_key or not remote_matches(remote, payload, operation_key)
-                or Decimal(remote["unit_price"]) != Decimal(payload["quote_values"]["unit_price"])
-                or remote.get("transaction_date") != payload["transaction_date"]):
+        if not remote_matches(remote, payload, operation_key):
             raise ERPRejected("ERP_READBACK_PAYLOAD_MISMATCH")
         return remote
 
@@ -418,12 +558,21 @@ class ERPNextClient:
         self._check_company_currency()
         self._check_unique_field()
         self._check_snapshot_field()
+        if values.get("lines") is not None:
+            checked_values = QuoteValues.model_validate(values)
+            item_values = [{"item_code": line.sku, "qty": str(line.quantity), "uom": line.uom,
+                           "rate": str(line.unit_price), "price_list_rate": str(line.unit_price),
+                           "description": multi_line_description(line),
+                           "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}
+                          for line in sorted(checked_values.lines, key=lambda line: line.sku)]
+        else:
+            item_values = [{"item_code": values["sku"], "qty": values["quantity"], "uom": values["uom"],
+                "rate": values["unit_price"], "price_list_rate": values["unit_price"],
+                "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}]
         body = {"doctype": "Supplier Quotation", "docstatus": 0, "company": self.company,
                 "supplier": values["supplier_id"], "transaction_date": payload["transaction_date"],
                 "currency": values["currency"], self.key_field: operation_key,
-                self.hash_field: payload["snapshot_hash"], "items": [{"item_code": values["sku"],
-                "qty": values["quantity"], "uom": values["uom"], "rate": values["unit_price"], "price_list_rate": values["unit_price"],
-                "discount_amount": "0", "discount_percentage": "0", "item_tax_template": ""}], **costs}
+                self.hash_field: payload["snapshot_hash"], "items": item_values, **costs}
         content = erp_numeric_json(body)
         # Company/field metadata checks above perform network I/O. Authority may
         # expire during them, so the caller's final gate belongs here, directly
@@ -448,26 +597,46 @@ class ERPNextClient:
 
 def remote_matches(remote: dict, payload: dict, operation_key: str | None = None) -> bool:
     """Never treat an arbitrary object returned by a search as successful execution."""
-    values = payload["quote_values"]
     if not isinstance(remote, dict) or type(remote.get("simulated")) is not bool:
         return False
     try:
-        if remote.get("simulated") is False:
+        values = payload["quote_values"]
+        multi = values.get("lines") is not None
+        if remote["simulated"] is False:
             _, expected_costs = cost_mapping(payload)
-            if not cost_proof_matches(remote.get("cost_proof"), expected_costs):
+            if not cost_proof_matches(remote.get("multi_cost_proof" if multi else "cost_proof"), expected_costs):
                 return False
-        elif remote.get("simulated") is True:
-            if remote.get("cost_values") != {key: values.get(key) for key in ("tax_mode", "tax_rate", "shipping_cost", "discount")}:
+        elif multi:
+            if not cost_proof_matches(remote.get("cost_values"), expected_mock_cost_values(payload)):
                 return False
-        return ((operation_key is None or remote.get("operation_key") == operation_key)
-                and isinstance(remote.get("name"), str) and bool(remote.get("name")) and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
+        elif remote.get("cost_values") != expected_mock_cost_values(payload):
+            return False
+        common = ((operation_key is None or remote.get("operation_key") == operation_key)
+                and isinstance(remote.get("name"), str) and bool(remote.get("name"))
+                and type(remote.get("docstatus")) is int and remote.get("docstatus") == 0
                 and remote.get("snapshot_hash") == payload["snapshot_hash"]
-                and remote.get("supplier_id") == values["supplier_id"]
-                and remote.get("sku") == values["sku"] and remote.get("currency") == values["currency"]
-                and remote.get("uom") == values["uom"] and remote.get("company") == payload["erp_company"]
-                and Decimal(remote["quantity"]) == Decimal(values["quantity"])
-                and Decimal(remote["total"]) == Decimal(payload["total"])
-                and Decimal(remote["unit_price"]) == Decimal(values["unit_price"])
+                and remote.get("supplier_id") == values["supplier_id"] and remote.get("currency") == values["currency"]
+                and remote.get("company") == payload["erp_company"]
+                and not isinstance(remote.get("total"), bool)
+                and Decimal(remote["total"]).is_finite() and Decimal(remote["total"]) == Decimal(payload["total"])
                 and remote.get("transaction_date") == payload["transaction_date"])
+        if not common:
+            return False
+        if multi:
+            rows = remote.get("lines")
+            if (not isinstance(rows, list) or not 1 <= len(rows) <= MAX_ERP_LINES
+                    or any(not isinstance(row, dict) or not isinstance(row.get("sku"), str) for row in rows)
+                    or len({row["sku"] for row in rows}) != len(rows)):
+                return False
+            return cost_proof_matches({"lines": sorted(rows, key=lambda row: row["sku"])},
+                                      {"lines": quote_item_values(payload)})
+        # Retain the exact legacy one-line match, and never ignore extra rows.
+        if "lines" in remote and (not isinstance(remote["lines"], list) or len(remote["lines"]) != 1):
+            return False
+        return (remote.get("sku") == values["sku"] and remote.get("uom") == values["uom"]
+                and not isinstance(remote.get("quantity"), bool) and not isinstance(remote.get("unit_price"), bool)
+                and Decimal(remote["quantity"]).is_finite() and Decimal(remote["unit_price"]).is_finite()
+                and Decimal(remote["quantity"]) == Decimal(values["quantity"])
+                and Decimal(remote["unit_price"]) == Decimal(values["unit_price"]))
     except (ValueError, TypeError, KeyError, ArithmeticError, ERPRejected):
         return False

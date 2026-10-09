@@ -1,4 +1,4 @@
-"""Bounded table preview and explicit, provenance-preserving one-row extraction.
+"""Bounded table preview and explicit, provenance-preserving row extraction.
 
 The decoder subprocess is time/resource limited and denies Python filesystem,
 network and process operations. It is defense in depth, not an OS sandbox or a
@@ -29,7 +29,6 @@ PARSER_TIMEOUT_SECONDS = 5
 MAX_CONCURRENT_PARSERS = 2
 # Per API process only; deployment-wide quotas/rate limits remain necessary.
 PARSER_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_PARSERS)
-KNOWN = set(QuoteValues.model_fields)
 WORKER = Path(__file__).with_name("parser_worker.py")
 ALIASES = {
     "supplier_id": ("supplier", "supplier id", "supplier code", "vendor id", "vendor code", "供应商", "供应商编码", "供应商编号"),
@@ -44,6 +43,11 @@ ALIASES = {
     "delivery_days": ("delivery days", "lead time", "lead time days", "交期", "交期天数", "交货天数"),
     "currency": ("currency", "currency code", "币种", "货币", "结算币种"),
 }
+# A table column represents one scalar field, never the aggregate lines array.
+KNOWN = set(ALIASES)
+HEADER_VALUES = ("supplier_id", "currency", "shipping_cost")
+LINE_VALUES = ("sku", "quantity", "uom", "unit_price", "tax_mode", "tax_rate", "discount", "delivery_days")
+MAX_SELECTED_ROWS = 20
 
 
 def _header(value):
@@ -274,5 +278,62 @@ def map_table(table: dict, sheet: str, header_row: int, row: int, mapping: dict,
                            "fragment_id": fragment["id"], "text": fragment["text"], **locator}
     if not evidence:
         raise DomainError("NO_RECOGNIZED_FIELDS", "Selected row contains no valid mapped quote values", 422)
+    return {"values": QuoteValues.model_validate(values).model_dump(mode="json"), "evidence": evidence,
+            "fragments": fragments, "issues": sorted(set(issues)), "sha256": sha, "parser": "tabular-v1"}
+
+
+def map_table_rows(table: dict, sheet: str, header_row: int, rows: list[int], mapping: dict,
+                   document_id: str, sha: str) -> dict:
+    """Combine explicitly selected rows without weakening single-row safeguards.
+
+    Header fields must agree across every selected row, including unknowns.
+    Freight is one quote-level amount, not a per-line amount to sum. Each line
+    retains its own source cells; no value is carried into another row.
+    """
+    if (not isinstance(rows, list) or not 1 <= len(rows) <= MAX_SELECTED_ROWS
+            or any(type(row) is not int or not 1 <= row <= 10000 for row in rows)
+            or len(set(rows)) != len(rows)):
+        raise DomainError("INVALID_MAPPING", "Select between one and twenty distinct quote rows", 422)
+    parsed_rows = [map_table(table, sheet, header_row, row, mapping, document_id, sha) for row in rows]
+    first = parsed_rows[0]["values"]
+    for field in HEADER_VALUES:
+        def comparable(value):
+            return Decimal(value) if field == "shipping_cost" and value is not None else value
+        if any(comparable(item["values"].get(field)) != comparable(first.get(field)) for item in parsed_rows[1:]):
+            raise DomainError("IMPORT_HEADER_MISMATCH",
+                              f"All selected rows must have the same {field}; unknown values cannot be inherited", 422)
+    known_skus = [item["values"]["sku"] for item in parsed_rows if item["values"].get("sku") is not None]
+    if len(set(known_skus)) != len(known_skus):
+        raise DomainError("IMPORT_DUPLICATE_SKU", "Selected rows must contain distinct SKUs; duplicate SKUs are not combined", 422)
+
+    values = {field: first.get(field) for field in HEADER_VALUES}
+    values["lines"] = [{field: item["values"].get(field) for field in LINE_VALUES} for item in parsed_rows]
+    evidence, fragments, issues = {}, [], []
+    header_sources = {field: [] for field in HEADER_VALUES}
+    sheet_id = hashlib.sha256(sheet.encode("utf-8")).hexdigest()[:12]
+    for index, (row_number, item) in enumerate(zip(rows, parsed_rows)):
+        # Cell-address IDs remain stable if a buyer reorders the selected rows
+        # or mapping fields, and remain distinct across worksheets.
+        fragment_ids = {}
+        for fragment in item["fragments"]:
+            stable_id = f"{document_id}:s{sheet_id}:r{row_number:05d}:{fragment['locator']['column']}"
+            fragment_ids[fragment["id"]] = stable_id
+            fragments.append({**fragment, "id": stable_id})
+        for field, source in item["evidence"].items():
+            source = {**source, "fragment_id": fragment_ids[source["fragment_id"]]}
+            if field in HEADER_VALUES:
+                header_sources[field].append(source)
+            else:
+                evidence[f"lines.{index}.{field}"] = source
+        for issue in item["issues"]:
+            parts = issue.split(":", 1)
+            if len(parts) == 2 and parts[0] in {"MISSING", "INVALID", "FORMULA"}:
+                field = parts[1]
+                issues.append(f"{parts[0]}:lines.{index}.{field}" if field in LINE_VALUES else issue)
+            else:
+                issues.append(issue)
+    for field, sources in header_sources.items():
+        if sources:
+            evidence[field] = {**sources[0], "sources": sources}
     return {"values": QuoteValues.model_validate(values).model_dump(mode="json"), "evidence": evidence,
             "fragments": fragments, "issues": sorted(set(issues)), "sha256": sha, "parser": "tabular-v1"}
