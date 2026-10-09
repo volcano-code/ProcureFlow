@@ -9,13 +9,14 @@ import base64
 import io
 import json
 import os
+import re
 from pathlib import Path
 import stat
 from types import SimpleNamespace
 
 from jwcrypto import jwk, jwe, jws
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select, text
 
 import procureflow.backup as backup
 import procureflow.backup_protection as protection
@@ -23,8 +24,8 @@ from procureflow.backup import BackupError
 from procureflow.backup_cli import main
 from procureflow.db import Base, Database
 from procureflow.errors import DomainError
-from procureflow.maintenance import recovery_report, resume_writes
-from test_backup_recovery import _rewrite, bundle, source  # noqa: F401: shared synthetic fixtures
+from procureflow.maintenance import pause_writes, recovery_report, resume_writes
+from test_backup_recovery import _rewrite, _seed, bundle, source  # noqa: F401: shared synthetic fixtures
 
 
 MODES = ("plain", "signed", "encrypted", "signed-encrypted")
@@ -175,6 +176,131 @@ def test_roundtrip_preserves_evidence_credentials_and_held_ledger(source, tmp_pa
             assert _rows(restored_db, name) == rows, name
     finally:
         restored_db.engine.dispose()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("mode", MODES)
+def test_postgres_protection_preserves_evidence_and_recovery_posture(pg_database, tmp_path, keys, monkeypatch, mode):
+    """Actual disposable PG source and fresh schema target; no SQLite substitute.
+
+    pg_database enforces explicit opt-in and a *_test database. Fixture keys and
+    identity strings are synthetic, and cleanup drops only this restore schema.
+    """
+    from procureflow.auth import IdentityService, secret_hash
+    from procureflow.config import Settings
+    from procureflow.erp import MockERP
+    from procureflow.service import ProcurementService
+    from procureflow.worker import drain_once
+
+    db = pg_database
+    assert db.sqlite is False
+    documents = tmp_path / "pg-documents"
+    blob = _seed(db, documents)
+    token, invite = "pfs_synthetic_fixture_session", "pfi_synthetic_fixture_invite"
+    with db.transaction(write=True) as session:
+        session.execute(Base.metadata.tables["pilot_sessions"].update().values(token_hash=secret_hash(token)))
+        session.execute(Base.metadata.tables["pilot_invites"].update().values(credential_hash=secret_hash(invite)))
+    source_settings = Settings(data_dir=tmp_path, database_url=db.engine.url.render_as_string(hide_password=False),
+                               mode="pilot", auth_tokens={}, erp_mode="mock", erp_allow_draft_writes=False,
+                               erp_url="", erp_api_key="", erp_api_secret="", erp_company="")
+    assert IdentityService(db, source_settings).authenticate(token).user_id == "buyer"
+    pause_writes(db)
+    path = tmp_path / "pg-protected.pfb"
+    created = protection.create_backup(db, documents, path, **_write_options(mode, keys))
+    original = protection.verify_archive(path, **_read_options(mode, keys))
+    assert original.manifest["source"]["database"] == "postgresql"
+    receipt = {"mode": mode, "provenance_verified": "signed" in mode}
+    if "signed" in mode:
+        receipt["signer_thumbprint"] = jwk.JWK.from_json(keys["verification"]).thumbprint()
+    assert created["backup_protection"] == original.protection == receipt
+    source_rows = {name: _rows(db, name) for name in Base.metadata.tables}
+    with db.engine.connect() as connection:
+        source_schema = connection.scalar(text("SELECT current_schema()"))
+    assert re.fullmatch(r"pf_test_[0-9a-f]{32}", source_schema)
+    # The explicit URL deliberately carries the source search_path. Restore must
+    # replace it with a fresh isolated schema and ignore the ambient URL entirely.
+    parsed = db.engine.url
+    poison = tmp_path / "ambient-must-not-exist.sqlite3"
+    monkeypatch.setenv("PF_DATABASE_URL", f"sqlite:///{poison}")
+    target = tmp_path / "pg-restored"
+    result, restored = None, None
+    admin = create_engine(parsed, hide_parameters=True)
+    try:
+        result = protection.restore_archive(path, target, postgres_url=parsed.render_as_string(hide_password=False),
+                                            **_read_options(mode, keys))
+        assert result.database == "postgresql"
+        assert re.fullmatch(r"pf_restore_[0-9a-f]{32}", result.schema)
+        assert result.schema != source_schema
+        assert result.report()["backup_protection"] == receipt
+        assert (target / "documents" / "doc-fixture.txt").read_bytes() == blob
+        assert not (target / "procureflow.sqlite3").exists() and not poison.exists()
+        assert not (target / ".restore-incomplete").exists()
+        isolated = parsed.update_query_dict({"options": f"-csearch_path={result.schema}"})
+        restored = Database(isolated.render_as_string(hide_password=False))
+        assert restored.sqlite is False and restored.check_ready()["schema"] == "current"
+        with restored.engine.connect() as connection:
+            assert connection.scalar(text("SELECT current_schema()")) == result.schema
+        changed = {"audit_events", "system_state", "recovery_holds", "pilot_tenants", "pilot_memberships",
+                   "pilot_invites", "pilot_sessions"}
+        for name in Base.metadata.tables.keys() - changed:
+            assert _rows(restored, name) == original.tables[name], name
+        events = _rows(restored, "audit_events")
+        assert events[:-1] == original.tables["audit_events"]
+        assert events[-1]["type"] == "BACKUP_RESTORED"
+        assert events[-1]["payload"]["backup_protection"] == receipt
+        for name in ("pilot_sessions", "pilot_invites"):
+            rows = _rows(restored, name)
+            assert rows and all(row["revoked_at"] for row in rows)
+        for name in ("pilot_tenants", "pilot_memberships"):
+            assert [row["generation"] for row in _rows(restored, name)] == [
+                row["generation"] + 1 for row in original.tables[name]]
+        report = recovery_report(restored)
+        assert report["state"] == "RECOVERY" and report["required_auth_mode"] == "pilot"
+        assert report["automatic_replay_enabled"] is False
+        held = [row for row in report["operations"] if row["hold_restore_id"]]
+        assert {row["status"] for row in held} == {"PENDING", "IN_FLIGHT", "RECONCILING", "FAILED", "MANUAL_REVIEW"}
+        assert all(row["hold_restore_id"] == result.backup_id for row in held)
+        settings = Settings(data_dir=target, database_url=isolated.render_as_string(hide_password=False),
+                            mode="pilot", auth_tokens={}, erp_mode="mock", erp_allow_draft_writes=False,
+                            erp_url="", erp_api_key="", erp_api_secret="", erp_company="")
+        erp = MockERP(tmp_path / "isolated-mock-erp.sqlite3")
+        service = ProcurementService(restored, settings, erp)
+        assert drain_once(service) == 0 and erp.count() == 0
+        with pytest.raises(DomainError) as caught:
+            with restored.transaction(write=True):
+                pass
+        assert caught.value.code == "WRITES_PAUSED"
+        with pytest.raises(DomainError) as caught:
+            resume_writes(restored, generation=report["generation"], ledger_sha256=report["ledger_sha256"])
+        assert caught.value.code == "RECOVERY_REVIEW_REQUIRED"
+        ledger = {name: _rows(restored, name) for name in ("external_operations", "outbox", "recovery_holds")}
+        resumed = resume_writes(restored, generation=report["generation"], ledger_sha256=report["ledger_sha256"],
+                                restore_id=result.backup_id, acknowledge_credentials=True,
+                                acknowledge_reconciliation=True)
+        assert resumed["state"] == "ACTIVE" and resumed["required_auth_mode"] == "pilot"
+        assert resumed["operations"] == report["operations"] and resumed["automatic_replay_enabled"] is False
+        for action, credential in ((service.identities.authenticate, token), (service.identities.login, invite)):
+            with pytest.raises(DomainError) as caught:
+                action(credential)
+            assert caught.value.code == "UNAUTHENTICATED"
+        assert drain_once(service) == 0 and erp.count() == 0
+        for operation in held:
+            with pytest.raises(DomainError) as caught:
+                service.process_pending_operation("synthetic", operation["id"])
+            assert caught.value.code == "RECOVERY_OPERATION_HELD"
+        for name, rows in ledger.items():
+            assert _rows(restored, name) == rows, name
+        assert erp.count() == 0
+        assert recovery_report(db)["state"] == "PAUSED"
+        for name, rows in source_rows.items():
+            assert _rows(db, name) == rows, name
+    finally:
+        if restored is not None:
+            restored.engine.dispose()
+        if result is not None and re.fullmatch(r"pf_restore_[0-9a-f]{32}", result.schema):
+            with admin.begin() as connection:
+                connection.execute(text(f'DROP SCHEMA "{result.schema}" CASCADE'))
+        admin.dispose()
 
 
 def test_mode_is_a_required_keyword_before_any_source_or_target_access(tmp_path):

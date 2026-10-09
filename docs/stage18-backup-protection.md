@@ -2,8 +2,10 @@
 
 This is a bounded local development increment built on
 `a35f78713777016e8d76338391b18e0d558aa850` (tree
-`ef4d442c06ba0a8dc14e37fc29ab02f6fcdc8e5f`). It has not been pushed, merged,
-deployed or certified. Only invented, disposable data and ephemeral test keys
+`ef4d442c06ba0a8dc14e37fc29ab02f6fcdc8e5f`). The original local tree was subsequently published unchanged as
+`ea09ffaa2601e000a86c2427747e9ac4be66310e`; see the
+[publication record](stage18-publication.md) for the current CI scope. It has not
+been merged, deployed or certified. Only invented, disposable data and ephemeral test keys
 were used. No production keys, credentials, accounts or backups were created,
 configured, exported or restored. Independent security review remains incomplete.
 

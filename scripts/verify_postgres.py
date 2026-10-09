@@ -11,11 +11,13 @@ import time
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
+PROTECTION_MODES = ("plain", "signed", "encrypted", "signed-encrypted")
+PROTECTION_TEST = "test_postgres_protection_preserves_evidence_and_recovery_posture"
 
 
 def run(output: Path) -> int:
     output.mkdir(parents=True, exist_ok=True)
-    report = {"scope": "PostgreSQL migrations, concurrency and workflow; mock ERP only",
+    report = {"scope": "PostgreSQL migrations, concurrency, workflow and synthetic protected recovery; mock ERP only",
               "status": "blocked", "live_erp": False, "live_model": False, "sqlite_fallback": False}
     code = 2
     try:
@@ -31,6 +33,7 @@ def run(output: Path) -> int:
                "tests/test_advice_runs.py", "tests/test_policy_versions.py", "tests/test_policy_adversarial.py",
                "tests/test_table_imports.py", "tests/test_pilot_workflow.py", "tests/test_pilot_auth.py",
                "tests/test_retention.py", "tests/test_maintenance.py", "tests/test_backup_recovery.py",
+               "tests/test_backup_protection.py::" + PROTECTION_TEST,
                "tests/test_recovery_diagnostics.py", "tests/test_multi_item_procurement.py",
                "tests/test_multi_item_imports.py", "tests/test_multi_item_erp.py",
                "tests/test_advice_grounding.py::test_durable_api_uses_real_adapter_and_persists_source_read_receipt",
@@ -42,7 +45,8 @@ def run(output: Path) -> int:
         report.update(status="passed" if code == 0 else "failed", exit_code=code,
                       elapsed_seconds=round(time.monotonic() - start, 2))
         if code == 0:
-            suites = ET.parse(output / "postgres.xml").getroot().iter("testsuite")
+            results = ET.parse(output / "postgres.xml").getroot()
+            suites = results.iter("testsuite")
             counts = {k: 0 for k in ("tests", "failures", "errors", "skipped")}
             for suite in suites:
                 for key in counts:
@@ -51,6 +55,17 @@ def run(output: Path) -> int:
             if counts["tests"] < 82 or any(counts[k] for k in ("failures", "errors", "skipped")):
                 code = 1
                 report.update(status="failed", reason="POSTGRES_TESTS_MISSING_OR_SKIPPED")
+            else:
+                # The broader gate also includes explicit SQLite-only regressions.
+                # Only these pg_database-backed cases establish protected PG recovery.
+                expected = {f"{PROTECTION_TEST}[{mode}]" for mode in PROTECTION_MODES}
+                actual = {case.get("name") for case in results.iter("testcase")
+                          if case.get("classname", "").split(".")[-1] == "test_backup_protection"}
+                if not expected.issubset(actual):
+                    code = 1
+                    report.update(status="failed", reason="POSTGRES_PROTECTED_RECOVERY_MISSING")
+                else:
+                    report["postgres_protection_modes"] = list(PROTECTION_MODES)
         return code
     except (ET.ParseError, ValueError):
         code = 1

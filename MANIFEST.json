@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "source-version-evidence-pointer",
-  "status": "local-development-increment",
+  "status": "published-development-pr",
   "scope": "Baseline provenance and evidence locations. This is not a current-tree file checksum manifest or a release attestation.",
   "baseline": {
     "commit": "a35f78713777016e8d76338391b18e0d558aa850",
@@ -11,12 +11,15 @@
   "current_increment": {
     "name": "optional-backup-protection",
     "documentation": "docs/stage18-backup-protection.md",
-    "verification": "Offline synthetic tests only; original logs and final commit/tree are bound externally in the delivery package.",
-    "published": false,
+    "verification": "Original local verification remains immutable. Public exact-head CI and its source-bound original artifacts are required separately; historical or in-progress runs are not final acceptance.",
+    "published": true,
     "merged": false,
     "deployed": false,
     "verification_evidence": "docs/evidence/stage18-local-verification.json",
-    "independent_security_review": "not completed; not retried"
+    "independent_security_review": "not completed; not retried",
+    "first_published_commit": "ea09ffaa2601e000a86c2427747e9ac4be66310e",
+    "first_published_tree": "f8215641fc6894dfaacb395716d01d7233a2e902",
+    "publication_documentation": "docs/stage18-publication.md"
   },
   "historical_manifest": {
     "path": "docs/history/MANIFEST-0.1.0a2.json",

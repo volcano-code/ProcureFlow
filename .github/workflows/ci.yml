@@ -29,6 +29,10 @@ jobs:
         run: python scripts/evaluate_procurement.py --fixture --output evals/reports/ci/procurement-development.json
       - name: Paired synthetic backup and fresh paused recovery acceptance
         run: python scripts/verify_recovery.py --protection plain --output evals/reports/ci/recovery-acceptance.json
+      - name: Signed synthetic recovery acceptance
+        run: python scripts/verify_recovery.py --protection signed --output evals/reports/ci/recovery-signed-acceptance.json
+      - name: Encrypted synthetic recovery acceptance
+        run: python scripts/verify_recovery.py --protection encrypted --output evals/reports/ci/recovery-encrypted-acceptance.json
       - name: Authenticated and signed synthetic recovery acceptance
         run: python scripts/verify_recovery.py --protection signed-encrypted --output evals/reports/ci/recovery-protected-acceptance.json
       - name: Synthetic multi-item import, approval, draft and readback acceptance
