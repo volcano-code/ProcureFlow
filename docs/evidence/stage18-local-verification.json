@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "kind": "offline-synthetic-development-verification",
+  "verified_on": "2026-10-09",
+  "baseline_commit": "a35f78713777016e8d76338391b18e0d558aa850",
+  "baseline_tree": "ef4d442c06ba0a8dc14e37fc29ab02f6fcdc8e5f",
+  "source_fingerprint": "b097b90c7b59acc784a18d8956ef6f4e5f9718f4ca594828fbfe2483537b8033",
+  "source_identity_note": "Fingerprint binds executable package and migration files. Final Git commit/tree and raw evidence hashes are bound externally in the delivery package, avoiding a self-referential commit hash.",
+  "environment": {
+    "python": "3.12.14",
+    "platform": "Linux x86_64",
+    "database": "temporary SQLite",
+    "jwcrypto": "1.6.1",
+    "cryptography": "50.0.2",
+    "credentials": "ephemeral synthetic test keys only"
+  },
+  "results": {
+    "core": {
+      "tests": 2662,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "command": "python scripts/test.py -q -m 'not postgres and not browser and not live'",
+      "note": "Collection preceded creation of the new test module; all new tests are covered in the focused run."
+    },
+    "backup_focused": {
+      "tests": 330,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "command": "python scripts/test.py -q tests/test_backup_protection.py tests/test_backup_recovery.py -m 'not postgres'",
+      "new_protection_cases": 278,
+      "legacy_cases": 52
+    },
+    "final_selected_unique_cases": 2940,
+    "cross_run_overlap_cases": 52,
+    "final_selected_ids_match_junit_union": true,
+    "deselected": 15,
+    "contract_drift": "passed",
+    "compileall": "passed",
+    "pip_check": "passed",
+    "git_diff_check": "passed",
+    "recovery_profiles": {
+      "plain": {
+        "status": "passed",
+        "protection": {
+          "mode": "plain",
+          "provenance_verified": false
+        },
+        "external_writes": 0,
+        "old_session_rejected": true,
+        "reviewed_resume_keeps_operations_held": true,
+        "source_remains_paused": true
+      },
+      "signed": {
+        "status": "passed",
+        "protection": {
+          "mode": "signed",
+          "provenance_verified": true,
+          "signer_thumbprint": "8ADB7SNQPvos1FzLiuAFeJvHtWooKYG43bQ6xZq8Ig0"
+        },
+        "external_writes": 0,
+        "old_session_rejected": true,
+        "reviewed_resume_keeps_operations_held": true,
+        "source_remains_paused": true
+      },
+      "encrypted": {
+        "status": "passed",
+        "protection": {
+          "mode": "encrypted",
+          "provenance_verified": false
+        },
+        "external_writes": 0,
+        "old_session_rejected": true,
+        "reviewed_resume_keeps_operations_held": true,
+        "source_remains_paused": true
+      },
+      "signed-encrypted": {
+        "status": "passed",
+        "protection": {
+          "mode": "signed-encrypted",
+          "provenance_verified": true,
+          "signer_thumbprint": "APpJK5zHS03JqI8b7O7Q6NQtyrvK4vAs87YAfhbal5M"
+        },
+        "external_writes": 0,
+        "old_session_rejected": true,
+        "reviewed_resume_keeps_operations_held": true,
+        "source_remains_paused": true
+      }
+    },
+    "codec_capacity": {
+      "scope": "codec-only maximum-size synthetic input; excludes DB/ZIP validation",
+      "status": "passed",
+      "input_bytes": 33554432,
+      "protected_bytes": 59653000,
+      "elapsed_seconds": 10.073,
+      "max_rss_kib": 587468,
+      "production_data": false,
+      "persistent_keys": false
+    },
+    "excluded_test_ids": [
+      "tests/test_backup_recovery.py::test_postgres_source_and_isolated_restore",
+      "tests/test_browser.py::test_browser_edit_after_approval_invalidates_snapshot",
+      "tests/test_browser.py::test_browser_end_to_end_with_evidence_and_persistence",
+      "tests/test_maintenance.py::test_postgres_search_path_alias_shares_resolved_relation_fence",
+      "tests/test_pilot_auth.py::test_postgres_concurrent_invite_exchange_has_exactly_one_winner",
+      "tests/test_postgres.py::test_postgres_concurrent_dispatch_calls_create_once",
+      "tests/test_postgres.py::test_postgres_concurrent_edits_detect_version_conflict",
+      "tests/test_postgres.py::test_postgres_concurrent_reservation_is_one_operation",
+      "tests/test_postgres.py::test_postgres_independent_worker_and_api_restart",
+      "tests/test_postgres.py::test_postgres_lost_response_only_reconciles",
+      "tests/test_postgres.py::test_postgres_migration_roundtrip",
+      "tests/test_postgres.py::test_postgres_rollback_keeps_operation_and_outbox_atomic",
+      "tests/test_postgres.py::test_postgres_uniqueness_is_enforced_by_database",
+      "tests/test_postgres.py::test_postgres_waiting_confirmation_refreshes_quote_version",
+      "tests/test_postgres.py::test_real_erp_gate_business_schema_is_migrated_isolated_and_removed"
+    ]
+  },
+  "not_run": [
+    "current-change remote CI",
+    "live PostgreSQL",
+    "Docker/container gates",
+    "native/static browser gate",
+    "live ERP",
+    "production backup or restore",
+    "real/paid model calls",
+    "independent security review"
+  ],
+  "publication": {
+    "pushed": false,
+    "pull_request_edited": false,
+    "merged": false,
+    "deployed": false
+  },
+  "warnings": [
+    "Existing Starlette/AnyIO deprecation warning; no skipped tests in selected JUnit suites.",
+    "Protected raw payload ceiling is 32 MiB. Codec-only peak RSS excludes database export and ZIP validation.",
+    "Legacy V1 still requires matching source/schema; explicit plain mode does not migrate earlier source versions."
+  ]
+}

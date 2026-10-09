@@ -349,10 +349,10 @@ def test_cli_safe_output_and_restore_ignores_ambient_database(bundle, tmp_path, 
     poison = tmp_path / "DO_NOT_TOUCH.sqlite3"
     monkeypatch.setenv("PF_DATABASE_URL", f"sqlite:///{poison}")
     monkeypatch.setenv("ERP_API_SECRET", "secret-must-not-be-copied")
-    assert main(["verify", str(bundle)]) == 0
+    assert main(["verify", str(bundle), "--protection", "plain"]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "verified"
     target = tmp_path / "cli-target"
-    assert main(["restore", str(bundle), "--data-dir", str(target)]) == 0
+    assert main(["restore", str(bundle), "--data-dir", str(target), "--protection", "plain"]) == 0
     output = capsys.readouterr().out
     assert json.loads(output)["state"] == "RECOVERY"
     assert not poison.exists()
@@ -410,13 +410,13 @@ def test_explicit_url_file_permissions_and_secret_safe_cli(source, tmp_path, cap
     with pytest.raises(BackupError, match="DATABASE_URL_FILE_MUST_BE_OWNER_ONLY"):
         _database_url_file(credentials)
     credentials.chmod(0o600)
-    assert main(["backup", "--database-url-file", str(credentials), "--documents", str(source[1]),
+    assert main(["backup", "--protection", "plain", "--database-url-file", str(credentials), "--documents", str(source[1]),
                  "--output", str(tmp_path / "cli-backup.pfb")]) == 0
     output = capsys.readouterr()
     assert "sqlite:///" not in output.out + output.err
     alias = tmp_path / "secret-link"
     alias.symlink_to(credentials)
-    assert main(["backup", "--database-url-file", str(alias), "--documents", str(source[1]),
+    assert main(["backup", "--protection", "plain", "--database-url-file", str(alias), "--documents", str(source[1]),
                  "--output", str(tmp_path / "rejected-cli.pfb")]) == 2
     assert "sqlite:///" not in capsys.readouterr().err
 

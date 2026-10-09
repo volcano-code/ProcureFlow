@@ -5,9 +5,10 @@ must pause the source before backup. Restore only creates a new, isolated target
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import math
 import os
@@ -51,6 +52,7 @@ class VerifiedBackup:
     manifest: dict
     tables: dict[str, list[dict]]
     documents: dict[str, bytes]
+    protection: dict = field(default_factory=lambda: {"mode": "plain", "provenance_verified": False})
 
 
 @dataclass(frozen=True)
@@ -60,12 +62,13 @@ class RestoreResult:
     database: str
     schema: str | None = None
     state: str = "RECOVERY"
+    protection: dict = field(default_factory=lambda: {"mode": "plain", "provenance_verified": False})
 
     def report(self) -> dict:
         return {"backup_id": self.backup_id, "data_dir": str(self.data_dir),
                 "database": self.database, "schema": self.schema, "state": self.state,
                 "required_auth_mode": "pilot", "old_credentials": "revoked",
-                "old_operations": "held; no replay"}
+                "old_operations": "held; no replay", "backup_protection": self.protection}
 
 
 def _fail(code):
@@ -199,7 +202,13 @@ def _read_document(directory: Path, key: str) -> bytes:
 
 
 def backup_database(db: Database, document_dir: Path, output: Path, source_revision="unversioned") -> dict:
-    """Create an exclusive new bundle from a paused source under its maintenance fence."""
+    """Legacy plaintext V1 API. Use backup_protection for an explicit protection policy."""
+    return _backup_database(db, document_dir, output, source_revision)
+
+
+def _backup_database(db, document_dir, output, source_revision, *, encode=None, archive_limit=None):
+    """Publish a verified bundle, optionally encoded in memory before any output write."""
+    archive_limit = LIMITS["archive_bytes"] if archive_limit is None else archive_limit
     if not isinstance(source_revision, str) or not _REVISION.fullmatch(source_revision):
         _fail("BACKUP_INVALID_SOURCE_REVISION")
     output, document_dir = Path(output), Path(document_dir)
@@ -243,7 +252,7 @@ def backup_database(db: Database, document_dir: Path, output: Path, source_revis
                 docs[key] = content
                 metadata[key] = {"sha256": expected, "bytes": len(content)}
                 size += len(content)
-                if size > LIMITS["archive_bytes"] or len(docs) + 2 > LIMITS["members"]:
+                if size > archive_limit or len(docs) + 2 > LIMITS["members"]:
                     _fail("BACKUP_ARCHIVE_LIMIT")
             schema = _schema()
             manifest = {"format": FORMAT, "version": VERSION, "backup_id": uuid4().hex,
@@ -258,20 +267,31 @@ def backup_database(db: Database, document_dir: Path, output: Path, source_revis
             if len(manifest_bytes) > LIMITS["manifest_bytes"]:
                 _fail("BACKUP_MANIFEST_LIMIT")
             _check_json_budget(manifest_bytes)
+            encoded = None
+            if encode is not None:
+                # Protected backups never write an intermediate plaintext archive.
+                with io.BytesIO() as memory:
+                    _write_bundle(memory, manifest_bytes, data, docs, archive_limit)
+                    raw = memory.getvalue()
+                _verify_backup_bytes(raw)
+                encoded = encode(raw)
+                del raw
             fd, name = tempfile.mkstemp(prefix=".pf-backup-", dir=output.parent)
             temporary = Path(name)
             with os.fdopen(fd, "w+b") as stream:
-                with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
-                    archive.writestr("manifest.json", manifest_bytes)
-                    archive.writestr("database.json", data)
-                    for key, content in docs.items():
-                        archive.writestr("documents/" + key, content)
-                if stream.tell() > LIMITS["archive_bytes"]:
-                    _fail("BACKUP_ARCHIVE_LIMIT")
+                if encoded is None:
+                    _write_bundle(stream, manifest_bytes, data, docs, archive_limit)
+                else:
+                    stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
+                if encoded is not None:
+                    stream.seek(0)
+                    if stream.read(len(encoded) + 1) != encoded:
+                        _fail("BACKUP_OUTPUT_VERIFICATION_FAILED")
             # Read back and check the actual bundle before publishing it.
-            verify_backup(temporary)
+            if encoded is None:
+                verify_backup(temporary)
             # Atomic and exclusive: a concurrently created output is never replaced.
             os.link(temporary, output)
         return {"backup_id": manifest["backup_id"], "output": str(output),
@@ -282,6 +302,26 @@ def backup_database(db: Database, document_dir: Path, output: Path, source_revis
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
+
+
+def _write_bundle(stream, manifest_bytes, data, docs, archive_limit):
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
+        archive.writestr("manifest.json", manifest_bytes)
+        archive.writestr("database.json", data)
+        for key, content in docs.items():
+            archive.writestr("documents/" + key, content)
+    if stream.tell() > archive_limit:
+        _fail("BACKUP_ARCHIVE_LIMIT")
+
+
+def _verify_backup_bytes(content: bytes) -> VerifiedBackup:
+    """Internal V1 parser for authenticated, bounded in-memory envelope payloads."""
+    try:
+        with io.BytesIO(content) as stream:
+            _preflight_zip(stream, size=len(content))
+            return _verify_open_archive(stream)
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, OverflowError, struct.error):
+        _fail("BACKUP_ARCHIVE_INVALID")
 
 def _unique_object(pairs):
     result = {}
@@ -421,14 +461,14 @@ def _insert_tables(connection, tables):
             connection.execute(table.insert(), rows[start:start + 500])
 
 
-def _preflight_zip(stream):
+def _preflight_zip(stream, *, size=None):
     """Bound the central directory before ZipFile allocates one object per member.
 
     V1 is deliberately canonical: classic single-disk ZIP, stored entries, no
     extra fields, comments, data descriptors, prefix, trailing bytes or ZIP64.
     Both the advertised count and the actual directory records are validated.
     """
-    size = os.fstat(stream.fileno()).st_size
+    size = os.fstat(stream.fileno()).st_size if size is None else size
     if size < 22 or size > LIMITS["archive_bytes"]:
         _fail("BACKUP_ARCHIVE_LIMIT")
     stream.seek(size - 22)
@@ -474,7 +514,7 @@ def verify_backup(path: Path) -> VerifiedBackup:
     """Verify all bytes, schema, types, references and constraints without any target."""
     try:
         path = Path(path)
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 _fail("BACKUP_ARCHIVE_INVALID")
@@ -614,7 +654,8 @@ def _recovery_tables(verified):
                                   "payload": {"backup_id": identifier,
                                               "manifest_sha256": _digest(_json_bytes(verified.manifest)),
                                               "original_database_sha256": verified.manifest["database"]["sha256"],
-                                              "required_auth_mode": "pilot", "automatic_replay_enabled": False},
+                                              "required_auth_mode": "pilot", "automatic_replay_enabled": False,
+                                              "backup_protection": verified.protection},
                                   "created_at": stamp})
     _validate_tables(tables)
     return tables
@@ -641,7 +682,10 @@ def restore_backup(path: Path, data_dir: Path, *, postgres_url: str | None = Non
     postgres_url is explicit operator input, never read from environment or archive.
     Existing databases/tables/directories are never a restore destination.
     """
-    verified = verify_backup(path)
+    return _restore_verified_backup(verify_backup(path), data_dir, postgres_url=postgres_url)
+
+
+def _restore_verified_backup(verified, data_dir, *, postgres_url=None):
     tables = _recovery_tables(verified)
     target = Path(data_dir).absolute()
     if os.path.lexists(target):
@@ -703,7 +747,8 @@ def restore_backup(path: Path, data_dir: Path, *, postgres_url: str | None = Non
             _source_schema(connection)
         if parsed is None:
             os.chmod(target / "procureflow.sqlite3", 0o600)
-        result = RestoreResult(verified.manifest["backup_id"], target, "postgresql" if parsed else "sqlite", schema)
+        result = RestoreResult(verified.manifest["backup_id"], target, "postgresql" if parsed else "sqlite", schema,
+                               protection=verified.protection)
         with (target / "recovery-report.json").open("x", encoding="utf-8") as stream:
             json.dump(result.report(), stream, indent=2)
             stream.write("\n")

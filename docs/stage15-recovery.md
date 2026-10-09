@@ -5,6 +5,12 @@ production disaster-recovery certification. Do not use it to experiment on real
 pilot data. Run the synthetic tests first. PostgreSQL parity is an opt-in live
 integration gate; a skipped PostgreSQL test is not a passing gate.
 
+Stage 18 adds optional authenticated encryption and pinned provenance around this
+V1 payload. The operator CLI now requires an explicit `--protection` policy; the
+legacy examples below opt into `plain`. See [backup protection](stage18-backup-protection.md)
+for signed/encrypted commands and key responsibilities. Earlier archives still
+require their matching trusted source version.
+
 ## What is preserved
 
 A version-1 `.pfb` file pairs a typed logical database snapshot with every raw
@@ -52,12 +58,12 @@ normal application settings; check those settings before pausing.
 
 ```sh
 python -m procureflow.maintenance_cli pause --apply
-python -m procureflow.backup_cli backup \
+python -m procureflow.backup_cli backup --protection plain \
   --database-url-file /secure/source-database-url \
   --documents /srv/procureflow/documents \
   --output /secure/backups/recovery-point.pfb \
   --source-revision <git-sha>
-python -m procureflow.backup_cli verify /secure/backups/recovery-point.pfb
+python -m procureflow.backup_cli verify /secure/backups/recovery-point.pfb --protection plain
 ```
 
 The source remains paused after both success and failure. Review its current
@@ -106,7 +112,8 @@ an older release; use the matching trusted release and a separately reviewed
 upgrade procedure.
 
 The bundle contains sensitive business data and credential hashes. It is **not
-encrypted or cryptographically signed**. SHA-256 detects corruption and pairing
+encrypted or cryptographically signed** when the explicit `plain` policy is used.
+[Stage 18](stage18-backup-protection.md) adds optional JOSE protection around these exact bytes. SHA-256 detects corruption and pairing
 mistakes; it does not authenticate a maliciously rewritten manifest. Store and
 transfer bundles using your approved encrypted, access-controlled process. Never
 publish them or attach them to an issue. Possession of a structurally valid bundle
@@ -126,7 +133,7 @@ SQLite creates only `<new-dir>/procureflow.sqlite3`, the paired `documents/`
 directory and a credential-free `recovery-report.json`:
 
 ```sh
-python -m procureflow.backup_cli restore /secure/backups/recovery-point.pfb \
+python -m procureflow.backup_cli restore /secure/backups/recovery-point.pfb --protection plain \
   --data-dir /srv/recovery/drill-001
 ```
 
@@ -141,7 +148,7 @@ that schema and its paired fresh data directory; do not use an ambient/default
 schema. The CLI does not read `PF_DATABASE_URL` for restore.
 
 ```sh
-python -m procureflow.backup_cli restore /secure/backups/recovery-point.pfb \
+python -m procureflow.backup_cli restore /secure/backups/recovery-point.pfb --protection plain \
   --data-dir /srv/recovery/drill-pg-001 \
   --postgres-url-file /secure/recovery-database-url
 ```

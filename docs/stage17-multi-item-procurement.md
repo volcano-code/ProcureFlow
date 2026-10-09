@@ -143,7 +143,7 @@ NEXT_TELEMETRY_DISABLED=1 npm run build --prefix apps/web
 python scripts/verify_multi_item.py --output evals/reports/local/multi-item.json
 python scripts/smoke.py
 python scripts/web_http_smoke.py
-python scripts/verify_recovery.py --output evals/reports/local/recovery.json
+python scripts/verify_recovery.py --protection plain --output evals/reports/local/recovery.json
 python scripts/verify_next.py --output evals/reports/local/native-gate
 ```
 

@@ -15,3 +15,12 @@ psycopg and psycopg-binary: LGPL-3.0-or-later. Dependency: psycopg[binary]==3.3.
 ## Read-only graph runtime
 
 LangGraph 1.2.12 and LangSmith SDK 0.14.2: MIT. Official sources: https://github.com/langchain-ai/langgraph and https://github.com/langchain-ai/langsmith-sdk. Both are installed from PyPI, not vendored. LangSmith SDK is used only to explicitly disable tracing around local graph execution; no hosted LangSmith service is enabled. The runtime dependency snapshot includes transitive packages with their own upstream licenses. This is not a comprehensive license/security audit.
+
+## Optional backup protection
+
+JWCrypto 1.6.1: LGPL-3.0-or-later. pyca cryptography 50.0.2: Apache-2.0 OR BSD-3-Clause.
+Both are installed from published PyPI packages, not vendored. Retain their package
+license metadata when distributing built images. New transitive snapshot entries
+include cffi 2.1.1 (MIT-0) and pycparser 3.1 (BSD-3-Clause). Sources:
+https://github.com/latchset/jwcrypto and https://github.com/pyca/cryptography.
+This is dependency attribution, not an independent security or license audit.

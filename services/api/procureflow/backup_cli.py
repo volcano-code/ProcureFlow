@@ -10,7 +10,8 @@ import sys
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from .backup import BackupError, backup_database, restore_backup, verify_backup
+from .backup import BackupError
+from .backup_protection import (MODES, _keys, create_backup, read_key_file, restore_archive, verify_archive)
 from .db import Database
 from .errors import DomainError
 
@@ -43,19 +44,37 @@ def main(argv=None):
     restore.add_argument("archive", type=Path)
     restore.add_argument("--data-dir", type=Path, required=True)
     restore.add_argument("--postgres-url-file", type=Path, help="Owner-only URL file; creates only a new random schema")
+    for command in (backup, verify, restore):
+        command.add_argument("--protection", choices=MODES, required=True,
+                             help="Required exact protection policy; plain explicitly permits unauthenticated V1")
+        command.add_argument("--encryption-key-file", type=Path,
+                             help="Owner-only minimal oct/A256GCM JWK; never put key bytes in arguments")
+    backup.add_argument("--signing-key-file", type=Path, help="Owner-only minimal private Ed25519 JWK")
+    for command in (verify, restore):
+        command.add_argument("--verification-key-file", type=Path,
+                             help="Owner-only independently trusted minimal public Ed25519 JWK")
     args = parser.parse_args(argv)
     db = None
     try:
+        encryption_key = read_key_file(args.encryption_key_file) if args.encryption_key_file else None
+        authority_path = args.signing_key_file if args.command == "backup" else args.verification_key_file
+        authority_key = read_key_file(authority_path) if authority_path else None
+        # Reject unused/missing/invalid keys before opening even the source DB.
+        _keys(args.protection, encryption_key, authority_key, writing=args.command == "backup")
         if args.command == "backup":
             db = Database(_database_url_file(args.database_url_file))
-            result = backup_database(db, args.documents, args.output, args.source_revision)
+            result = create_backup(db, args.documents, args.output, args.source_revision,
+                                   mode=args.protection, encryption_key=encryption_key, signing_key=authority_key)
         elif args.command == "verify":
-            result = verify_backup(args.archive)
+            result = verify_archive(args.archive, mode=args.protection, encryption_key=encryption_key,
+                                    verification_key=authority_key)
             result = {"backup_id": result.manifest["backup_id"], "state": "verified",
-                      "schema_heads": result.manifest["schema_heads"], "documents": len(result.documents)}
+                      "schema_heads": result.manifest["schema_heads"], "documents": len(result.documents),
+                      "backup_protection": result.protection}
         else:
             url = _database_url_file(args.postgres_url_file) if args.postgres_url_file else None
-            result = restore_backup(args.archive, args.data_dir, postgres_url=url).report()
+            result = restore_archive(args.archive, args.data_dir, postgres_url=url, mode=args.protection,
+                                     encryption_key=encryption_key, verification_key=authority_key).report()
         print(json.dumps(result, sort_keys=True))
         return 0
     except DomainError as error:

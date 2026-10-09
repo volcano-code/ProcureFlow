@@ -1,4 +1,4 @@
-# Runtime dependency snapshot resolved/tested on Python 3.12 Linux, 2026-10-01.
+# Runtime dependency snapshot on Python 3.12 Linux; base 2026-10-01, JOSE additions 2026-10-09.
 # Not a security audit or a cross-platform hash lock; runtime dependencies only.
 alembic==1.18.4
 annotated-doc==0.0.5
@@ -50,3 +50,9 @@ uvicorn==0.48.0
 websockets==16.1.1
 xxhash==4.0.1
 zstandard==0.25.0
+
+# Bounded compact JOSE backup protection; no hosted crypto service.
+jwcrypto==1.6.1
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.1

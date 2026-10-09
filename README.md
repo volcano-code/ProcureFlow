@@ -13,13 +13,17 @@
 - 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
 - 受控 pilot 登录：一次性邀请、短期内存会话、退出／到期／跨进程撤权、用户／租户／角色展示；买方与审批方授权版本在首次 ERP 写入前重验（见 [阶段十四](docs/stage14-pilot-sessions.md)），不自动发放真实账号
 - SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
-- 过期未导入预览的可逆归档与有效配额；数据库＋来源文件的成对备份、校验和新隔离目标恢复。恢复默认暂停写入并永久拦截旧待处理操作重放；[恢复诊断工作台](docs/stage16-recovery-diagnostics.md) 提供待处理 hold、证据和只读 ERP 字段差异，不释放 hold 或授权写入。见 [预览保留](docs/table-preview-retention.md) 和 [备份恢复](docs/stage15-recovery.md)。归档不回收磁盘，不支持原地覆盖恢复或永久清除
+- 过期未导入预览的可逆归档与有效配额；数据库＋来源文件的成对备份、校验和新隔离目标恢复；新增可选 A256GCM 加密和固定公钥 Ed25519 签名验证，CLI 必须显式选择保护模式（见 [阶段十八](docs/stage18-backup-protection.md)）。恢复默认暂停写入并永久拦截旧待处理操作重放；[恢复诊断工作台](docs/stage16-recovery-diagnostics.md) 提供待处理 hold、证据和只读 ERP 字段差异，不释放 hold 或授权写入。见 [预览保留](docs/table-preview-retention.md) 和 [备份恢复](docs/stage15-recovery.md)。归档不回收磁盘，不支持原地覆盖恢复或永久清除
 - ERPNext Supplier Quotation 草稿和独立读回。支持范围与税/运费/折扣合同以 [费用映射边界](docs/erp-cost-mapping.md) 和 [ERP 说明](integrations/erpnext/README.md) 为准；没有 Submit、Purchase Order、删除或支付功能
 - 原生 Next.js 工作台，以及 FastAPI 提供的轻量静态演示页；锁定 npm 安装、类型检查、生产构建、浏览器与容器验收入口
 - 持久化只读建议：一次性领取、来源读取、过期/中断回执、不自动重放；真实 LangGraph 节点和有界工具白名单。不是逐工具 checkpoint 或跨进程模型恢复
 - [10 个冻结合成开发案例](docs/stage10-evaluation.md)、确定性与协议评分、独立解释评分流程。fixture 通过不证明真实模型质量，未选择真实提供方/型号/费用预算；不是 60-task benchmark 或 Holdout
 
 本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP/AG-UI、向量 RAG、Celery/Redis 或真实模型质量/费用结论。
+
+## 当前本地备份保护增量
+
+基于远端已验收 `a35f78713777016e8d76338391b18e0d558aa850` 新增 [备份保护](docs/stage18-backup-protection.md)：标准 JOSE 格式、调用方管理的本地密钥、验证完成前不创建恢复目标，以及显式明文兼容选项。仅使用合成数据和临时测试密钥；当前增量未推送、合并或部署，独立安全审查未完成。下列阶段十七结果是历史基线，不代表本增量通过。新保护模式原始备份上限 32 MiB，旧版明文上限保持 256 MiB。
 
 ## 验收证据如何读
 
@@ -98,7 +102,7 @@ python scripts/smoke.py
 python scripts/web_http_smoke.py
 python scripts/verify_model_acceptance.py --fixture
 python scripts/evaluate_procurement.py --fixture --output evals/reports/local/procurement-development.json
-python scripts/verify_recovery.py --output evals/reports/local/recovery-acceptance.json
+python scripts/verify_recovery.py --protection plain --output evals/reports/local/recovery-acceptance.json
 python scripts/verify_multi_item.py --output evals/reports/local/multi-item-acceptance.json
 ```
 

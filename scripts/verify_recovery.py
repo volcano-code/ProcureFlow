@@ -17,12 +17,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'services/api'))
 
 
-def run(output):
+def run(output, protection="plain"):
     from fastapi.testclient import TestClient
     from sqlalchemy import select
     from procureflow.app import create_app
     from procureflow.auth import IdentityService
-    from procureflow.backup import _migrate, backup_database, restore_backup, verify_backup
+    from procureflow.backup import _migrate
+    from procureflow.backup_protection import create_backup, restore_archive, verify_archive
+    from jwcrypto import jwk
     from procureflow.config import Settings, DEMO_IDENTITIES
     from procureflow.db import Base, Database, TableImportRow
     from procureflow.domain import digest
@@ -36,6 +38,15 @@ def run(output):
     report = {'scope': 'synthetic SQLite paired recovery acceptance', 'status': 'failed',
               'real_user_data': False, 'live_erp': False, 'live_model': False,
               'external_writes': 0, 'automatic_replay': False}
+    # Ephemeral synthetic material only: never persisted, exported to reports or
+    # reused as an identity. Production key provisioning is operator-owned.
+    encrypted, signed = 'encrypted' in protection, 'signed' in protection
+    encryption_key = jwk.JWK.generate(kty='oct', size=256).export().encode() if encrypted else None
+    signer = jwk.JWK.generate(kty='OKP', crv='Ed25519') if signed else None
+    signing_key = signer.export_private().encode() if signer else None
+    verification_key = signer.export_public().encode() if signer else None
+    create_keys = dict(mode=protection, encryption_key=encryption_key, signing_key=signing_key)
+    verify_keys = dict(mode=protection, encryption_key=encryption_key, verification_key=verification_key)
     buyer = {'Authorization': 'Bearer demo-buyer'}
     approver = {'Authorization': 'Bearer demo-approver'}
     databases = []
@@ -87,9 +98,9 @@ def run(output):
                 identity.issue_invite('synthetic-pilot', 'auditor')
                 pause_writes(db)
                 backup_path = root / 'paired.pfb'
-                backup = backup_database(db, data / 'documents', backup_path)
-                verified = verify_backup(backup_path)
-                restored = restore_backup(backup_path, root / 'restored')
+                backup = create_backup(db, data / 'documents', backup_path, **create_keys)
+                verified = verify_archive(backup_path, **verify_keys)
+                restored = restore_archive(backup_path, root / 'restored', **verify_keys)
                 recovered = Database(f'sqlite:///{restored.data_dir / "procureflow.sqlite3"}')
                 databases.append(recovered)
                 restored_settings = Settings(data_dir=restored.data_dir,
@@ -175,6 +186,7 @@ def run(output):
                     assert readback.json()['replay_permitted'] is False
                 assert database_digest() == before_diagnostics and restored_erp.count() == 0
                 report.update(status='passed', backup_id=backup['backup_id'],
+                    backup_protection=verified.protection,
                     source_fingerprint=verified.manifest['source']['fingerprint'],
                     schema_heads=verified.manifest['schema_heads'], documents_verified=len(document_hashes),
                     document_sha256=document_hashes, preserved_table_sha256=preserved,
@@ -202,6 +214,8 @@ def run(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'evals/reports/recovery/acceptance.json')
+    parser.add_argument('--protection', choices=('plain', 'signed', 'encrypted', 'signed-encrypted'),
+                        default='plain', help='Explicit synthetic profile, legacy default retained for existing CI')
     args = parser.parse_args()
     # Remove ambient service secrets before any module-level default app is imported.
     for key in list(os.environ):
@@ -209,4 +223,4 @@ if __name__ == '__main__':
             os.environ.pop(key, None)
     with tempfile.TemporaryDirectory(prefix='pf-recovery-module-') as temporary:
         os.environ.update(PF_DATA_DIR=temporary, PF_MODE='demo', PF_ERP_MODE='mock', ERP_ALLOW_DRAFT_WRITES='false')
-        raise SystemExit(run(args.output.resolve()))
+        raise SystemExit(run(args.output.resolve(), args.protection))
