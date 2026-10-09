@@ -1,4 +1,161 @@
 {
+  "$defs": {
+    "QuoteLineValues": {
+      "additionalProperties": false,
+      "properties": {
+        "sku": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sku"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "decimal_places": 3,
+              "gt": 0,
+              "le": "1000000",
+              "max_digits": 10
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity"
+        },
+        "uom": {
+          "anyOf": [
+            {
+              "maxLength": 12,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uom"
+        },
+        "unit_price": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "decimal_places": 2,
+              "ge": 0,
+              "le": "1000000000",
+              "max_digits": 15
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit Price"
+        },
+        "tax_mode": {
+          "default": "unknown",
+          "enum": [
+            "included",
+            "excluded",
+            "unknown"
+          ],
+          "title": "Tax Mode",
+          "type": "string"
+        },
+        "tax_rate": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "decimal_places": 6,
+              "ge": 0,
+              "le": 1,
+              "max_digits": 7
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tax Rate"
+        },
+        "discount": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "decimal_places": 2,
+              "ge": 0,
+              "le": "1000000000",
+              "max_digits": 15
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discount"
+        },
+        "delivery_days": {
+          "anyOf": [
+            {
+              "maximum": 365,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivery Days"
+        }
+      },
+      "title": "QuoteLineValues",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "supplier_id": {
@@ -200,6 +357,23 @@
       ],
       "default": null,
       "title": "Currency"
+    },
+    "lines": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/QuoteLineValues"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lines"
     }
   },
   "title": "QuoteValues",

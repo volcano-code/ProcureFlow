@@ -1,0 +1,10 @@
+{
+  "title": "Synthetic two-item procurement",
+  "lines": [
+    {"sku": "STAND-01", "quantity": "2", "uom": "EA"},
+    {"sku": "CABLE-02", "quantity": "3", "uom": "EA"}
+  ],
+  "budget": "1000.00",
+  "max_delivery_days": 14,
+  "currency": "CNY"
+}

@@ -1,0 +1,29 @@
+........................................................................ [  4%]
+...................................................F
+=================================== FAILURES ===================================
+____________ test_native_gate_expected_names_match_collected_source ____________
+
+    def test_native_gate_expected_names_match_collected_source():
+        names = set()
+        for file in ("workbench_e2e.py", "proxy_e2e.py"):
+            tree = ast.parse((ROOT / "apps/web/e2e" / file).read_text())
+            names.update(node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+                         and node.name.startswith("test_"))
+>       assert names == gate.EXPECTED
+E       AssertionError: assert {'test_audit_...dentity', ...} == {'test_audit_...dentity', ...}
+E         
+E         Extra items in the left set:
+E         'test_native_table_archived_preview_readback_and_reopen_stay_read_only'
+E         Use -v to get more diff
+
+tests/test_container_gate.py:36: AssertionError
+=============================== warnings summary ===============================
+../../../procureflow-quality-venv/lib/python3.12/site-packages/starlette/testclient.py:45
+  /workspace/scratch/79d4ff397d9e/procureflow-quality-venv/lib/python3.12/site-packages/starlette/testclient.py:45: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_container_gate.py::test_native_gate_expected_names_match_collected_source
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 123 passed, 15 deselected, 1 warning in 18.74s

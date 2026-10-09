@@ -1,0 +1,70 @@
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 426d852ce82c, initial procurement evidence approval outbox schema
+Revision ID: 426d852ce82c
+Revises:
+INFO  [alembic.runtime.migration] Running upgrade 426d852ce82c -> 5ce3ab9b84a2, durable version-bound read-only advice receipts
+Revision ID: 5ce3ab9b84a2
+Revises: 426d852ce82c
+INFO  [alembic.runtime.migration] Running upgrade 5ce3ab9b84a2 -> a82d71f09c36, Immutable tenant policy revisions and complete historical evaluation inputs.
+INFO  [alembic.runtime.migration] Running upgrade a82d71f09c36 -> b9134d27c80f, Durable, tenant-scoped table import previews and idempotent confirmation receipts.
+INFO  [alembic.runtime.migration] Running upgrade b9134d27c80f -> d261a40ce712, Controlled pilot identities, one-use invitations and revocable sessions.
+INFO  [alembic.runtime.migration] Running upgrade d261a40ce712 -> e731bb62c905, Durable maintenance fence and permanent no-replay holds for restored work.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 426d852ce82c, initial procurement evidence approval outbox schema
+Revision ID: 426d852ce82c
+Revises:
+INFO  [alembic.runtime.migration] Running upgrade 426d852ce82c -> 5ce3ab9b84a2, durable version-bound read-only advice receipts
+Revision ID: 5ce3ab9b84a2
+Revises: 426d852ce82c
+INFO  [alembic.runtime.migration] Running upgrade 5ce3ab9b84a2 -> a82d71f09c36, Immutable tenant policy revisions and complete historical evaluation inputs.
+INFO  [alembic.runtime.migration] Running upgrade a82d71f09c36 -> b9134d27c80f, Durable, tenant-scoped table import previews and idempotent confirmation receipts.
+INFO  [alembic.runtime.migration] Running upgrade b9134d27c80f -> d261a40ce712, Controlled pilot identities, one-use invitations and revocable sessions.
+INFO  [alembic.runtime.migration] Running upgrade d261a40ce712 -> e731bb62c905, Durable maintenance fence and permanent no-replay holds for restored work.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+{
+  "scope": "synthetic SQLite paired recovery acceptance",
+  "status": "passed",
+  "real_user_data": false,
+  "live_erp": false,
+  "live_model": false,
+  "external_writes": 0,
+  "automatic_replay": false,
+  "backup_id": "c2d4843acbc244dcb78ff3c803b8cb02",
+  "source_fingerprint": "8f4690abc038ab48b386951a840208831f71b7785cd7cc2e9ffa949a64b6da6b",
+  "schema_heads": [
+    "e731bb62c905"
+  ],
+  "documents_verified": 2,
+  "document_sha256": {
+    "doc_733c105998934ac28270c27e023d7e30.txt": "686675f50474aa296574c0a7abce06afd4520186de69b1961eeb2c7cfa9f43d9",
+    "tim_a19f5ab58aad4edc902363a44c7a6e40.csv": "edfb6a9cecf7b3b9b378f5a1c49f228828efa26c8c5426be0575bff014755a36"
+  },
+  "preserved_table_sha256": {
+    "audit_events": "0e591ddcfca009932c430ffe08a237a4871d0762a6eb21f72a7f262350b1ffad",
+    "procurement_requests": "208f5300c59cc2157da148b8b732903be97de34b97b81f0257057234302e486d",
+    "tenant_policies": "8f6208a7aa5cbbb752e62f680fa5f585b849fb3d994618059ecbdf5b08c168ab",
+    "advice_runs": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "approvals": "9138fc3d02b6f41e6e747fd7520215912e4bb27b304e5a739420a11c2403748a",
+    "documents": "7bd7adaed44b8debde2d1842dbeb6772a3eb12e3101221f0d42627eef89808fe",
+    "evaluations": "0e2431ddb03341741bb6e068522aa02d10c13d54ada6e79fe73b444907c156b6",
+    "policy_versions": "52fe71721bb8fefdea6698a59047a16a07d4ed4fa3c820bbe990a8a59abea3c4",
+    "quotes": "3be302143ce1021a2ef5b6a12289df9c95a1f3b333530acc685f07bf5ebf684a",
+    "external_operations": "ffa2f4f6c5c9175f07688e89cadc603a10758b7b359f46e6de27e1c491ddb3cc",
+    "quote_versions": "bac5d3ba03746b74680c888ab12c3686943b64071e91880e149e9a6be75c566c",
+    "table_imports": "dc84906e8f4ab48b1d3e5742ccd1812744552c27231a3d33d493d4236625d865",
+    "outbox": "350043f9957f02ea90cb83356e7d27377f62155cc8edb33fcf242dd3359677db"
+  },
+  "old_session_rejected": true,
+  "api_writes_paused": true,
+  "worker_paused": true,
+  "reviewed_resume_keeps_operations_held": true,
+  "archived_source_preserved": true,
+  "held_operation_read_only_verification": true,
+  "source_remains_paused": true,
+  "production_backup_or_restore_performed": false
+}

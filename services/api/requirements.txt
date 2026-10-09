@@ -6,3 +6,10 @@ httpx==0.28.1
 pypdf==5.9.0
 uvicorn==0.48.0
 python-multipart==0.0.29
+langgraph==1.2.12
+# Explicitly disable transitive tracing for private graph state.
+langsmith==0.14.2
+
+# Bounded compact JOSE backup protection; no hosted crypto service.
+jwcrypto==1.6.1
+cryptography==50.0.2

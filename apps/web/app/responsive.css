@@ -1,0 +1,59 @@
+/* Keep long identifiers and wide tables inside their panels; do not hide body overflow. */
+main, .content, .panel, .lower-grid > *, .request-panel > *, .event > div {
+  min-width: 0;
+}
+.lower-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.eyebrow, .decision-result, .decision-label, .form-error { overflow-wrap: anywhere; }
+.heading-actions { max-width: 100%; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .lower-grid { grid-template-columns: minmax(0, 1fr); }
+  .request-panel { flex-direction: column; align-items: stretch; }
+  .request-panel > div { width: 100%; }
+  .topbar { height: auto; min-height: 74px; padding-top: 12px; padding-bottom: 12px; gap: 10px; flex-wrap: wrap; }
+  .identity { min-width: 0; flex-wrap: wrap; }
+  .identity input { min-width: 0; max-width: 100%; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Versioned procurement policy and immutable evaluation receipts. */
+.policy-summary{display:grid;grid-template-columns:1fr 1.2fr;gap:20px;margin:12px 0;padding:15px;background:var(--soft);border-radius:7px}
+.policy-summary p{margin-top:7px}.policy-version,.evaluation-version{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.policy-panel details,.evaluation-panel details{margin-top:15px}.policy-panel summary,.evaluation-panel summary{cursor:pointer;font-size:12px;color:var(--teal)}
+.policy-fields{border:0;padding:0;margin:18px 0;min-width:0}.policy-fields textarea{min-height:90px}
+.violation-list{margin:8px 0;padding-left:18px;white-space:normal;max-width:420px;font-size:11px;line-height:1.7;color:var(--red)}
+.binding-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;font-size:11px;line-height:1.7}.binding-grid dt{color:var(--muted)}.binding-grid dd{margin:0;overflow-wrap:anywhere}
+.stale-notice{background:#fff3df;border:1px solid #f0d9b2;border-radius:6px;padding:12px;margin:12px 0;color:#835815}
+@media(max-width:760px){.policy-summary{grid-template-columns:minmax(0,1fr)}.binding-grid{grid-template-columns:minmax(0,1fr)}.policy-panel dialog .heading-actions{flex-wrap:wrap}}
+/* Explicit one-row table import; long source cells remain inside the dialog. */
+.table-import-dialog{width:min(1100px,94vw)}
+.table-import-dialog p{font-size:12px}.table-import-dialog h3{font-size:14px;margin:20px 0 10px}
+.table-import-dialog .modal-head>div{min-width:0}.table-import-dialog .modal-head button{flex-shrink:0}
+.table-import-source{padding:12px;background:var(--soft);border-radius:6px;margin:15px 0}
+.table-import-actions{margin:14px 0}.table-import-selectors{grid-template-columns:repeat(3,minmax(0,1fr))}
+.table-mapping-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px}.table-mapping-grid select{min-width:0}
+.table-import-raw summary{cursor:pointer;color:var(--teal);font-size:12px;margin-bottom:10px}
+.table-import-raw .table-scroll{max-height:290px}.table-import-dialog td{max-width:280px;min-width:100px;white-space:normal;overflow-wrap:anywhere}
+.table-import-dialog td small{max-width:none}.table-import-dialog td .unknown{display:block;margin-top:5px}
+.table-import-dialog .selected-import-row>*{background:#e9f5f3}.table-import-dialog .import-header-row>*{background:#f1f4f7;font-weight:600}
+.table-import-result{border-top:1px solid var(--line);margin-top:18px;padding-top:8px}
+.table-import-result td:nth-child(2){min-width:90px}.table-import-result td:nth-child(3){min-width:180px}
+@media(max-width:760px){.table-import-dialog{padding:18px;max-height:92vh}.table-import-selectors,.table-mapping-grid{grid-template-columns:minmax(0,1fr)}.table-import-dialog .form-actions{flex-wrap:wrap}}
+/* Recovery diagnostics remain readable without a selected procurement request. */
+.recovery-panel{margin-bottom:20px}.recovery-panel h3{font-size:13px;margin:18px 0 9px}
+.recovery-panel .binding-grid{margin:14px 0}.recovery-panel td{white-space:normal;overflow-wrap:anywhere;min-width:115px;max-width:300px;vertical-align:top}
+.recovery-panel td p{margin-top:5px}.recovery-panel tr[aria-selected="true"]{background:#edf7f5}
+.recovery-panel details summary{font-size:12px;color:var(--teal);cursor:pointer}
+.recovery-pagination{margin-top:14px}.recovery-detail{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}
+.recovery-source{margin:10px 0;padding:12px;background:var(--soft);border-radius:6px;overflow-wrap:anywhere;font-size:12px}
+.recovery-diagnostics{padding-left:20px;line-height:1.8;font-size:12px;overflow-wrap:anywhere}
+.recovery-reconciliation{border-top:1px solid var(--line);margin-top:18px;padding-top:2px}
+.recovery-panel .stale-notice{display:block;line-height:1.8}.recovery-panel .form-error .secondary{margin:8px}
+@media(max-width:760px){.recovery-panel .decision-content{padding-right:14px;padding-left:14px}.recovery-source .badge{white-space:normal}}
+/* Bounded multi-item requests and quote lines retain keyboard access and mobile scrolling. */
+.procurement-editor{width:min(1000px,94vw)}.procurement-editor h3{font-size:14px;margin:18px 0 8px}.procurement-editor p{font-size:12px;line-height:1.7}
+.line-editor{min-width:0;border:1px solid var(--line);border-radius:7px;padding:14px;margin:16px 0}.line-editor legend{font-size:13px;font-weight:600;padding:0 6px}
+.line-editor .form-grid>div{min-width:0}.line-editor .source-meta{display:block;overflow-wrap:anywhere;white-space:normal;max-height:5em;overflow:auto;margin:5px 0 10px}
+.quote-line-row>td{padding:0 18px 18px;white-space:normal}.quote-lines{min-width:0;max-width:100%}.quote-lines p{font-size:12px;line-height:1.8;margin:12px 0;white-space:normal;overflow-wrap:anywhere}
+.quote-lines th,.quote-lines td{font-size:11px;min-width:65px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}.quote-lines .violation-list{min-width:130px}
+.request-lines{font-size:12px;line-height:1.8;list-style:none;padding:0;margin:8px 0}.request-lines li{overflow-wrap:anywhere}
+@media(max-width:760px){.procurement-editor{padding:18px;max-height:92vh}.line-editor .form-grid{grid-template-columns:minmax(0,1fr)}.procurement-editor .form-actions{flex-wrap:wrap}.quote-line-row>td{padding:0 10px 14px}}

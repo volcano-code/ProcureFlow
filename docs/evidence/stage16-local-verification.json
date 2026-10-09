@@ -1,0 +1,171 @@
+{
+  "kind": "local-increment-verification-summary",
+  "verified_on_utc_date": "2026-10-08",
+  "scope": "Recovery diagnostics local development increment; partial environment coverage, not production or independent security acceptance.",
+  "baseline_commit": "a10f62b65263c9e6bb53219a6296dfb9a67de527",
+  "source_identity_note": "Final local source commit/tree belong in the accompanying delivery manifest; this file does not embed its own commit hash.",
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.19.0"
+  },
+  "results": {
+    "core_non_postgres_non_browser": {
+      "status": "passed",
+      "passed": 1782,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "deselected": 15,
+      "warnings": 1,
+      "warning": "AnyIO BlockingPortal deprecation",
+      "seconds_reported_in_log": 246.27
+    },
+    "focused_recovery_diagnostics": {
+      "status": "passed",
+      "passed": 47,
+      "overlap": "Included in the core regression; do not add to 1782."
+    },
+    "frontend_units": {
+      "status": "passed",
+      "passed": 56,
+      "new_recovery_cases": 13
+    },
+    "frontend_typecheck": "passed",
+    "frontend_production_build": "passed; NEXT_TELEMETRY_DISABLED=1",
+    "frontend_typecheck_after_restoring_next_env": "passed",
+    "contract_drift_check": "passed",
+    "http_worker_smoke": {
+      "status": "passed",
+      "named_steps": 16,
+      "live_erp": false,
+      "live_model": false
+    },
+    "web_http_transport": {
+      "status": "passed",
+      "passed": 5
+    },
+    "synthetic_sqlite_paired_recovery": {
+      "status": "passed",
+      "live_erp": false,
+      "live_model": false,
+      "external_writes": 0,
+      "automatic_replay": false,
+      "documents_verified": 2,
+      "old_session_rejected": true,
+      "api_writes_paused": true,
+      "worker_paused": true,
+      "reviewed_resume_keeps_operations_held": true,
+      "recovery_diagnostics_gets_leave_database_unchanged": true,
+      "offline_diagnostics_while_recovery_paused": true,
+      "restored_credentials_cannot_read_diagnostics": true,
+      "production_backup_or_restore_performed": false
+    },
+    "native_browser": {
+      "status": "blocked",
+      "reason": "CHROMIUM_UNIX_SOCKET_DENIED",
+      "detail": "socket() Operation not permitted before UI execution on both attempts",
+      "attempts": 2,
+      "collected_cases": 25,
+      "new_recovery_cases": 3,
+      "browser_verified": false,
+      "screenshots_created": false
+    },
+    "live_postgresql": "not run for this increment",
+    "containers": "not run for this increment",
+    "live_erpnext": "not run for this increment",
+    "remote_ci": "not run for this increment",
+    "independent_security_review": "incomplete; no certification claimed",
+    "offline_cli_acceptance": {
+      "status": "passed",
+      "scope": "Fresh migrated synthetic paused database; scoped inspect succeeded, missing tenant rejected; database unchanged and zero ERP writes"
+    }
+  },
+  "evidence_paths_relative_to": "Local validation evidence directory in the accompanying delivery",
+  "evidence_files": {
+    "final-core.log": {
+      "bytes": 2623,
+      "sha256": "a6230098129411d26f268ad9608f9975026b1fea905210f9e91ce3d95ed22fd2"
+    },
+    "final-core.xml": {
+      "bytes": 4462032,
+      "sha256": "f5dbb4563f97235beaac6baab4c91f331cfbd4cf41ff2e8f0af20ecf4781ac9d"
+    },
+    "recovery-diagnostics.log": {
+      "bytes": 675,
+      "sha256": "7fce7528cef0fabf7dbed787a56ce53e4a974d2fdd5975120281674dad7772e5"
+    },
+    "recovery-diagnostics.xml": {
+      "bytes": 7180,
+      "sha256": "6f79c09b7af1bb6e10b78a330fc114f87ec41b06017bd1e1f41ab1effdc81099"
+    },
+    "contracts.log": {
+      "bytes": 44,
+      "sha256": "52436c71922b5b2526343b014fb9ab09c3af6d45c3e96186757042ab040f820e"
+    },
+    "smoke.log": {
+      "bytes": 884,
+      "sha256": "23eb34a95368ba306957440abea3f13c8e6020fbcfb63f8edc5b93004be8e4a7"
+    },
+    "web-http.log": {
+      "bytes": 655,
+      "sha256": "26d4bf4bbd02d3200c0429e04aa0da7a4802b700c32dd21443cc3eb9b892f8ed"
+    },
+    "recovery-acceptance.json": {
+      "bytes": 2338,
+      "sha256": "dad260f32f06ec9817cd243141bcfbce08f5aaaf873db8422494920e0bd3bb5a"
+    },
+    "recovery-acceptance.log": {
+      "bytes": 4768,
+      "sha256": "a89b1cc07607d095f8438ea796c4b369c166eb3b5669a1f06137662bc94b0c61"
+    },
+    "frontend/unit-final.log": {
+      "bytes": 5170,
+      "sha256": "97849ccfe347cc0586f244b6f8f34760f02ab30d0a5a96168d4ff72a5025ff6c"
+    },
+    "frontend/typecheck-final.log": {
+      "bytes": 158,
+      "sha256": "9abd8ca5534bd3253a9ba05290e1674ca4612b70cb9d1a200a61be6133bbff0d"
+    },
+    "frontend/typecheck-restored-env.log": {
+      "bytes": 158,
+      "sha256": "9abd8ca5534bd3253a9ba05290e1674ca4612b70cb9d1a200a61be6133bbff0d"
+    },
+    "frontend/build-final-telemetry-disabled.log": {
+      "bytes": 642,
+      "sha256": "a2b0e1de9eab48f318fa64ca99a19f20ea7795afec70826ade771d6c51e701da"
+    },
+    "frontend/frontend-verification.json": {
+      "bytes": 1844,
+      "sha256": "c2d0cd75c1a1f4050570b4e3d572d4272fd727ff1b1ba62d1f7be32cc67c4bdd"
+    },
+    "frontend/native-gate/next-gate.json": {
+      "bytes": 476,
+      "sha256": "df1d2420526ab86ab3de351534dfb481a5301332589fce2eaeeb7c39d935378b"
+    },
+    "frontend/native-gate/next-browser.log": {
+      "bytes": 178507,
+      "sha256": "b3b448873de9fbf72def920932644aaf84e9c431c764f38571fd1bc035a0f7da"
+    },
+    "frontend/native-gate/next-browser.xml": {
+      "bytes": 298773,
+      "sha256": "8e2186d0aef889384d9f4083c6d29d095aeb92ea7bf9d398f592a69f649ed580"
+    },
+    "frontend/native-gate-escalated/next-gate.json": {
+      "bytes": 476,
+      "sha256": "df1d2420526ab86ab3de351534dfb481a5301332589fce2eaeeb7c39d935378b"
+    },
+    "frontend/native-gate-escalated/next-browser.log": {
+      "bytes": 174326,
+      "sha256": "99ce49c8112cf69272b05aa07cb834f315f1c13985a5656dbef408b40d293627"
+    },
+    "frontend/native-gate-escalated/next-browser.xml": {
+      "bytes": 290811,
+      "sha256": "975819a3e7f8ecc36248b1fae8836e757b2b2333f7482972779df6cc801d4ad6"
+    },
+    "cli-acceptance.log": {
+      "bytes": 1564,
+      "sha256": "5df2046dd373cb8cbc03eb9f2e8af3d4ec0bbaa367d240e8d55d3c872f65585a"
+    }
+  },
+  "count_caution": "Suites overlap and include parameterized cases. Do not sum these results as independent procurement tasks or real-model evaluations."
+}

@@ -1,0 +1,12 @@
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 426d852ce82c, initial procurement evidence approval outbox schema
+Revision ID: 426d852ce82c
+Revises:
+INFO  [alembic.runtime.migration] Running upgrade 426d852ce82c -> 5ce3ab9b84a2, durable version-bound read-only advice receipts
+Revision ID: 5ce3ab9b84a2
+Revises: 426d852ce82c
+INFO  [alembic.runtime.migration] Running upgrade 5ce3ab9b84a2 -> a82d71f09c36, Immutable tenant policy revisions and complete historical evaluation inputs.
+INFO  [alembic.runtime.migration] Running upgrade a82d71f09c36 -> b9134d27c80f, Durable, tenant-scoped table import previews and idempotent confirmation receipts.
+INFO  [alembic.runtime.migration] Running upgrade b9134d27c80f -> d261a40ce712, Controlled pilot identities, one-use invitations and revocable sessions.
+INFO  [alembic.runtime.migration] Running upgrade d261a40ce712 -> e731bb62c905, Durable maintenance fence and permanent no-replay holds for restored work.

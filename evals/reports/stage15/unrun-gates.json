@@ -1,0 +1,32 @@
+{
+  "postgres": {
+    "status": "blocked",
+    "reason": "POSTGRES_TEST_CONFIGURATION_REQUIRED",
+    "fallback": false
+  },
+  "docker_compose": {
+    "status": "not_run",
+    "reason": "DOCKER_EXECUTABLE_UNAVAILABLE"
+  },
+  "real_erp": {
+    "status": "not_run",
+    "reason": "NO_AUTHORIZED_DISPOSABLE_SERVICE_AVAILABLE"
+  },
+  "remote_ci": {
+    "status": "not_run",
+    "reason": "LOCAL_INCREMENT_NOT_PUBLISHED"
+  },
+  "browser": {
+    "status": "blocked",
+    "reason": "CHROMIUM_UNIX_SOCKET_DENIED",
+    "native_demo_cases_collected": 22,
+    "pilot_cases": 9,
+    "case_execution_verified": false
+  },
+  "independent_review": {
+    "status": "incomplete",
+    "reason": "PLATFORM_REVIEW_INTERRUPTED",
+    "prior_findings_addressed": true,
+    "clean_review_claim": false
+  }
+}

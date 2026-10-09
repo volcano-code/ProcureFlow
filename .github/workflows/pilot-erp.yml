@@ -1,0 +1,92 @@
+name: native-pilot-real-erpnext-validation
+on:
+  push:
+    branches: [main, 'develop/**']
+    paths: ['services/api/**', 'apps/web/**', 'scripts/**', 'integrations/erpnext/**', 'compose.erp-sandbox.yaml', '.github/workflows/pilot-erp.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-pilot-real-erpnext:
+    # A separate fresh lab. Never mix these two drafts into the strict eight-case gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        business-database: [sqlite, postgresql]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-only
+          POSTGRES_DB: procureflow_pilot_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procureflow_pilot_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      COMPOSE_PROJECT_NAME: pf-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.business-database }}
+      PF_TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-disposable-only@127.0.0.1:5432/procureflow_pilot_test
+      PF_ALLOW_DATABASE_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive exact tracked source
+        run: git archive --format=zip --output="${RUNNER_TEMP}/procureflow-pilot-source.zip" "${GITHUB_SHA}"
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-postgres.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Frozen frontend install
+        working-directory: apps/web
+        run: npm ci
+      - name: Create new isolated credentials without printing
+        run: python scripts/init_erp_sandbox.py --create-ephemeral
+      - name: Start fresh disposable ERPNext and MariaDB
+        run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml up -d
+      - name: Seed restricted synthetic integration identity
+        run: |
+          set -o pipefail
+          mkdir -p evals/reports/ci/pilot-erp
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/seed.py | tee evals/reports/ci/pilot-erp/seed.json
+          mkdir -p .data
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp erp-backend:/tmp/pf-erp-sandbox-credentials.json .data/erp-sandbox.json
+          chmod 600 .data/erp-sandbox.json
+      - name: Native pilot browser sessions to independent Worker and real ERP drafts
+        id: roundtrip
+        run: python scripts/verify_pilot_combined.py --ephemeral-test --business-database ${{ matrix.business-database }} --output evals/reports/ci/pilot-erp/roundtrip.json
+      - name: Independently audit actual ERP database
+        if: always() && steps.roundtrip.outcome == 'success'
+        run: |
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp evals/reports/ci/pilot-erp/roundtrip.json erp-backend:/tmp/pf-pilot-result.json
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/pilot_audit.py > evals/reports/ci/pilot-erp/database-audit.json
+      - name: Record actual ERP image identity
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/pilot-erp
+          docker image inspect frappe/erpnext:v16.36.0 --format '{{json .RepoDigests}}' > evals/reports/ci/pilot-erp/image-digests.json
+      - name: Require complete pilot evidence without static or mock fallback
+        if: always()
+        run: python scripts/check_pilot_combined_evidence.py --business-database ${{ matrix.business-database }} --directory evals/reports/ci/pilot-erp > evals/reports/ci/pilot-erp/acceptance.json
+      - name: Check immutable frontend configuration
+        if: always()
+        run: git diff --exit-code -- apps/web/tsconfig.json apps/web/package-lock.json apps/web/package.json
+      - name: Destroy only this disposable lab
+        if: always()
+        run: docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml down -v --remove-orphans
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-pilot-real-erpnext-${{ matrix.business-database }}-records
+          path: evals/reports/ci/pilot-erp
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-pilot-${{ matrix.business-database }}-source
+          path: ${{ runner.temp }}/procureflow-pilot-source.zip
+          if-no-files-found: error
+          retention-days: 7

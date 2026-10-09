@@ -1,0 +1,86 @@
+{
+  "increment": "preview-retention-and-paired-recovery",
+  "base_commit": "7aa118208ad52a405c344b6178477c13c5aaa175",
+  "publication": "local-only; no push, PR edit, merge or deployment",
+  "source_fingerprint": "8f4690abc038ab48b386951a840208831f71b7785cd7cc2e9ffa949a64b6da6b",
+  "schema_heads": [
+    "e731bb62c905"
+  ],
+  "core": {
+    "status": "passed",
+    "command": "python scripts/test.py -q -m 'not postgres and not browser'",
+    "junit": {
+      "tests": 1733,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "deselected": 15,
+    "source": "core-acceptance.xml"
+  },
+  "focused": {
+    "status": "passed",
+    "tests": 82,
+    "deselected_postgres": 2,
+    "source": "focused-final.xml"
+  },
+  "frontend_units": {
+    "status": "passed",
+    "tests": 43
+  },
+  "frontend_real_http": {
+    "status": "passed",
+    "tests": 5
+  },
+  "native": {
+    "typecheck": "passed",
+    "build": "passed",
+    "browser": "blocked",
+    "reason": "CHROMIUM_UNIX_SOCKET_DENIED",
+    "demo_cases_collected": 22,
+    "pilot_cases": 9,
+    "synthetic_socket_escalation_retry": "same verified blocker"
+  },
+  "synthetic_recovery": {
+    "status": "passed",
+    "source": "recovery-acceptance-final.json",
+    "credentials_revoked": true,
+    "paired_documents_verified": 2,
+    "old_ledger_preserved": true,
+    "held_operation_read_only_verification": true,
+    "automatic_replay": false
+  },
+  "fixture_evaluations": {
+    "offline_model_protocol": "passed",
+    "procurement_development_cases": 10,
+    "live_model_quality_claim": false
+  },
+  "contracts": "passed",
+  "diff_check": "passed",
+  "postgres": "blocked: no disposable PostgreSQL configuration/server",
+  "docker_compose": "not run: docker absent",
+  "real_erp": "not run: no authorized disposable service available",
+  "remote_ci": "not run: increment not published",
+  "independent_review": {
+    "status": "incomplete",
+    "reason": "platform interruption",
+    "received_findings_addressed_and_regressed": true,
+    "clean_review_claim": false
+  },
+  "earlier_attempts": {
+    "core.xml": "1677 passed, 2 browser launch errors; preliminary source",
+    "core-final.xml": "1730 passed, 1 native gate inventory mismatch, fixed",
+    "core-stable.xml": "123 passed, 1 same inventory mismatch, fixed",
+    "core-stable-final.xml": "1732 passed; superseded by final 1733-case run",
+    "native": "initial dependency symlink build failure fixed by isolated local dependency copy; later build passed"
+  },
+  "limits": [
+    "No real user data backup/restore executed",
+    "Archive retains all source bytes; it does not reclaim disk",
+    "Version1 restore requires exactly matching source/schema and a new target",
+    "Existing unmanaged demo SQLite adoption is outside scope",
+    "Restored non-completed ERP operations are held permanently; no release/replay command",
+    "Backups are not encrypted or signed; operators must protect them",
+    "Independent review did not complete; local passes are not production acceptance"
+  ]
+}

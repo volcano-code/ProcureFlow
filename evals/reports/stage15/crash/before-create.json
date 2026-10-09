@@ -1,0 +1,10 @@
+{
+  "point": "before-create",
+  "signal": "SIGKILL",
+  "child_returncode": -9,
+  "lease_expiry_injected": true,
+  "status": "NEEDS_HUMAN",
+  "mock_draft_count": 0,
+  "live_erp": false,
+  "attempts": 2
+}

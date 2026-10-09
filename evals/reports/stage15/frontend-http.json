@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "node_exit_code": 0,
+  "scope": "shared Next frontend fetch transport + real local HTTP; not browser/React E2E",
+  "mock_draft_count": 2,
+  "live_erp": false,
+  "live_model": false,
+  "stdout": "✔ native frontend transport: evidence -> independent approval -> idempotent mock draft (709.54754ms)\n✔ native frontend transport: request modification invalidates approved snapshot (632.099091ms)\n✔ native frontend transport: authenticated real SSE can be read and cancelled (588.000359ms)\n✔ native frontend transport: ordinary CSV preview -> explicit map -> unconfirmed quote -> approved draft (150.135064ms)\n✔ native frontend transport: tenant policy publication invalidates bound approval and preserves history (639.583344ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2820.330104\n",
+  "stderr": ""
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "source-version-evidence-pointer",
+  "status": "unreleased-local-development",
+  "scope": "Baseline provenance and evidence locations. This is not a current-tree file checksum manifest or a release attestation.",
+  "baseline": {
+    "commit": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
+    "tree": "4a0a151a09afef085df55d2c284d5f291462370f",
+    "evidence": "docs/evidence/fc9750e-baseline.json"
+  },
+  "current_increment": {
+    "name": "multi-item-procurement",
+    "documentation": "docs/stage17-multi-item-procurement.md",
+    "verification": "Local Python 2662 passed (15 deselected), web unit82, typecheck/build/contracts, HTTP, offline fixtures and synthetic multi-item/recovery passed. Native browser blocked before assertions. Expanded nine-case real-ERP CI source is executable but actual ERP/PostgreSQL/containers and remote CI are unrun.",
+    "remote_ci": "not run for this local increment",
+    "published": false,
+    "merged": false,
+    "deployed": false,
+    "verification_evidence": "docs/evidence/stage17-local-verification.json"
+  },
+  "historical_manifest": {
+    "path": "docs/history/MANIFEST-0.1.0a2.json",
+    "release": "0.1.0a2",
+    "sha256": "bb7c42b9eb29b3514d28b0cf89abeac6ed96f9f11fb2d7f3b6fffd21d07196ca",
+    "preservation": "byte-identical to MANIFEST.json in the baseline Git tree; listed file hashes describe that historical a2 package only"
+  },
+  "version_note": "Package 0.1.0a2 strings are retained Alpha metadata, not current evidence. The baseline commit above is fixed provenance, not the current checkout identity. Record the final commit/tree externally when packaging a delivery; do not embed a self-referential current commit hash.",
+  "prior_increment_manifest": {
+    "path": "docs/history/MANIFEST-fc9750e.json",
+    "sha256": "7a4b3fffc31d6c9239d88ab088cc5bcb82f4732dd68da3bc4750acf75290976b",
+    "preservation": "Exact MANIFEST.json bytes from fc9750e baseline."
+  }
+}

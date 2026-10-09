@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "kind": "local-development-verification",
+  "baseline_commit": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
+  "baseline_tree": "4a0a151a09afef085df55d2c284d5f291462370f",
+  "environment": {
+    "python": "3.12.14",
+    "node": "24.19.0",
+    "business_db": "temporary SQLite",
+    "erp": "MockERP, mocked transports and an explicitly fake local HTTP ERP only"
+  },
+  "results": {
+    "python_regression": {
+      "tests": 2662,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "deselected": 15,
+      "command": "python scripts/test.py -q -m 'not postgres and not browser'",
+      "new_test_modules": {
+        "multi_item_procurement": 35,
+        "multi_item_imports": 51,
+        "multi_item_erp": 89,
+        "erp_multi_cost_audit": 639,
+        "erp_multi_item_acceptance": 66
+      }
+    },
+    "frontend_unit": {
+      "passed": 82,
+      "failed": 0,
+      "skipped": 0
+    },
+    "frontend_typecheck": "passed",
+    "frontend_production_build": "passed",
+    "contract_drift": "passed",
+    "http_smoke": "passed",
+    "frontend_http_tests": {
+      "passed": 5
+    },
+    "multi_item_mock_acceptance": "passed",
+    "paired_sqlite_recovery": "passed",
+    "offline_graph_fixture": "passed",
+    "frozen_10_case_procurement_fixture": "passed",
+    "native_browser": {
+      "status": "blocked",
+      "reason": "CHROMIUM_UNIX_SOCKET_DENIED",
+      "collected": 32,
+      "new_cases": 7,
+      "verified": false,
+      "screenshots": false
+    },
+    "expanded_erp_gate": {
+      "implemented": true,
+      "ci_selection": "Nine cases explicitly required on both SQLite and PostgreSQL jobs",
+      "offline_focused_tests_passed": 1353,
+      "actual_erp_executed": false,
+      "actual_mariadb_executed": false,
+      "postgresql_new_scenario_executed": false
+    }
+  },
+  "not_run": [
+    "current-increment real PostgreSQL",
+    "Compose/native containers",
+    "actual ERPNext/MariaDB multi-item scenario",
+    "real model quality/cost evaluation",
+    "independent security review",
+    "remote CI"
+  ],
+  "boundaries": {
+    "published": false,
+    "merged": false,
+    "deployed": false,
+    "real_user_data": false,
+    "production_writes": 0,
+    "automatic_replay_of_restored_operations": false,
+    "no_currency_or_uom_conversion": true,
+    "maximum_unique_skus": 20
+  },
+  "notes": [
+    "Test groups overlap; do not add their counts or interpret them as real procurement tasks.",
+    "Existing Starlette deprecation warning remains; it did not fail the gate.",
+    "Earlier intermediate runs exposed contract-schema expectations, an ERP error-check ordering regression, and missing new browser names in the exact container gate; these were corrected before this final aggregate.",
+    "The frontend/browser build was checked in this cloud workspace; browser launch was blocked before UI assertions.",
+    "Source commit/tree are recorded externally in the delivery manifest to avoid a self-referential repository manifest."
+  ],
+  "raw_evidence_location": "verification/ in accompanying delivery archive",
+  "files": {
+    "aggregate-final.log": {
+      "bytes": 3583,
+      "sha256": "ffdcc54d3e4f96c821539438da8eb0cc02433ffb72da61f7a28403cb05a09b12"
+    },
+    "aggregate-final.xml": {
+      "bytes": 4596778,
+      "sha256": "1840d181aff7c4d59cee982285004e646814c5cc719162fd535a5e1d47b56994"
+    },
+    "contracts.log": {
+      "bytes": 44,
+      "sha256": "52436c71922b5b2526343b014fb9ab09c3af6d45c3e96186757042ab040f820e"
+    },
+    "smoke-current.json": {
+      "bytes": 883,
+      "sha256": "c5cfcaffab5b073aa6c773d749451320ce6e1b4c31dfbe20a30593595235f9e3"
+    },
+    "smoke-current.log": {
+      "bytes": 884,
+      "sha256": "1058e8c15612ef00b491ef866b2f2334bfb2d611a92e1fefb3aa1f48a1c47d70"
+    },
+    "http-current.json": {
+      "bytes": 909,
+      "sha256": "0b8532acc6aeebc079b0c908aa052c86cbb9291f0d55ba74e9ebaac839c2bbea"
+    },
+    "http-current.log": {
+      "bytes": 655,
+      "sha256": "a846d0cb4412e2af4b829f80d13efeaf4301ad62be5f119912e62473850ba1d1"
+    },
+    "acceptance-current.json": {
+      "bytes": 469,
+      "sha256": "09df3991e44dd5d29b8f203e49bf8e7fd6c449e3288b3db9ff75ac347b4ed1d0"
+    },
+    "acceptance-current.log": {
+      "bytes": 437,
+      "sha256": "eacdf52f7b92ebc487dc01b61a64e15bb53db60c6876dafcb0d0f1d5ff4fcf27"
+    },
+    "recovery-current.json": {
+      "bytes": 2338,
+      "sha256": "2bb5a9821f326e0da964972d52eeb0980f8ca4aa9e035250e6bb8adf946c72e9"
+    },
+    "recovery-current.log": {
+      "bytes": 4768,
+      "sha256": "072669fe57ff2e140f640f3fd85527a23f89533e33d6b988aaec14a1639bbd67"
+    },
+    "model-fixture.json": {
+      "bytes": 1010,
+      "sha256": "05e359bdfb711bfa4bca6ee1404b07c98a928dfa0dc0797b2f1dcd76b683142c"
+    },
+    "model-fixture.log": {
+      "bytes": 1010,
+      "sha256": "05e359bdfb711bfa4bca6ee1404b07c98a928dfa0dc0797b2f1dcd76b683142c"
+    },
+    "procurement-fixture.json": {
+      "bytes": 10677,
+      "sha256": "94b98c31e60778d2a4fad6f747d4b248155a6fdf7307c2a67c9a44d37756960d"
+    },
+    "procurement-fixture.log": {
+      "bytes": 10677,
+      "sha256": "94b98c31e60778d2a4fad6f747d4b248155a6fdf7307c2a67c9a44d37756960d"
+    },
+    "frontend/browser-collection.log": {
+      "bytes": 3121,
+      "sha256": "0c08ef53224a8209ee8546fa59edaee26f621773ade960d7ad819b74d799da4f"
+    },
+    "frontend/build.log": {
+      "bytes": 642,
+      "sha256": "672fcbcd1eccf2b787c372624b3063b728cc316b2cd46caaa9d43a43912b3d91"
+    },
+    "frontend/native/api-server.log": {
+      "bytes": 474,
+      "sha256": "da2705d36a4a893622abb46b00bd92520e9748b00d1e41982359d6bb6e54ec25"
+    },
+    "frontend/native/next-browser.log": {
+      "bytes": 245481,
+      "sha256": "6756cbfe2dccb221804d8ff49d443342067446e875c31db049059a074d16570e"
+    },
+    "frontend/native/next-browser.xml": {
+      "bytes": 416187,
+      "sha256": "e84b8f10877a08042af9885c411f0d8eb24c5d2c6d16e701b8e5852ebb74cc63"
+    },
+    "frontend/native/next-build.log": {
+      "bytes": 640,
+      "sha256": "3d9e606cf3ad0b41063538ed75e0cfac2afcd9a523dd82576909cc3b3f073955"
+    },
+    "frontend/native/next-gate.json": {
+      "bytes": 476,
+      "sha256": "df1d2420526ab86ab3de351534dfb481a5301332589fce2eaeeb7c39d935378b"
+    },
+    "frontend/native/next-server.log": {
+      "bytes": 273,
+      "sha256": "dcbd9a156bb49584be70aa35aecc668cae9c4fc67d81cfe9cc22bdb65fa11c44"
+    },
+    "frontend/native/next-typecheck.log": {
+      "bytes": 158,
+      "sha256": "65550e0a88d558e30ce8ff27858a88e96793da315b8fff45693f09b24d621e7c"
+    },
+    "frontend/typecheck.log": {
+      "bytes": 158,
+      "sha256": "9abd8ca5534bd3253a9ba05290e1674ca4612b70cb9d1a200a61be6133bbff0d"
+    },
+    "frontend/unit.log": {
+      "bytes": 7586,
+      "sha256": "29eef5305c1e049a771edc8e97b835bd1a42116b465ea3b9bcc14a88bbfef8f1"
+    },
+    "frontend/verification.json": {
+      "bytes": 5286,
+      "sha256": "d98b9252e88919446e60456fa660913f0c67e24195e50d4d483f19fee477f8b9"
+    },
+    "erp/final-source-to-mock-tests.txt": {
+      "bytes": 124,
+      "sha256": "108342e76078268bde1a0c753594f1440c8f5d1720275e1209f99cffc0e111f3"
+    },
+    "erp/offline-expanded-gate-tests.txt": {
+      "bytes": 1553,
+      "sha256": "a96541aed5b599c23287350d9e2c375c61263fe98f4d5d240ad1cf07b7fbacf2"
+    },
+    "erp/source-to-mock-approval.txt": {
+      "bytes": 124,
+      "sha256": "b2a00899ea715f84e9d1cd754c94994bb28e20d305a06b4adc140b396c8e1371"
+    },
+    "erp/verification.json": {
+      "bytes": 964,
+      "sha256": "7fd037ea5a9b9c2a190c4785bb71b8fee7ebfd4e412974a8b72b18df48c8be6e"
+    }
+  }
+}

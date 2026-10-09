@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "suite_id": "procurement-development-v1",
+  "case_count": 10,
+  "files": {
+    "development-v1.json": "1ea3cc2edc5de1aa5963e837481b0b7ae4902111489b999a1eaebbcaa6d5141b",
+    "replays-v1.json": "e28718a9c12cf7e4867ab2bc5d52db30be89416fc8c3434ab911fa550dd76ef0"
+  }
+}

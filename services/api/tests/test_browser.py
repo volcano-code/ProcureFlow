@@ -12,6 +12,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 
+
+def expect(locator):
+    """Use Playwright locator assertions without weakening the page CSP."""
+    return pytest.importorskip("playwright.sync_api").expect(locator)
+
 @pytest.fixture
 def live_server(tmp_path):
     with socket.socket() as sock:
@@ -75,7 +80,7 @@ def prepare(page, url):
             pytest.skip('ENVIRONMENT_BLOCKED: Chromium policy prohibits navigation to the local test server; browser E2E NOT verified')
         raise
     page.locator('#load-demo').click()
-    page.wait_for_function("document.querySelectorAll('#quote-body tr').length === 3")
+    expect(page.locator("#quote-body tr")).to_have_count(3)
     assert '24800.00' in page.locator('#quote-body').inner_text()
     assert '24200.00' in page.locator('#quote-body').inner_text()
     assert '未知' in page.locator('#quote-body').inner_text()
@@ -83,9 +88,9 @@ def prepare(page, url):
         page.locator('[data-confirm]').nth(index).click()
         page.locator('#ack-confirm').click()
         page.locator('#modal').wait_for(state='hidden')
-        page.wait_for_function(f"document.querySelectorAll('[data-confirm]')[{index}].disabled")
+        expect(page.locator("[data-confirm]").nth(index)).to_be_disabled()
     page.locator('#analyze').click()
-    page.wait_for_function("document.querySelector('#proposal-body').textContent.includes('24200.00')")
+    expect(page.locator("#proposal-body")).to_contain_text("24200.00")
 
 
 @pytest.mark.browser
@@ -93,20 +98,20 @@ def test_browser_end_to_end_with_evidence_and_persistence(live_server, browser_p
     page = browser_page
     prepare(page, live_server)
     page.locator('#quote-body tr').filter(has_text='SUP-C').locator('[data-field="unit_price"]').click()
-    page.wait_for_function("document.querySelector('#evidence-body').textContent.includes('第 1 页')")
+    expect(page.locator("#evidence-body")).to_contain_text("第 1 页")
     assert '1180.00' in page.locator('#evidence-body').inner_text()
     page.locator('#role').select_option('demo-approver')
     page.locator('#approve').click()
-    page.wait_for_function("document.querySelector('#request-status').textContent.includes('已批准')")
+    expect(page.locator("#request-status")).to_contain_text("已批准")
     page.locator('#role').select_option('demo-buyer')
     page.locator('#execute').click()
-    page.wait_for_function("document.querySelector('#proposal-body').textContent.includes('MOCK-SQ-')")
+    expect(page.locator("#proposal-body")).to_contain_text("MOCK-SQ-")
     assert '草稿已创建' in page.locator('#request-status').inner_text()
     assert 'COMPLETED' in page.locator('#proposal-body').inner_text()
     page.reload()
-    page.wait_for_function("document.querySelector('#proposal-body').textContent.includes('MOCK-SQ-')")
+    expect(page.locator("#proposal-body")).to_contain_text("MOCK-SQ-")
     page.locator('#quote-body tr').filter(has_text='SUP-C').locator('[data-field="unit_price"]').click()
-    page.wait_for_function("document.querySelector('#evidence-body').textContent.includes('第 1 页')")
+    expect(page.locator("#evidence-body")).to_contain_text("第 1 页")
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     report_dir = os.getenv('PF_SCREENSHOT_DIR')
     if report_dir:
@@ -125,12 +130,12 @@ def test_browser_edit_after_approval_invalidates_snapshot(live_server, browser_p
     prepare(page, live_server)
     page.locator('#role').select_option('demo-approver')
     page.locator('#approve').click()
-    page.wait_for_function("document.querySelector('#request-status').textContent.includes('已批准')")
+    expect(page.locator("#request-status")).to_contain_text("已批准")
     page.locator('#role').select_option('demo-buyer')
     page.locator('#edit-request').click()
     page.locator('#request-form input[name="quantity"]').fill('21')
     page.locator('#request-form button[type="submit"]').click()
     page.locator('#modal').wait_for(state='hidden')
-    page.wait_for_function("document.querySelector('#request-status').textContent.includes('审批已失效')")
+    expect(page.locator("#request-status")).to_contain_text("审批已失效")
     assert page.locator('#execute').count() == 0
     assert '21 EA' in page.locator('#request-meta').inner_text()

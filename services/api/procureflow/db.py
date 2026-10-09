@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, text
+from pathlib import Path
+from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
+from .database_config import normalize_database_url
+from sqlalchemy import JSON, Boolean, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.pool import NullPool
 
 
 def now() -> str:
@@ -17,6 +23,27 @@ def uid(prefix="") -> str:
 
 class Base(DeclarativeBase):
     pass
+
+
+class SystemStateRow(Base):
+    """Durable global maintenance/recovery fence, never an HTTP control."""
+    __tablename__ = "system_state"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    restore_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    required_auth_mode: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class RecoveryHoldRow(Base):
+    """Restored operations cannot be replayed, even after new work is enabled."""
+    __tablename__ = "recovery_holds"
+    operation_id: Mapped[str] = mapped_column(ForeignKey("external_operations.id"), primary_key=True)
+    restore_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
 
 
 class RequestRow(Base):
@@ -41,6 +68,27 @@ class DocumentRow(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     storage_key: Mapped[str] = mapped_column(String(100))
     fragments: Mapped[list] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class TableImportRow(Base):
+    """Durable bounded upload preview. It is not a quote or confirmation."""
+    __tablename__ = "table_imports"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "sha256", name="uq_table_import_request_hash"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(160))
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_key: Mapped[str] = mapped_column(String(100))
+    table: Mapped[dict] = mapped_column(JSON)
+    selection: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    parsed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    request_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="OPEN")
+    quote_id: Mapped[str | None] = mapped_column(ForeignKey("quotes.id"), nullable=True)
+    expires_at: Mapped[str] = mapped_column(String(40))
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
@@ -72,7 +120,9 @@ class ApprovalRow(Base):
     request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     approver_id: Mapped[str] = mapped_column(String(80))
+    approver_auth_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     snapshot_hash: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(24))
     note: Mapped[str] = mapped_column(Text, default="")
     expires_at: Mapped[str] = mapped_column(String(40))
@@ -86,6 +136,8 @@ class OperationRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"))
     approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"))
+    initiator_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    initiator_auth_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     snapshot_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
@@ -115,10 +167,133 @@ class EventRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+class AdviceRunRow(Base):
+    """A durable advisory receipt, never an approval or an execution command."""
+    __tablename__ = "advice_runs"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key",
+                                      name="uq_advice_request_key"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    idempotency_key: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_until: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class TenantPolicyRow(Base):
+    """Tenant serialization anchor. Lock before any request aggregate lock."""
+    __tablename__ = "tenant_policies"
+    tenant_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PilotTenantRow(Base):
+    __tablename__ = "pilot_tenants"
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenant_policies.tenant_id"), primary_key=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotMembershipRow(Base):
+    """User identities are scoped to a tenant, with one controlled role."""
+    __tablename__ = "pilot_memberships"
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("pilot_tenants.tenant_id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    role: Mapped[str] = mapped_column(String(24), nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotInviteRow(Base):
+    __tablename__ = "pilot_invites"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "user_id"],
+        ["pilot_memberships.tenant_id", "pilot_memberships.user_id"]),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    user_id: Mapped[str] = mapped_column(String(80))
+    credential_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    auth_version: Mapped[str] = mapped_column(String(80))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    consumed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    revoked_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PilotSessionRow(Base):
+    __tablename__ = "pilot_sessions"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "user_id"],
+        ["pilot_memberships.tenant_id", "pilot_memberships.user_id"]),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    user_id: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    auth_version: Mapped[str] = mapped_column(String(80))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    revoked_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class PolicyVersionRow(Base):
+    __tablename__ = "policy_versions"
+    __table_args__ = (UniqueConstraint("tenant_id", "version", name="uq_tenant_policy_version"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenant_policies.tenant_id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON)
+    policy_hash: Mapped[str] = mapped_column(String(64))
+    effective_at: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    created_by: Mapped[str] = mapped_column(String(80))
+    reason: Mapped[str] = mapped_column(Text)
+
+
+class EvaluationRow(Base):
+    """Append-only comparison receipt including inputs and the prepared proposal."""
+    __tablename__ = "evaluations"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(80))
+    request_version: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+def _immutable_receipt(*_):
+    raise ValueError("IMMUTABLE_HISTORY")
+
+
+for _model in (PolicyVersionRow, EvaluationRow):
+    event.listen(_model, "before_update", _immutable_receipt)
+    event.listen(_model, "before_delete", _immutable_receipt)
+
+
 class Database:
     def __init__(self, url: str, create_schema: bool = False):
-        self.sqlite = url.startswith("sqlite")
-        self.engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 20} if self.sqlite else {}, pool_pre_ping=True)
+        url = normalize_database_url(url)
+        self.sqlite = make_url(url).get_backend_name() == "sqlite"
+        options = {"check_same_thread": False, "timeout": 20} if self.sqlite else {"connect_timeout": 10}
+        engine_options = {} if self.sqlite else {"isolation_level": "READ COMMITTED"}
+        self.engine = create_engine(url, connect_args=options, pool_pre_ping=True,
+                                    hide_parameters=True, **engine_options)
+        # Long-lived activity fences must not consume the business pool and
+        # deadlock concurrent callers awaiting their actual SQL connection.
+        self.fence_engine = None if self.sqlite else create_engine(url,
+            connect_args=options, hide_parameters=True, poolclass=NullPool)
         if self.sqlite:
             @event.listens_for(self.engine, "connect")
             def sqlite_settings(connection, _):
@@ -126,16 +301,117 @@ class Database:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.execute("PRAGMA busy_timeout=20000")
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
+        self._activity_depth = ContextVar("procureflow_activity_" + uid(), default=0)
+        self._exclusive_activity = ContextVar("procureflow_exclusive_" + uid(), default=False)
         if create_schema:
+            if not self.sqlite:
+                raise ValueError("POSTGRES_REQUIRES_ALEMBIC_MIGRATIONS")
             Base.metadata.create_all(self.engine)
+            with self.engine.begin() as connection:
+                if connection.execute(text("SELECT id FROM system_state WHERE id=1")).first() is None:
+                    connection.execute(SystemStateRow.__table__.insert().values(id=1, state="ACTIVE", generation=1,
+                        reason="initial", restore_id=None, required_auth_mode=None, updated_at=now()))
+
+    def state(self):
+        from .errors import DomainError
+        with self.engine.connect() as connection:
+            row = connection.execute(SystemStateRow.__table__.select().where(SystemStateRow.id == 1)).mappings().first()
+        if row is None or row["state"] not in {"ACTIVE", "PAUSED", "RECOVERY"}:
+            raise DomainError("MAINTENANCE_STATE_INVALID", "Operator maintenance state requires review", 503)
+        return dict(row)
+
+    def assert_writable(self):
+        from .errors import DomainError
+        if self.state()["state"] != "ACTIVE":
+            raise DomainError("WRITES_PAUSED", "Writes are paused for operator maintenance or recovery review", 503)
 
     @contextmanager
-    def transaction(self, write=False):
+    def activity(self, write=False, exclusive=False):
+        """Cross-process fence covers SQL, source files and full outbound calls.
+
+        SQLite uses an adjacent POSIX lock; PostgreSQL uses a schema-scoped
+        advisory transaction lock. Operators must stop old, pre-fence binaries
+        and any direct database/file writers before relying on this protocol.
+        """
+        from .maintenance import activity_lock
+        if exclusive and self._activity_depth.get() and not self._exclusive_activity.get():
+            raise RuntimeError("MAINTENANCE_LOCK_UPGRADE_FORBIDDEN")
+        outer = not self._activity_depth.get()
+        with activity_lock(self, exclusive=exclusive) if outer else nullcontext():
+            depth = self._activity_depth.set(self._activity_depth.get() + 1)
+            mode = self._exclusive_activity.set(exclusive or self._exclusive_activity.get())
+            try:
+                if write:
+                    self.assert_writable()
+                yield
+            finally:
+                self._exclusive_activity.reset(mode)
+                self._activity_depth.reset(depth)
+
+    @contextmanager
+    def maintenance(self):
+        """Snapshot only an explicitly paused DB, with no active mutation/I/O."""
+        from .errors import DomainError
+        with self.activity(exclusive=True):
+            if self.state()["state"] not in {"PAUSED", "RECOVERY"}:
+                raise DomainError("MAINTENANCE_PAUSE_REQUIRED", "Pause writes before creating a backup", 409)
+            with self.operator_transaction() as session:
+                yield session
+
+    @contextmanager
+    def operator_transaction(self):
+        """Offline administrative use only; never accept this flag over HTTP."""
+        with self._transaction(write=True, operator=True) as session:
+            yield session
+
+    def check_ready(self, require_migrations: bool = True) -> dict:
+        """Read-only connection + table + migration check; never performs DDL."""
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        with self.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            if not set(Base.metadata.tables) <= set(inspect(connection).get_table_names()):
+                raise RuntimeError("DATABASE_SCHEMA_MISSING")
+            if require_migrations:
+                current = set(MigrationContext.configure(connection).get_current_heads())
+                scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                if current != set(scripts.get_heads()):
+                    raise RuntimeError("DATABASE_MIGRATION_REQUIRED")
+        return {"status": "ok", "database": "sqlite" if self.sqlite else "postgresql",
+                "schema": "current" if require_migrations else "local-demo"}
+
+    @contextmanager
+    def transaction(self, write=False, consistent=False):
+        with self._transaction(write=write, consistent=consistent) as session:
+            yield session
+
+    @contextmanager
+    def _transaction(self, write=False, operator=False, consistent=False):
+        with self.activity(write=write and not operator) if write or consistent else nullcontext():
+            with self._session_transaction(write=write or consistent, read_only=not write) as session:
+                yield session
+
+    @contextmanager
+    def _session_transaction(self, write=False, read_only=False):
         with self.sessions() as session:
+            if read_only:
+                from .errors import DomainError
+                @event.listens_for(session, "before_flush")
+                def deny_flush(current, *_):
+                    if current.new or current.deleted or any(current.is_modified(row) for row in current.dirty):
+                        raise DomainError("READ_ONLY_TRANSACTION", "This evidence transaction cannot change stored data", 503)
+                @event.listens_for(session, "do_orm_execute")
+                def deny_dml(execution):
+                    if execution.is_insert or execution.is_update or execution.is_delete:
+                        raise DomainError("READ_ONLY_TRANSACTION", "This evidence transaction cannot change stored data", 503)
             try:
                 if write and self.sqlite:
                     # Serializes local demo writes, including concurrent approvals/dispatch.
                     session.execute(text("BEGIN IMMEDIATE"))
+                if not self.sqlite:
+                    # Bound SQL waiting; do not retry business writes automatically.
+                    session.execute(text("SELECT set_config('lock_timeout', '10s', true)"))
+                    session.execute(text("SELECT set_config('statement_timeout', '30s', true)"))
                 yield session
                 session.commit()
             except Exception:

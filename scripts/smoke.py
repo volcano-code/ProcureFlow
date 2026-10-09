@@ -87,8 +87,32 @@ def run() -> dict:
                 remote_id = final['remote_id']
                 assert remote_id.startswith('MOCK-SQ-')
                 steps.extend(['separate-worker-process', 'second-worker-drain-no-repeat'])
+                policy_before = call('GET', '/policy')
+                other_policy = call('GET', '/policy', role='demo-other-tenant')
+                saved_evaluation = call('GET', f'/requests/{rid}/evaluations')[0]
+                current_request = call('GET', f'/requests/{rid}')
+                saved_advice = call('POST', f'/requests/{rid}/advice-runs', status=201, json={
+                    'expected_version': current_request['version'], 'idempotency_key': 'smoke_policy_restart'})
+                revised_policy = call('POST', '/policy/versions', role='demo-approver', status=201, json={
+                    'expected_version': policy_before['latest_version'], 'budget_cap': '20000.00',
+                    'max_delivery_days': 7, 'minimum_valid_quotes': 2,
+                    'reason': 'Verify policy and historical inputs survive process restart'})
                 stop(server)
                 server = start()
+                assert call('GET', '/policy')['policy_hash'] == revised_policy['policy_hash']
+                assert call('GET', '/policy', role='demo-other-tenant') == other_policy
+                policy_history = call('GET', '/policy/versions')
+                assert [p['version'] for p in policy_history] == [2, 1]
+                old_evaluation = call('GET', f'/requests/{rid}/evaluations')[0]
+                assert old_evaluation['input_snapshot'] == saved_evaluation['input_snapshot']
+                assert old_evaluation['result'] == saved_evaluation['result'] and not old_evaluation['current']
+                old_approval = call('GET', f'/requests/{rid}/approvals')[0]
+                assert old_approval['snapshot'] == proposal and old_approval['status'] == 'STALE'
+                old_advice = call('GET', f"/advice-runs/{saved_advice['id']}")
+                assert old_advice['input_snapshot'] == saved_advice['input_snapshot'] and not old_advice['current']
+                assert old_advice['status'] == 'PENDING' and old_advice['output'] is None
+                steps.extend(['published-policy-and-tenant-isolation-survive-restart',
+                              'immutable-evaluation-approval-advice-inputs-survive-restart'])
                 restored = call('GET', f'/requests/{rid}')
                 assert restored['status'] == 'ERP_CREATED'
                 replay = call('POST', f'/requests/{rid}/execute', status=202, json=snapshot)

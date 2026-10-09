@@ -59,7 +59,8 @@ def main(argv=None) -> int:
                 with tempfile.TemporaryDirectory(prefix='pf-preflight-') as tmp:
                     settings = Settings(data_dir=Path(tmp), database_url='sqlite:///:memory:')
                     client = ERPNextClient(settings.erp_url, settings.erp_api_key, settings.erp_api_secret,
-                                           settings.erp_company, allow_writes=False)
+                                           settings.erp_company, allow_writes=False,
+                                           tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
                     try:
                         report['erp_probe_attempted'] = True
                         report['erp'] = client.preflight()

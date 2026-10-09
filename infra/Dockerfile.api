@@ -1,8 +1,11 @@
-# Local demo packaging only. Image build has NOT been validated in the authoring environment.
+# Local demo image. PostgreSQL is optional; acceptance is recorded by the Compose CI gate.
 FROM python:3.13-slim
 WORKDIR /app
+ARG WITH_POSTGRES=false
 COPY services/api/requirements.lock /tmp/requirements.lock
+COPY services/api/requirements-postgres.txt /tmp/requirements-postgres.txt
 RUN python -m pip install --no-cache-dir -r /tmp/requirements.lock \
+ && if [ "$WITH_POSTGRES" = "true" ]; then python -m pip install --no-cache-dir -r /tmp/requirements-postgres.txt; fi \
  && useradd --uid 10001 --create-home appuser \
  && mkdir -p /data && chown appuser:appuser /data
 COPY services/api /app/services/api
