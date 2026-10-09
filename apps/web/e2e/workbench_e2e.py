@@ -1169,7 +1169,14 @@ def test_native_multi_item_request_line_edit_stales_approval_and_preserves_snaps
     expect(form).to_have_count(0)
     expect(page.get_by_test_id('request-status')).to_have_text('审批已失效')
     expect(page.get_by_test_id('request-lines')).to_contain_text('CABLE-02 · 4 EA')
-    expect(page.get_by_test_id('proposal-stale')).to_be_visible()
+    # Request edits clear the active proposal; only the immutable approval
+    # history retains the old snapshot. Policy changes may retain a stale
+    # proposal, but a request edit must not leave approval controls attached.
+    expect(page.get_by_test_id('proposal-line-details')).to_have_count(0)
+    expect(page.get_by_test_id('proposal-body')).to_contain_text('需要重新生成和审批')
+    current=page.request.get(request_url,headers={'Authorization':'Bearer demo-buyer'}).json()
+    assert current['proposal'] is None and current['proposal_current'] is False
+    assert current['lines'][1]['quantity']=='4'
     expect(page.get_by_test_id('execute')).to_have_count(0)
     page.get_by_test_id('approval-history').locator('summary').first.click()
     expect(page.get_by_test_id('approval-current').first).to_have_text('已失效，仅供审计')
@@ -1178,7 +1185,9 @@ def test_native_multi_item_request_line_edit_stales_approval_and_preserves_snaps
     assert history[0]['snapshot_hash']==before['proposal']['snapshot_hash']
     assert history[0]['snapshot']['request']['lines'][1]['quantity']=='3'
     page.get_by_label('切换演示身份').select_option('demo-approver')
-    expect(page.get_by_test_id('approve')).to_be_disabled()
+    expect(page.get_by_test_id('identity')).to_have_text('approver')
+    expect(page.get_by_test_id('approve')).to_have_count(0)
+    expect(page.get_by_test_id('reject')).to_have_count(0)
 
 
 def test_native_multi_item_role_cancel_back_and_mobile_dialog_guards(page):

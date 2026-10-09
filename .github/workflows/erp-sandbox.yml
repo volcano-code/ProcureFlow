@@ -2,7 +2,8 @@ name: isolated-real-erpnext-validation
 on:
   push:
     branches: [main, 'develop/**']
-    paths: ['services/api/**', 'scripts/**', 'integrations/erpnext/**', 'compose.erp-sandbox.yaml', '.github/workflows/erp-sandbox.yml']
+    # Native request/import changes must retain the nine-scenario joint ERP gate.
+    paths: ['services/api/**', 'apps/web/**', 'scripts/**', 'integrations/erpnext/**', 'compose.erp-sandbox.yaml', '.github/workflows/erp-sandbox.yml']
   workflow_dispatch:
 permissions:
   contents: read

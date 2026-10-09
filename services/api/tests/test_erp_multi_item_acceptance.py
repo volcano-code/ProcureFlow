@@ -141,6 +141,8 @@ def test_multi_source_rows_are_complete_unique_and_exact(reports, change):
 def test_workflow_explicitly_requires_multi_selection_in_runner_and_checker():
     source = (ROOT / '.github/workflows/erp-sandbox.yml').read_text()
     assert 'business-database: [sqlite, postgresql]' in source
+    paths, = [line for line in source.splitlines() if line.lstrip().startswith('paths:')]
+    assert "'apps/web/**'" in paths  # Final-head UI fixes also need both real ERP matrices.
     for script in ('verify_erp_sandbox.py', 'check_erp_sandbox_evidence.py'):
         command, = [line for line in source.splitlines() if f'python scripts/{script} ' in line]
         assert '--include-multi-item' in command

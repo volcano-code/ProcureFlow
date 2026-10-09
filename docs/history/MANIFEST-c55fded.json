@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "source-version-evidence-pointer",
-  "status": "published-development-pr",
+  "status": "unreleased-local-development",
   "scope": "Baseline provenance and evidence locations. This is not a current-tree file checksum manifest or a release attestation.",
   "baseline": {
     "commit": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
@@ -11,15 +11,12 @@
   "current_increment": {
     "name": "multi-item-procurement",
     "documentation": "docs/stage17-multi-item-procurement.md",
-    "verification": "Original local verification remains immutable in the local evidence index. Publication, narrow native-test correction and exact-head CI evidence are described separately.",
-    "remote_ci": "Complete exact-head Actions runs and externally packaged original artifacts are required; first-head results are historical, not final acceptance.",
-    "published": true,
+    "verification": "Local Python 2662 passed (15 deselected), web unit82, typecheck/build/contracts, HTTP, offline fixtures and synthetic multi-item/recovery passed. Native browser blocked before assertions. Expanded nine-case real-ERP CI source is executable but actual ERP/PostgreSQL/containers and remote CI are unrun.",
+    "remote_ci": "not run for this local increment",
+    "published": false,
     "merged": false,
     "deployed": false,
-    "verification_evidence": "docs/evidence/stage17-local-verification.json",
-    "publication_documentation": "docs/stage17-publication.md",
-    "first_published_commit": "48af996efbd91072ef59ed4a5bd55843388a64b4",
-    "first_published_tree": "672fc3bd140b64eef9d455b01d708b7736523f3a"
+    "verification_evidence": "docs/evidence/stage17-local-verification.json"
   },
   "historical_manifest": {
     "path": "docs/history/MANIFEST-0.1.0a2.json",
@@ -32,10 +29,5 @@
     "path": "docs/history/MANIFEST-fc9750e.json",
     "sha256": "7a4b3fffc31d6c9239d88ab088cc5bcb82f4732dd68da3bc4750acf75290976b",
     "preservation": "Exact MANIFEST.json bytes from fc9750e baseline."
-  },
-  "local_increment_manifest": {
-    "path": "docs/history/MANIFEST-c55fded.json",
-    "sha256": "4bd1ecf6dc90038cb0e4c89be7251e752c0b2521bdc9859643ee0b3390fd7cd2",
-    "preservation": "Exact MANIFEST.json bytes from original local c55fded, published without source changes as 48af996."
   }
 }

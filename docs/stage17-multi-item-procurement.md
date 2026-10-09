@@ -1,11 +1,17 @@
 # Stage 17: bounded multi-item procurement
 
-This is an **unpublished local development increment** from commit
+This is the **historical local-development record**, prepared before publication,
+from commit
 `fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf`, tree
 `4a0a151a09afef085df55d2c284d5f291462370f`. Read-only GitHub inspection confirmed
 that PR #1 still had that head before work began. The earlier source and evidence
 remain immutable. No push, PR edit, merge, deployment, production access, real
-model call is part of this increment. Independent security review remains incomplete.
+model call was part of that local phase. Independent security review remains incomplete.
+
+The exact local source was subsequently published in PR #1 as `48af996`, with
+the same tree as local `c55fded`. The statements below about unrun remote gates
+describe that earlier local phase, not current CI status. See the
+[publication follow-up](stage17-publication.md) and exact-head delivery evidence.
 
 ## Supported purchase
 

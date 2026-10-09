@@ -6,8 +6,8 @@
 - 逐行 Decimal 税/折扣/舍入与整单运费，完整 SKU/数量覆盖与预算/交期政策共同约束
 - 完整报价集合审批绑定、任意行变更失效、持久化幂等、不确定结果只读核对和恢复 hold 继续生效
 - 原生 Next 多行编辑/来源/成本/审批展示，保留旧单行 API 和静态 demo
-- ERPNext 多行费用映射限定零税率/零折扣/同税价模式/整数 EA；仅合成 transport 验证，未运行实时 ERP
-- 本地验收与限制见 [阶段十七](docs/stage17-multi-item-procurement.md)；尚未发布、合并或部署
+- ERPNext 多行费用映射限定零税率/零折扣/同税价模式/整数 EA；已公开源码并启动合成隔离环境的真实 ERP 验收
+- 本地验收与限制见 [阶段十七](docs/stage17-multi-item-procurement.md)，公开后的修正和证据入口见 [验收续记](docs/stage17-publication.md)；尚未合并或部署
 
 
 ## 待发布：恢复后只读诊断与对账

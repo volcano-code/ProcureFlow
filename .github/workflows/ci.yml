@@ -58,7 +58,7 @@ jobs:
         run: npm ci
       - name: Assert install did not rewrite the lock
         run: git diff --exit-code -- apps/web/package-lock.json apps/web/package.json
-      # Runs actual tsc/build/production Next + 4 native browser tests;
+      # Runs actual tsc/build/production Next + 32 native browser tests;
       # no substitution of apps/demo, no skipping missing prerequisites.
       - run: python scripts/verify_next.py --output evals/reports/ci/next-gate
       - name: Native pilot session boundary in real browser
