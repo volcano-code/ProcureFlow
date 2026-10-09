@@ -167,7 +167,7 @@ def test_failed_model_node_is_never_retried(failure):
             agent.run(lambda *_: pytest.fail("Unexpected tool"), set(), observer=events.append)
     finally:
         agent.client.close()
-    assert error.value.code == "MODEL_CALL_FAILED"
+    assert error.value.code == ("MODEL_TIMEOUT" if failure == "timeout" else "MODEL_CALL_FAILED")
     assert len(calls) == 1 and graph_nodes(events) == ["model"]
     assert "SYNTHETIC_UNSAFE_PROVIDER_ERROR" not in str(error.value)
     assert_no_private_state(events)
@@ -402,7 +402,7 @@ def test_durable_api_graph_receipts_are_safe_and_never_replayed(system, monkeypa
         assert receipt["output"]["runtime_version"] == LANGGRAPH_VERSION
         assert graph_nodes(receipt["output"]["trace"]) == ["model", "tools", "model", "validate"]
     else:
-        assert receipt["error_code"] == "MODEL_CALL_FAILED" and receipt["output"] is None
+        assert receipt["error_code"] == "MODEL_TIMEOUT" and receipt["output"] is None
     assert client.get(f"/api/v1/advice-runs/{run_id}", headers=BUYER).json() == receipt
     assert client.post(f"/api/v1/advice-runs/{run_id}/process", headers=BUYER).json() == receipt
     assert len(sent) == 2 and len(factories) == 1

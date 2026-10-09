@@ -459,3 +459,41 @@ def test_policy_activation_during_final_identity_validation_blocks_post(pilot, m
     result=service.process_pending_operation('alpha',operation['id'])
     assert result['status']=='NEEDS_HUMAN' and result['error']=='APPROVAL_STALE'
     assert calls==[] and erp.count()==0
+
+
+@pytest.mark.parametrize("change", ["logout", "expiry", "revoke"])
+def test_real_adapter_cancels_between_provider_read_boundaries_after_authority_change(pilot, change):
+    import json
+    import httpx
+    from procureflow.agent import ReadOnlyAgent
+    from procureflow.db import AdviceRunRow, EventRow
+    service, erp, identities = pilot
+    request, _ = prepared(pilot)
+    buyer = identities["alpha"]["buyer"]
+    advice = AdviceService(service)
+    current = service.get_request(buyer, request["id"])
+    pending = advice.reserve(buyer, request["id"], AdviceRunCommand(
+        expected_version=current["version"], idempotency_key="cancel-revoked-provider"))
+    calls = []
+    def respond(http_request):
+        calls.append(http_request)
+        if change == "logout":
+            service.identities.logout(buyer)
+        elif change == "expiry":
+            expire_session(service, buyer)
+        else:
+            service.identities.set_membership("alpha", "buyer", "buyer", active=False)
+        return httpx.Response(200, json={"choices": [{"message": {"tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "get_comparison", "arguments": "{}"}}],
+            "reasoning_content": "PRIVATE_CANCELLED_RESPONSE"}}]})
+    def factory():
+        return ReadOnlyAgent("https://fixture.invalid", "synthetic-unused-key", "offline",
+                             transport=httpx.MockTransport(respond))
+    assert_denied(lambda: advice.process(buyer, pending["id"], factory))
+    with service.db.transaction() as session:
+        row = session.get(AdviceRunRow, pending["id"])
+        assert row.status == "FAILED" and row.error_code == "MODEL_CANCELLED" and row.output is None
+        events = list(session.scalars(select(EventRow).where(EventRow.request_id == request["id"])))
+        assert not any(event.type == "AGENT_TOOL_STARTED" for event in events)
+        assert "PRIVATE_CANCELLED_RESPONSE" not in json.dumps([event.payload for event in events])
+    assert len(calls) == 1 and erp.count() == 0

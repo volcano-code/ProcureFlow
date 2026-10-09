@@ -20,6 +20,7 @@ LEASE_SECONDS = 90
 # Only fixed application codes can become a durable failure receipt.
 SAFE_ERRORS = frozenset({
     "MODEL_NOT_CONFIGURED", "MODEL_ENDPOINT_INVALID", "MODEL_CALL_FAILED", "MODEL_PROTOCOL_INVALID",
+    "MODEL_TIMEOUT", "MODEL_CANCELLED", "MODEL_REFUSED", "MODEL_EMPTY_OUTPUT",
     "MODEL_OUTPUT_INCOMPLETE", "MODEL_USAGE_REQUIRED", "MODEL_RESPONSE_LIMIT", "MODEL_SCHEMA_INVALID",
     "MODEL_GROUNDING_REQUIRED", "BUDGET_EXCEEDED", "EVIDENCE_NOT_FOUND", "EVIDENCE_REQUIRED",
     "EVIDENCE_NOT_READ", "TOOL_POLICY_DENIED", "TOOL_ARGUMENTS_INVALID", "TOOL_SCOPE_DENIED",
@@ -184,10 +185,23 @@ class AdviceService:
             with self.procurement.transaction(principal, write=True) as session:
                 audit(session, principal, request_id, "AGENT_" + event["type"].upper(), {**event, "run_id": run_id})
 
+        def cancelled():
+            # Check at bounded provider/read boundaries. This cannot forcibly
+            # interrupt a blocking transport; its timeout remains necessary.
+            try:
+                with self.procurement.transaction(principal, consistent=True) as session:
+                    request = self.procurement._request(session, principal, request_id, lock=True)
+                    row = self._run(session, principal, run_id)
+                    current, _reason = self._freshness(session, principal, request, row)
+                    return not current or expired(row) or row.status != "RUNNING"
+            except DomainError:
+                return True
+
         agent, output, error_code = None, None, None
         try:
             agent = factory()
             agent.require_evidence_reads = True
+            agent.cancelled = cancelled
             output = agent.run(invoke, evidence_ids, observer=observe)
         except DomainError as error:
             error_code = error.code if error.code in SAFE_ERRORS else "ADVICE_FAILED"

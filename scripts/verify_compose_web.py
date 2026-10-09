@@ -17,6 +17,16 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "test_native_advice_stop_waiting_for_reservation_never_starts_late_paid_work",
+    "test_native_advice_stop_waiting_for_process_reads_saved_state_without_replay",
+    "test_native_advice_process_wait_timeout_reads_receipt_without_replay",
+    "test_native_advice_history_timeout_does_not_assert_cached_freshness",
+    "test_native_advice_changed_policy_cancels_late_reservation_before_process",
+    "test_native_advice_model_timeout_diagnostics_never_replay",
+    "test_native_advice_model_cancelled_diagnostics_never_replay",
+    "test_native_advice_model_refused_diagnostics_never_replay",
+    "test_native_advice_model_empty_diagnostics_never_replay",
+    "test_native_advice_missing_usage_and_cost_are_never_displayed_as_zero",
     "test_native_multi_item_create_duplicate_and_twenty_line_boundary",
     "test_native_multi_item_csv_selected_rows_line_evidence_and_no_implicit_confirmation",
     "test_native_multi_item_partial_unknown_and_duplicate_correction_stays_unconfirmed",

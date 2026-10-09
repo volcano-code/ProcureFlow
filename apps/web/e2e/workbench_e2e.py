@@ -162,7 +162,13 @@ class MockAdviceRoutes:
         self.hold_reservation=False
         self.hold_process=False
         self.outcome='COMPLETED'
+        self.error_code=None
+        self.usage={'prompt_tokens':20,'completion_tokens':10,'total_tokens':30}
+        self.usage_complete=True
+        self.provider_attempts=None
         self.fail_history=False
+        self.hold_history=False
+        self.pending_history=[]
         self.lose_process_response=False
         self.lose_process_before_claim=False
         self.cite_real_source=False
@@ -204,6 +210,7 @@ class MockAdviceRoutes:
                 self.history_reads+=1
                 if self.fail_history:
                     self.respond(route,{'error':{'code':'MOCK_HISTORY_UNAVAILABLE','message':'Mock history unavailable'}},503)
+                elif self.hold_history:self.pending_history.append((route,list(reversed(self.runs.get(request_id,[])))))
                 else:self.respond(route,list(reversed(self.runs.get(request_id,[]))))
                 return
             body=route.request.post_data_json
@@ -242,9 +249,9 @@ class MockAdviceRoutes:
                 'llm_used':True,'advisory_only':True,'semantic_factuality_verified':False,
                 'evidence_read_verified':True,
                 'model_calls':2,'tool_calls':1,'trace':[{'type':'tool_completed','tool':'get_comparison'}],
-                'usage':{'prompt_tokens':20,'completion_tokens':10,'total_tokens':30},
-                'usage_complete':True,'cost':None}
-        else:run['error_code']='MOCK_'+self.outcome
+                'usage':self.usage,'usage_complete':self.usage_complete,'cost':None}
+            if self.provider_attempts is not None:run['output']['provider_attempts']=self.provider_attempts
+        else:run['error_code']=self.error_code or 'MOCK_'+self.outcome
         if self.lose_process_response:route.abort('failed')
         else:self.respond(route,run)
 
@@ -294,7 +301,7 @@ def test_native_advice_unconfigured_never_calls_model(page):
 
 
 def test_native_advice_mock_provider_persisted_history_and_no_replay(page):
-    mock=MockAdviceRoutes(page);mock.hold_process=True
+    mock=MockAdviceRoutes(page);mock.hold_process=True;mock.provider_attempts=3
     prepare_advice(page)
     version=int(re.search(r'v(\d+)',page.get_by_test_id('request-meta').inner_text())[1])
     expect(page.get_by_test_id('advice-provider')).to_contain_text('尚未验证连通性或质量')
@@ -320,6 +327,8 @@ def test_native_advice_mock_provider_persisted_history_and_no_replay(page):
     expect(page.get_by_test_id('advice-output')).to_contain_text('语义真实性未验证')
     expect(page.get_by_test_id('advice-citations')).to_contain_text('mock-document:fragment-1')
     expect(page.get_by_test_id('advice-output')).to_contain_text('费用未知')
+    expect(page.get_by_test_id('advice-output')).to_contain_text('模型对话 2 轮')
+    expect(page.get_by_test_id('advice-output')).to_contain_text('提供方请求尝试 3 次')
     advice_screenshot(page,'next-advice-mock-completed.png')
     page.get_by_test_id('refresh-advice').click()
     expect(page.get_by_test_id('advice-status')).to_have_text('已完成')
@@ -493,6 +502,134 @@ def test_native_advice_mock_business_audit_event_refreshes_freshness(page):
     assert changed.status==200
     expect(page.get_by_test_id('advice-current')).to_have_text('历史结果，已失效')
     assert mock.history_reads>before and len(mock.process_calls)==1
+
+
+def test_native_advice_stop_waiting_for_reservation_never_starts_late_paid_work(page):
+    mock=MockAdviceRoutes(page);mock.hold_reservation=True
+    prepare_advice(page)
+    page.get_by_test_id('new-advice').click()
+    wait_for_mock(page,lambda: len(mock.pending_routes)==1)
+    page.get_by_test_id('stop-advice-wait').click()
+    expect(page.get_by_test_id('advice-error')).to_contain_text('ADVICE_WAIT_CANCELLED')
+    expect(page.get_by_test_id('advice-error')).to_contain_text('不代表服务端或提供方已取消')
+    expect(page.get_by_test_id('process-advice')).to_be_enabled()
+    route,run=mock.pending_routes.pop();mock.respond(route,run)
+    page.wait_for_timeout(100)
+    assert len(mock.reservations)==1 and mock.process_calls==[]
+    expect(page.get_by_test_id('advice-status')).to_have_text('已预留，尚未调用模型')
+    page.get_by_test_id('process-advice').click()
+    expect(page.get_by_test_id('advice-status')).to_have_text('已完成')
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
+
+
+def test_native_advice_stop_waiting_for_process_reads_saved_state_without_replay(page):
+    mock=MockAdviceRoutes(page);mock.hold_process=True
+    prepare_advice(page)
+    page.get_by_test_id('new-advice').click()
+    wait_for_mock(page,lambda: len(mock.process_calls)==1)
+    page.get_by_test_id('stop-advice-wait').click()
+    expect(page.get_by_test_id('advice-error')).to_contain_text('ADVICE_WAIT_CANCELLED')
+    expect(page.get_by_test_id('advice-status')).to_have_text('生成中')
+    expect(page.get_by_test_id('advice-panel')).to_have_attribute('aria-busy','false')
+    expect(page.get_by_test_id('new-advice')).to_be_disabled()
+    route,run=mock.pending_routes.pop();mock.finish(route,run)
+    page.get_by_test_id('refresh-advice').click()
+    expect(page.get_by_test_id('advice-output')).to_contain_text('MOCK PROVIDER')
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
+
+
+def test_native_advice_process_wait_timeout_reads_receipt_without_replay(page):
+    mock=MockAdviceRoutes(page);mock.hold_process=True
+    prepare_advice(page);page.clock.install()
+    page.get_by_test_id('new-advice').click()
+    wait_for_mock(page,lambda: len(mock.process_calls)==1)
+    page.clock.fast_forward(60_001)
+    expect(page.get_by_test_id('advice-error')).to_contain_text('ADVICE_WAIT_TIMEOUT')
+    expect(page.get_by_test_id('advice-error')).to_contain_text('可能已产生费用')
+    expect(page.get_by_test_id('advice-status')).to_have_text('生成中')
+    expect(page.get_by_test_id('advice-panel')).to_have_attribute('aria-busy','false')
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
+    route,run=mock.pending_routes.pop();mock.finish(route,run)
+    page.get_by_test_id('refresh-advice').click()
+    expect(page.get_by_test_id('advice-status')).to_have_text('已完成')
+    assert len(mock.process_calls)==1
+
+
+def test_native_advice_history_timeout_does_not_assert_cached_freshness(page):
+    mock=MockAdviceRoutes(page)
+    prepare_advice(page)
+    page.get_by_test_id('new-advice').click()
+    expect(page.get_by_test_id('advice-status')).to_have_text('已完成')
+    expect(page.get_by_test_id('advice-current')).to_have_text('当前版本及来源')
+    page.clock.install();mock.hold_history=True
+    page.get_by_test_id('refresh-advice').click()
+    wait_for_mock(page,lambda: len(mock.pending_history)>0)
+    page.clock.fast_forward(15_001)
+    expect(page.get_by_test_id('advice-read-error')).to_contain_text('ADVICE_WAIT_TIMEOUT')
+    expect(page.get_by_test_id('advice-current')).to_have_text('当前性待核验')
+    expect(page.get_by_test_id('new-advice')).to_be_disabled()
+    expect(page.get_by_test_id('refresh-advice')).to_be_enabled()
+    mock.hold_history=False
+    for route,value in mock.pending_history:mock.respond(route,value)
+    page.get_by_test_id('refresh-advice').click()
+    expect(page.get_by_test_id('advice-current')).to_have_text('当前版本及来源')
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
+
+
+def test_native_advice_changed_policy_cancels_late_reservation_before_process(page):
+    mock=MockAdviceRoutes(page);mock.hold_reservation=True
+    prepare_advice(page)
+    base=policy_api(page)
+    page.get_by_test_id('new-advice').click()
+    wait_for_mock(page,lambda: len(mock.pending_routes)==1)
+    publish_policy_api(page,base)
+    page.get_by_test_id('refresh-policy').click()
+    expect(page.get_by_test_id('advice-error')).to_contain_text('ADVICE_CONTEXT_CHANGED')
+    expect(page.get_by_test_id('advice-panel')).to_have_attribute('aria-busy','false')
+    route,run=mock.pending_routes.pop();mock.respond(route,run)
+    page.wait_for_timeout(100)
+    expect(page.get_by_test_id('advice-current')).to_have_text('历史结果，已失效')
+    expect(page.get_by_test_id('process-advice')).to_have_count(0)
+    assert len(mock.reservations)==1 and mock.process_calls==[]
+
+
+def assert_advice_model_failure_diagnostics(page,code,explanation):
+    mock=MockAdviceRoutes(page);mock.outcome='FAILED';mock.error_code=code
+    prepare_advice(page)
+    page.get_by_test_id('new-advice').click()
+    expect(page.get_by_test_id('advice-failure')).to_contain_text(code)
+    expect(page.get_by_test_id('advice-failure')).to_contain_text(explanation)
+    expect(page.get_by_test_id('advice-output')).to_have_count(0)
+    page.get_by_test_id('refresh-advice').click()
+    expect(page.get_by_test_id('new-advice')).to_be_enabled()
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
+
+
+def test_native_advice_model_timeout_diagnostics_never_replay(page):
+    assert_advice_model_failure_diagnostics(page,'MODEL_TIMEOUT','响应超时')
+
+
+def test_native_advice_model_cancelled_diagnostics_never_replay(page):
+    assert_advice_model_failure_diagnostics(page,'MODEL_CANCELLED','无法据此确认')
+
+
+def test_native_advice_model_refused_diagnostics_never_replay(page):
+    assert_advice_model_failure_diagnostics(page,'MODEL_REFUSED','拒绝')
+
+
+def test_native_advice_model_empty_diagnostics_never_replay(page):
+    assert_advice_model_failure_diagnostics(page,'MODEL_EMPTY_OUTPUT','未返回可用内容')
+
+
+def test_native_advice_missing_usage_and_cost_are_never_displayed_as_zero(page):
+    mock=MockAdviceRoutes(page);mock.usage=None;mock.usage_complete=False
+    prepare_advice(page)
+    page.get_by_test_id('new-advice').click()
+    expect(page.get_by_test_id('advice-output')).to_contain_text('token 用量不完整或未知')
+    expect(page.get_by_test_id('advice-output')).to_contain_text('费用未知')
+    expect(page.get_by_test_id('advice-output')).not_to_contain_text('token 总量 0')
+    expect(page.get_by_test_id('advice-output')).to_contain_text('提供方请求尝试次数未报告')
+    assert len(mock.reservations)==1 and len(mock.process_calls)==1
 
 
 def policy_api(page):

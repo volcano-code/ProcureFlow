@@ -40,7 +40,7 @@ export interface RecoveryReconciliation {operation_id:string;ledger_sha256:strin
 export interface Capabilities {mode:"demo"|"private"|"pilot";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"langgraph-read-only-v1";advice_runtime_version:string}
 export interface AdviceOutput {
   summary:string;evidence_ids:string[];runtime:string;llm_used:boolean;advisory_only:true;
-  semantic_factuality_verified:false;evidence_read_verified?:boolean;model_calls:number;tool_calls:number;
+  semantic_factuality_verified:false;evidence_read_verified?:boolean;model_calls:number;provider_attempts?:number;tool_calls:number;
   trace:Record<string,unknown>[];usage:{prompt_tokens:number;completion_tokens:number;total_tokens:number}|null;
   usage_complete:boolean;cost:null;
 }

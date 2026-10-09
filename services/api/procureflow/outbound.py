@@ -42,13 +42,16 @@ def validate_endpoint(value: str) -> str:
 
 
 def request_json(client: httpx.Client, method: str, path: str, *, limit: int,
-                 deadline: float | None = None, parse_float=float, **kwargs):
+                 deadline: float | None = None, parse_float=float, check_active=None, **kwargs):
     """Return status and parsed JSON. Do not parse/log bodies of non-2xx responses.
 
     A deadline is checked between reads, not a promise to preempt arbitrary
     blocking code. Callers must also set transport timeouts and bound tools.
+    Optional check_active runs at the same boundaries for cooperative cancellation.
     """
     def check_time():
+        if check_active is not None:
+            check_active()
         if deadline is not None and time.monotonic() >= deadline:
             raise ResponseDeadlineError("Response deadline exceeded")
     check_time()
@@ -64,7 +67,7 @@ def request_json(client: httpx.Client, method: str, path: str, *, limit: int,
             if declared < 0 or declared > limit:
                 raise ResponseLimitError("Response too large")
         body = bytearray()
-        for chunk in response.iter_bytes(chunk_size=8192):
+        for chunk in response.iter_bytes():
             check_time()
             if len(body) + len(chunk) > limit:
                 raise ResponseLimitError("Response too large")

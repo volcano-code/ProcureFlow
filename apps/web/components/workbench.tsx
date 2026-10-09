@@ -12,6 +12,7 @@ import {RequestEditor,QuoteEditor} from "@/components/procurement-editors";
 import QuoteLineDetails from "@/components/quote-line-details";
 import {FIELD_LABELS,HEADER_FIELDS} from "@/lib/procurement-lines.mjs";
 import {bindingCurrent,staleExplanation,strictestBudget,violationExplanation} from "@/lib/policy.mjs";
+import {ADVICE_WRITE_TIMEOUT_MS,AdviceWaitError,adviceFailureExplanation,providerAttemptExplanation,waitForAdvice} from "@/lib/advice.mjs";
 
 const names: Record<string,string> = {DRAFT:"待录入", NEEDS_CONFIRMATION:"待核对", READY_FOR_REVIEW:"待审批",
   APPROVED:"已批准", APPROVAL_STALE:"审批已失效", ERP_PENDING:"执行已预留", ERP_CREATED:"草稿已创建",
@@ -38,19 +39,26 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
   const [citationBusy,setCitationBusy] = useState(false);
   const [citationError,setCitationError] = useState("");
   const [processingRunId,setProcessingRunId] = useState<string|null>(null);
+  const [verifiedFreshness,setVerifiedFreshness] = useState<string|null>(null);
   const context = useRef<AdviceContext|null>(null);
   const mutationLock = useRef(false);
+  const mutationController = useRef<AbortController|null>(null);
   const processingNetworkPending = useRef(false);
   const lastFreshnessEvent = useRef(freshnessEvent);
+  const latestFreshnessEvent = useRef(freshnessEvent);
+  latestFreshnessEvent.current = freshnessEvent;
   const readEpoch = useRef(0);
   const scopeIsActive = (scope:AdviceContext) => scope.active && context.current === scope;
   const reload = useCallback(async(scope:AdviceContext) => {
     const epoch = ++readEpoch.current;
+    const freshness = latestFreshnessEvent.current;
     if (scopeIsActive(scope)) {setLoading(true);setReadError("");}
     try {
-      const saved = await api<AdviceRun[]>(`/requests/${request.id}/advice-runs`,token,"GET",undefined,scope.controller.signal);
+      const saved = await waitForAdvice(signal=>api<AdviceRun[]>(`/requests/${request.id}/advice-runs`,token,"GET",undefined,signal),
+        {signal:scope.controller.signal});
       if (scopeIsActive(scope) && epoch === readEpoch.current) {
         setRuns(saved);
+        setVerifiedFreshness(freshness);
         if (!processingNetworkPending.current)
           setProcessingRunId(id=>saved.some(run=>run.id === id && run.status !== "PENDING") ? null : id);
       }
@@ -69,6 +77,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
   useEffect(()=>{
     if (lastFreshnessEvent.current === freshnessEvent) return;
     lastFreshnessEvent.current=freshnessEvent;
+    mutationController.current?.abort(new AdviceWaitError("ADVICE_CONTEXT_CHANGED"));
     if (context.current) void reload(context.current);
   },[freshnessEvent,reload]);
   // Poll persisted state only. Mount, refresh and polling must never POST /process.
@@ -85,15 +94,25 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
   const start = async(pending?:AdviceRun) => {
     const scope=context.current;
     if (!scope || !scopeIsActive(scope) || mutationLock.current || !buyer || !cap?.advice_configured || workflowBusy || !policyHash) return;
+    const controller = new AbortController();mutationController.current=controller;
+    const signal = AbortSignal.any([scope.controller.signal,controller.signal]);
+    const startedFreshness = latestFreshnessEvent.current;
+    const assertFresh = () => {
+      signal.throwIfAborted();
+      if (startedFreshness !== latestFreshnessEvent.current) throw new AdviceWaitError("ADVICE_CONTEXT_CHANGED");
+    };
     mutationLock.current=true;setWorking(true);setRunError("");
     try {
-      const run = pending || await api<AdviceRun>(`/requests/${request.id}/advice-runs`,token,"POST",
-        {expected_version:request.version,idempotency_key:crypto.randomUUID()},scope.controller.signal);
+      const run = pending || await waitForAdvice(waitSignal=>api<AdviceRun>(`/requests/${request.id}/advice-runs`,token,"POST",
+        {expected_version:request.version,idempotency_key:crypto.randomUUID()},waitSignal),{signal,timeoutMs:ADVICE_WRITE_TIMEOUT_MS});
       if (!scopeIsActive(scope)) return; // Never start paid work for an abandoned reservation response.
+      assertFresh();
       retain(scope,run);
       if (run.status === "PENDING" && bindingCurrent(run,policyHash) && run.request_version === request.version) {
         setProcessingRunId(run.id);processingNetworkPending.current=true;
-        const result = await api<AdviceRun>(`/advice-runs/${run.id}/process`,token,"POST",undefined,scope.controller.signal);
+        const result = await waitForAdvice(waitSignal=>api<AdviceRun>(`/advice-runs/${run.id}/process`,token,"POST",undefined,waitSignal),
+          {signal,timeoutMs:ADVICE_WRITE_TIMEOUT_MS});
+        assertFresh();
         retain(scope,result);
         if (scopeIsActive(scope)) setProcessingRunId(null);
         if (scopeIsActive(scope)) await reload(scope);
@@ -101,16 +120,19 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
     } catch (error) {
       processingNetworkPending.current=false;
       if (scopeIsActive(scope)) {
-        setRunError(`${error instanceof Error ? error.message : String(error)}。未自动重试；请回读状态。失败或中断后须显式新建运行。`);
+        setRunError(`${error instanceof Error ? error.message : String(error)}。未自动重试；正在回读状态。停止等待不代表服务端或提供方已取消，可能已产生费用。失败或中断后须显式新建运行。`);
         await reload(scope); // A lost response may still have a persisted terminal result.
       }
     } finally {
       processingNetworkPending.current=false;
+      if (mutationController.current === controller) mutationController.current=null;
       mutationLock.current=false;
       if (scopeIsActive(scope)) setWorking(false);
     }
   };
-  const isCurrent = (run:AdviceRun) => !!policyHash && bindingCurrent(run,policyHash) && run.request_version === request.version;
+  const freshnessVerified = !loading && !readError && verifiedFreshness === freshnessEvent;
+  const isCurrent = (run:AdviceRun) => freshnessVerified && !!policyHash &&
+    bindingCurrent(run,policyHash) && run.request_version === request.version;
   const activeRun = runs.some(run=>isCurrent(run) && ["PENDING","RUNNING"].includes(run.status));
   const citationDocument = (id:string) => quotes.find(quote=>id.startsWith(quote.document_id+":"));
   const openCitation = async(id:string) => {
@@ -118,7 +140,8 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
     if (!scope || !scopeIsActive(scope) || !quote || citationBusy) return;
     const ticket=beginEvidence();setCitationBusy(true);setCitationError("");
     try {
-      const source = await api<DocumentEvidence>(`/documents/${quote.document_id}/evidence`,token,"GET",undefined,scope.controller.signal);
+      const source = await waitForAdvice(signal=>api<DocumentEvidence>(`/documents/${quote.document_id}/evidence`,token,"GET",undefined,signal),
+        {signal:scope.controller.signal});
       const fragment=source.fragments.find(item=>item.id === id);
       const knownHash=Object.values(quote.evidence).find(item=>item.document_sha256)?.document_sha256;
       if (source.id !== quote.document_id || !fragment || (knownHash && knownHash !== source.sha256))
@@ -133,6 +156,8 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
       <p>绑定需求 v{request.version}、报价集合、生效策略与来源快照。建议不会审批、采购、生成 ERP 草稿或改变确定性规则结果。</p></div>
       <div className="heading-actions"><button className="secondary" data-testid="refresh-advice" disabled={loading||working}
         onClick={()=>{if (context.current) void reload(context.current);}}>回读建议状态</button>
+        {working && <button className="secondary" data-testid="stop-advice-wait"
+          onClick={()=>mutationController.current?.abort(new AdviceWaitError("ADVICE_WAIT_CANCELLED"))}>停止等待并回读状态</button>}
         {buyer && <button className="primary" data-testid="new-advice" disabled={workflowBusy||working||loading||!!readError||!policyHash||!cap?.advice_configured||activeRun}
           onClick={()=>void start()}>{working ? "正在生成只读建议…" : "新建只读建议"}</button>}</div>
     </div>
@@ -151,10 +176,12 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
         <div className="heading-actions"><strong data-testid="advice-status">{run.status === "PENDING" && processingRunId === run.id
           ? "处理请求已发送，模型调用可能进行中" : adviceStatus[run.status]}</strong>
           <span className="badge">需求 v{run.request_version}</span>
-          <span className={`badge ${isCurrent(run) ? "ok" : "warn"}`} data-testid="advice-current">{isCurrent(run) ? "当前版本及来源" : "历史结果，已失效"}</span></div>
+          <span className={`badge ${isCurrent(run) ? "ok" : "warn"}`} data-testid="advice-current">{isCurrent(run) ? "当前版本及来源" : freshnessVerified ? "历史结果，已失效" : "当前性待核验"}</span></div>
         <p className="source-meta">运行 {run.id} · 创建于 {run.created_at}{run.completed_at ? ` · 结束于 ${run.completed_at}` : ""}</p>
-        {!isCurrent(run) && <p data-testid="advice-stale">需求版本、报价集合、策略或证据来源已变化或无法核验，不能将旧建议视为当前结论。{staleExplanation(run.policy_hash && run.policy_hash!==policyHash?"POLICY_CHANGED":run.stale_reason)}（{run.stale_reason||"INPUT_BINDING_CHANGED"}）</p>}
-        {run.error_code && <p className="form-error" data-testid="advice-failure">{run.error_code}。本次运行不会自动重试；修正来源或配置后显式新建运行。</p>}
+        {!isCurrent(run) && <p data-testid="advice-stale">{freshnessVerified
+          ? <>需求版本、报价集合、策略或证据来源已变化或无法核验，不能将旧建议视为当前结论。{staleExplanation(run.policy_hash && run.policy_hash!==policyHash?"POLICY_CHANGED":run.stale_reason)}（{run.stale_reason||"INPUT_BINDING_CHANGED"}）</>
+          : "历史读取未完成或失败，当前性尚未核验，不能将缓存建议视为当前结论。"}</p>}
+        {run.error_code && <p className="form-error" data-testid="advice-failure">{run.error_code}：{adviceFailureExplanation(run.error_code)}本次运行不会自动重试；核对来源、配置及状态后，如需再次调用，请显式新建运行。</p>}
         {run.status === "INTERRUPTED" && <p>调用结果不确定，可能已产生费用。此运行不能重放；如需再次调用，请新建运行。</p>}
         {run.status === "RUNNING" && <p>正在回读运行状态，页面刷新不会重放模型调用。</p>}
         {run.status === "PENDING" && <p>{processingRunId === run.id
@@ -170,9 +197,10 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
             {citationDocument(id) ? <button className="field-link" data-testid="advice-citation" disabled={citationBusy||workflowBusy}
               style={{textAlign:"left",overflowWrap:"anywhere"}} onClick={()=>void openCitation(id)}>核验并查看 {id}</button>
               : <span>{id}（不在当前报价来源中，无法打开）</span>}</div>) : "未引用来源片段"}</div>
-          <p>模型调用 {run.output.model_calls} 次 · 只读工具调用 {run.output.tool_calls} 次 · {run.output.usage_complete && run.output.usage
+          <p>模型对话 {run.output.model_calls} 轮 · {providerAttemptExplanation(run.output)} · 只读工具调用 {run.output.tool_calls} 次 · {run.output.usage_complete && run.output.usage
             ? `提供方报告 token 总量 ${run.output.usage.total_tokens}` : "token 用量不完整或未知"} · 费用未知</p>
           <details><summary>查看只读运行记录</summary><pre>{JSON.stringify({runtime:run.output.runtime,llm_used:run.output.llm_used,
+            model_calls:run.output.model_calls,provider_attempts:run.output.provider_attempts??null,
             advisory_only:run.output.advisory_only,evidence_read_verified:run.output.evidence_read_verified,
             semantic_factuality_verified:run.output.semantic_factuality_verified,
             usage:run.output.usage,usage_complete:run.output.usage_complete,trace:run.output.trace},null,2)}</pre></details>

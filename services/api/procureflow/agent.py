@@ -41,6 +41,7 @@ class AssistantMessage(BaseModel):
     tool_calls: list[ToolCall] | None = Field(default=None, max_length=32)
     # Provider continuation material: transient only, never an audit/output field.
     reasoning_content: str | None = Field(default=None, max_length=32000, strict=True)
+    refusal: str | None = Field(default=None, max_length=16000, strict=True)
 
 
 class EmptyArgs(Contract):
@@ -64,6 +65,7 @@ RUNTIME = "langgraph-read-only-v1"
 LANGGRAPH_VERSION = version("langgraph")
 NODE_ERRORS = frozenset({
     "BUDGET_EXCEEDED", "MODEL_CALL_FAILED", "MODEL_PROTOCOL_INVALID", "MODEL_OUTPUT_INCOMPLETE",
+    "MODEL_TIMEOUT", "MODEL_CANCELLED", "MODEL_REFUSED", "MODEL_EMPTY_OUTPUT",
     "MODEL_USAGE_REQUIRED", "MODEL_RESPONSE_LIMIT", "MODEL_SCHEMA_INVALID", "EVIDENCE_NOT_FOUND",
     "MODEL_GROUNDING_REQUIRED", "EVIDENCE_REQUIRED", "EVIDENCE_NOT_READ", "TOOL_POLICY_DENIED",
     "TOOL_ARGUMENTS_INVALID", "TOOL_SCOPE_DENIED", "TOOL_CALL_FAILED", "TOOL_OUTPUT_LIMIT",
@@ -83,7 +85,7 @@ class ReadOnlyAgent:
                  max_model_calls=4, max_tool_calls=8, max_wall_seconds=35,
                  transport: httpx.BaseTransport | None = None, *, thinking_mode="default",
                  max_reported_tokens=16000, require_usage=False, required_tools=("get_comparison",),
-                 require_evidence_reads=False):
+                 require_evidence_reads=False, max_connection_retries=1, cancelled=None):
         if not model or not api_key:
             raise DomainError("MODEL_NOT_CONFIGURED", "Configure LLM_MODEL and LLM_API_KEY on the server", 503)
         try:
@@ -106,6 +108,12 @@ class ReadOnlyAgent:
                 and 1 <= max_model_calls <= 20 and 1 <= max_tool_calls <= 50
                 and 0 < max_wall_seconds <= 300):
             raise ValueError("Model, tool and wall-time budgets must be bounded positive values")
+        if type(max_connection_retries) is not int or not 0 <= max_connection_retries <= 2:
+            raise ValueError("Connection retries must be between zero and two")
+        if cancelled is not None and not callable(cancelled):
+            raise ValueError("Cancellation check must be callable")
+        self.max_connection_retries = max_connection_retries
+        self.cancelled = cancelled
         self.model = model
         self.max_model_calls = max_model_calls
         self.max_tool_calls = max_tool_calls
@@ -133,10 +141,13 @@ class ReadOnlyAgent:
         private = {"messages": messages, "message": {}, "completed_tools": set(),
                    "read_evidence_ids": set(), "seen_call_ids": set(),
                    "usage_total": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                   "usage_complete": True, "output": {}}
+                   "usage_complete": True, "usage_received": False, "output": {}, "provider_attempts": 0}
         deadline = started + self.max_wall_seconds
+        cancelled = self.cancelled
 
         def check_budget():
+            if cancelled is not None and cancelled():
+                raise DomainError("MODEL_CANCELLED", "Explanation is no longer active", 409)
             if time.monotonic() >= deadline:
                 raise DomainError("BUDGET_EXCEEDED", "Explanation deadline reached; no write performed", 422)
 
@@ -162,49 +173,105 @@ class ReadOnlyAgent:
             remaining = self.max_wall_seconds - (time.monotonic() - started)
             if remaining <= 0 or len(json.dumps(messages, ensure_ascii=False)) > 60000:
                 raise DomainError("BUDGET_EXCEEDED", "The explanation context/time budget was reached", 422)
-            try:
-                body = {"model": self.model, "messages": messages,
-                        "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
-                        "max_tokens": 1600}
-                if self.thinking_mode != "default":
-                    body["thinking"] = {"type": self.thinking_mode}
-                status, result = request_json(self.client, "POST", "chat/completions", limit=200000,
-                    deadline=deadline, json=body, timeout=min(10, remaining))
-                if status >= 300:
-                    raise DomainError("MODEL_CALL_FAILED", "Model HTTP request failed; no write performed", 502)
-                choice = result["choices"][0]
-                if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
-                    raise DomainError("MODEL_PROTOCOL_INVALID", "Model message is malformed", 502)
-                if choice.get("finish_reason") in {"length", "content_filter"}:
-                    raise DomainError("MODEL_OUTPUT_INCOMPLETE", "Model output was truncated or filtered", 502)
+            body = {"model": self.model, "messages": messages,
+                    "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
+                    "max_tokens": 1600}
+            if self.thinking_mode != "default":
+                body["thinking"] = {"type": self.thinking_mode}
+            result = None
+            for retry in range(self.max_connection_retries + 1):
+                check_budget()
+                # Count every transport attempt inside the existing total call
+                # budget, including pre-dispatch failures. No retry gets extra
+                # time, output tokens, or a new durable run.
+                if private["provider_attempts"] >= self.max_model_calls:
+                    raise DomainError("BUDGET_EXCEEDED", "Maximum provider-attempt budget reached", 422)
+                private["provider_attempts"] += 1
+                attempt = private["provider_attempts"]
+                remaining = deadline - time.monotonic()
                 try:
-                    parsed_message = AssistantMessage.model_validate(choice["message"])
-                except ValidationError as error:
-                    raise DomainError("MODEL_PROTOCOL_INVALID", "Model message failed protocol validation", 502) from error
-                message = parsed_message.model_dump()
-                usage = normalized_usage(result.get("usage"))
-                if usage is None:
-                    usage_complete = False
-                else:
-                    for key in usage_total:
-                        usage_total[key] += usage[key]
-                record({"type": "model_completed", "model_call": model_call,
-                        "usage": usage, "model": self.model})
-                if self.require_usage and usage is None:
-                    raise DomainError("MODEL_USAGE_REQUIRED", "Valid provider token counts required by this probe", 502)
-                if usage_total["total_tokens"] > self.max_reported_tokens:
-                    raise DomainError("BUDGET_EXCEEDED", "Provider-reported token budget reached", 422)
-            except ResponseLimitError as error:
-                raise DomainError("MODEL_RESPONSE_LIMIT", "Model response exceeded its byte limit", 502) from error
-            except ResponseDeadlineError as error:
-                raise DomainError("BUDGET_EXCEEDED", "Model response deadline reached", 422) from error
-            except DomainError:
-                raise
-            except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError, AttributeError, RecursionError) as error:
-                raise DomainError("MODEL_CALL_FAILED", "Model call failed; no purchase state was changed", 502) from error
-            if time.monotonic() - started > self.max_wall_seconds:
-                raise DomainError("BUDGET_EXCEEDED", "The explanation wall-time budget was reached", 422)
-            private.update(message=message, usage_total=usage_total, usage_complete=usage_complete)
+                    status, result = request_json(self.client, "POST", "chat/completions", limit=200000,
+                        deadline=deadline, check_active=check_budget, json=body, timeout=min(10, remaining))
+                    if not 200 <= status < 300:
+                        record({"type": "model_attempt_failed", "model_call": model_call, "attempt": attempt,
+                                "code": "MODEL_CALL_FAILED", "http_status": status, "retrying": False,
+                                "request_may_have_reached_provider": True, "usage": None, "cost": None})
+                        raise DomainError("MODEL_CALL_FAILED", "Model HTTP request failed", 502)
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as error:
+                    # Only errors before HTTP request dispatch are eligible.
+                    # Never retry reads/writes, status codes (even 429/503),
+                    # malformed responses, refusals, or tool/validation failures.
+                    code = "MODEL_TIMEOUT" if isinstance(error, httpx.TimeoutException) else "MODEL_CALL_FAILED"
+                    again = retry < self.max_connection_retries and attempt < self.max_model_calls
+                    record({"type": "model_attempt_failed", "model_call": model_call, "attempt": attempt,
+                            "code": code, "http_status": None, "retrying": again,
+                            "request_may_have_reached_provider": False, "usage": None, "cost": None})
+                    if not again:
+                        raise DomainError(code, "Model connection could not complete", 502) from error
+                    check_budget()
+                    delay = min(0.1 * (2 ** retry), max(0, deadline - time.monotonic()))
+                    time.sleep(delay)
+                    check_budget()
+                except httpx.TimeoutException as error:
+                    raise DomainError("MODEL_TIMEOUT", "Model transport timed out; outcome unknown", 502) from error
+                except ResponseLimitError as error:
+                    raise DomainError("MODEL_RESPONSE_LIMIT", "Model response exceeded its byte limit", 502) from error
+                except ResponseDeadlineError as error:
+                    raise DomainError("BUDGET_EXCEEDED", "Model response deadline reached", 422) from error
+                except DomainError:
+                    raise
+                except httpx.HTTPError as error:
+                    raise DomainError("MODEL_CALL_FAILED", "Model transport failed; outcome unknown", 502) from error
+                except (ValueError, TypeError, RecursionError) as error:
+                    raise DomainError("MODEL_PROTOCOL_INVALID", "Model response is not valid JSON", 502) from error
+            check_budget()
+            # Account for valid provider-reported usage even if the returned
+            # message is refused, truncated or malformed. It is never billing.
+            usage = normalized_usage(result.get("usage")) if isinstance(result, dict) else None
+            if usage is None:
+                usage_complete = False
+            else:
+                private["usage_received"] = True
+                for key in usage_total:
+                    usage_total[key] += usage[key]
+            private.update(usage_total=usage_total, usage_complete=usage_complete)
+            record({"type": "model_completed", "model_call": model_call, "attempt": attempt,
+                    "usage": usage, "model": self.model})
+            if self.require_usage and usage is None:
+                raise DomainError("MODEL_USAGE_REQUIRED", "Valid provider token counts required by this probe", 502)
+            if usage_total["total_tokens"] > self.max_reported_tokens:
+                raise DomainError("BUDGET_EXCEEDED", "Provider-reported token budget reached", 422)
+            choices = result.get("choices") if isinstance(result, dict) else None
+            if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Exactly one model choice is required", 502)
+            choice = choices[0]
+            if not isinstance(choice.get("message"), dict):
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model message is malformed", 502)
+            if "index" in choice and (type(choice["index"]) is not int or choice["index"] != 0):
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model choice index is invalid", 502)
+            reason = choice.get("finish_reason")
+            if reason == "length":
+                raise DomainError("MODEL_OUTPUT_INCOMPLETE", "Model output was truncated", 502)
+            if reason == "content_filter":
+                raise DomainError("MODEL_REFUSED", "Model output was filtered", 502)
+            if reason not in (None, "stop", "tool_calls"):
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model finish reason is unsupported", 502)
+            if choice["message"].get("role", "assistant") != "assistant":
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model message role is invalid", 502)
+            try:
+                parsed_message = AssistantMessage.model_validate(choice["message"])
+            except ValidationError as error:
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model message failed protocol validation", 502) from error
+            message = parsed_message.model_dump()
+            if message.get("refusal") and message["refusal"].strip():
+                raise DomainError("MODEL_REFUSED", "Model declined the explanation", 502)
+            has_tools = bool(message.get("tool_calls"))
+            if ((reason == "tool_calls" and not has_tools) or (reason == "stop" and has_tools)):
+                raise DomainError("MODEL_PROTOCOL_INVALID", "Model finish reason contradicts its message", 502)
+            if not has_tools and not (message.get("content") or "").strip():
+                raise DomainError("MODEL_EMPTY_OUTPUT", "Model returned no explanation", 502)
+            private["message"] = message
             return {"model_call": model_call, "route": "tools" if message.get("tool_calls") else "validate"}
 
         def tools_node(state: AdviceGraphState):
@@ -287,7 +354,8 @@ class ReadOnlyAgent:
             private["output"] = {**narrative.model_dump(), "runtime": RUNTIME, "runtime_version": LANGGRAPH_VERSION, "llm_used": True,
                     "advisory_only": True, "semantic_factuality_verified": False,
                     "evidence_read_verified": bool(self.require_evidence_reads),
-                    "model_calls": model_call, "tool_calls": tool_count, "trace": trace,
+                    "model_calls": model_call, "provider_attempts": private["provider_attempts"],
+                    "tool_calls": tool_count, "trace": trace,
                     "usage": usage_total if usage_complete else None, "usage_complete": usage_complete,
                     "usage_source": "provider_reported", "cost": None}
             return {"done": True}
@@ -302,6 +370,17 @@ class ReadOnlyAgent:
                     failure = DomainError(code, "Read-only explanation could not complete", status)
                 except Exception:
                     failure = DomainError("ADVICE_FAILED", "Read-only explanation could not complete", 502)
+                # A fixed receipt is useful even when no narrative exists. Known
+                # usage is partial evidence, never a fabricated zero/cost total.
+                try:
+                    record({"type": "graph_node_failed", "node": node.__name__.removesuffix("_node"),
+                            "code": failure.code, "provider_attempts": private["provider_attempts"],
+                            "known_usage": dict(private["usage_total"]) if private["usage_received"] else None,
+                            "usage": None, "usage_complete": False, "cost": None})
+                except Exception:
+                    # Revoked identity/audit failure must not disclose provider
+                    # content or replace the original safe failure category.
+                    pass
                 # Outside except: the new error has no provider/tool/validation
                 # context. Global debug callbacks cannot serialize raw causes.
                 raise failure from None
@@ -318,6 +397,7 @@ class ReadOnlyAgent:
         builder.add_edge("validate", END)
         # SQL advice_runs owns claims and crash receipts. No graph retry, cache,
         # checkpointer or resume path: an ambiguous provider call is never replayed.
+        # The narrow pre-dispatch retry above never repeats a completed HTTP call.
         graph = builder.compile(checkpointer=False, name=RUNTIME)
         def execute():
             # A fresh context removes ambient LangChain callbacks/collectors and

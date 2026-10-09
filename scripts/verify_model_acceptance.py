@@ -27,6 +27,7 @@ DEFAULT_BUDGETS = {"max_model_calls": 4, "max_tool_calls": 8,
                    "max_reported_tokens": 8000, "max_wall_seconds": 35}
 SAFE_ERRORS = frozenset({
     "MODEL_NOT_CONFIGURED", "MODEL_ENDPOINT_INVALID", "MODEL_CALL_FAILED", "MODEL_PROTOCOL_INVALID",
+    "MODEL_TIMEOUT", "MODEL_CANCELLED", "MODEL_REFUSED", "MODEL_EMPTY_OUTPUT",
     "MODEL_OUTPUT_INCOMPLETE", "MODEL_USAGE_REQUIRED", "MODEL_RESPONSE_LIMIT", "MODEL_SCHEMA_INVALID",
     "MODEL_GROUNDING_REQUIRED", "BUDGET_EXCEEDED", "EVIDENCE_NOT_FOUND", "EVIDENCE_REQUIRED",
     "EVIDENCE_NOT_READ", "TOOL_POLICY_DENIED", "TOOL_ARGUMENTS_INVALID", "TOOL_SCOPE_DENIED",
@@ -258,7 +259,7 @@ def _exercise_api(config):
             return ReadOnlyAgent(config["base_url"], config["api_key"], config["model"],
                 thinking_mode=config["thinking_mode"], require_usage=True,
                 required_tools=("get_comparison", "search_policy"), require_evidence_reads=True,
-                transport=CountedTransport(), **config["budgets"])
+                transport=CountedTransport(), max_connection_retries=0, **config["budgets"])
 
         settings = Settings()
         database = Database(settings.database_url, create_schema=True)

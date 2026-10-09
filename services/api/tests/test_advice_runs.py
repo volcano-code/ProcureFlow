@@ -544,7 +544,7 @@ def test_provider_private_reasoning_not_in_durable_output_or_audit(system, monke
         else:
             message = {"content": json.dumps({"summary": "证据与比较已读取。", "evidence_ids": [evidence_id]}),
                        "reasoning_content": secret, "provider_debug": secret}
-        return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}],
+        return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "tool_calls" if message.get("tool_calls") else "stop"}],
                                         "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
                                         "provider_debug": secret})
 
