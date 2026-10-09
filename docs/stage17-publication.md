@@ -25,6 +25,16 @@ history. The corrected test requires a null active proposal, no approval/reject/
 execute controls, updated request quantity and an unchanged historical snapshot.
 No application authorization, approval binding or readback check was relaxed.
 
+The second published head, `e50b0400cfa63d187c3c3beee8a7c52b0f9bc688`, passed
+all 32 demo-native and 30 container-native cases in both push and PR runs. Its
+unchanged pilot-session gate then caught a real editor regression: `showModal()`
+made the global logout control inert while a request mutation was pending. Both
+pilot suites passed eight of nine cases and failed only the pending-logout test.
+The editor now restores nonmodal `show()` behavior, retaining explicit Escape/
+navigation cleanup and busy guards. Four lifecycle unit regressions were added;
+the tenant-isolation browser assertion remains unchanged. Final exact-head CI
+must verify this repair, including all real-ERP matrices again.
+
 The real-ERP workflow path filter now also includes `apps/web/**`, covered by a
 selection regression. A native-only correction therefore triggers both real-ERP
 database matrices on the new head instead of relying on evidence from an older

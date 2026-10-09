@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MAX_LINES,LINE_FIELDS,blankQuoteLine,requestLines,quoteLines,requestLineProblems,coverageProblems,requestPayload,quotePayload,lineEvidence} from '../lib/procurement-lines.mjs';
 import {violationExplanation} from '../lib/policy.mjs';
+import {attachEditorLifecycle} from '../lib/editor-lifecycle.mjs';
 const request=[{sku:'A',quantity:'2',uom:'EA'},{sku:'B',quantity:'3',uom:'EA'}];
 const line=(sku='A',quantity='2')=>({sku,quantity,uom:'EA',unit_price:'10.00',tax_mode:'included',tax_rate:'0',discount:'0',delivery_days:7});
 const form=entries=>{const result=new FormData();for(const [key,value]of Object.entries(entries))result.set(key,String(value));return result;};
@@ -90,4 +91,32 @@ test('line violations identify the exact item and full coverage failures',()=>{
 test('legacy submission cannot silently discard additional lines',()=>{
   assert.throws(()=>requestPayload(form(headers),request,false),/只能提交一项/);
   assert.throws(()=>quotePayload(form({}),false,2),/只能提交一项/);
+});
+
+const keyEvent=(key='Escape')=>Object.assign(new Event('keydown',{cancelable:true}),{key});
+test('request and quote editors open nonmodally so pending writes cannot make logout inert',()=>{
+  const events=new EventTarget();let shown=0;
+  const dialog={open:false,show(){shown++;this.open=true;},showModal(){assert.fail('Global logout must stay reachable');}};
+  const dispose=attachEditorLifecycle(dialog,()=>{},()=>true,events);
+  assert.equal(shown,1);assert.equal(dialog.open,true);dispose();
+});
+test('editor Escape and navigation preserve live busy guards without auto-saving',()=>{
+  const events=new EventTarget();let busy=true,closed=0;
+  const dispose=attachEditorLifecycle({open:true},()=>closed++,()=>busy,events);
+  const heldEscape=keyEvent();events.dispatchEvent(heldEscape);events.dispatchEvent(new Event('popstate'));
+  assert.equal(heldEscape.defaultPrevented,true);assert.equal(closed,0);
+  busy=false;events.dispatchEvent(keyEvent());assert.equal(closed,1);
+  events.dispatchEvent(new Event('popstate'));assert.equal(closed,2);dispose();
+});
+test('editor ignores other keys and already handled Escape; unmount removes all listeners',()=>{
+  const events=new EventTarget();let closed=0;
+  const dispose=attachEditorLifecycle({open:true},()=>closed++,()=>false,events);
+  events.dispatchEvent(keyEvent('Enter'));const handled=keyEvent();handled.preventDefault();events.dispatchEvent(handled);
+  assert.equal(closed,0);dispose();
+  events.dispatchEvent(keyEvent());events.dispatchEvent(new Event('popstate'));assert.equal(closed,0);
+});
+test('an already open editor is never reopened and the newest close callback remains usable',()=>{
+  const events=new EventTarget();let closed='';let current=()=>{closed='old';};
+  const dispose=attachEditorLifecycle({open:true,show(){assert.fail('Already open');}},()=>current(),()=>false,events);
+  current=()=>{closed='current';};events.dispatchEvent(keyEvent());assert.equal(closed,'current');dispose();
 });

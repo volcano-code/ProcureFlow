@@ -2,16 +2,12 @@
 import {useEffect,useRef,useState,type FormEvent,type ReactNode} from "react";
 import type {ProcurementRequest,Quote,QuoteLineValues,QuoteScalarField,RequestLine,EvidenceRef} from "@/lib/api";
 import {MAX_LINES,FIELD_LABELS,LINE_FIELDS,HEADER_FIELDS,blankQuoteLine,requestLines,quoteLines,requestLineProblems,coverageProblems,requestPayload,quotePayload,lineEvidence} from "@/lib/procurement-lines.mjs";
+import {attachEditorLifecycle} from "@/lib/editor-lifecycle.mjs";
 
 /** Each mounted editor owns its form. Navigation and dismissal discard unsaved changes. */
 function EditorDialog({title,id,busy,onClose,children}:{title:string;id:string;busy:boolean;onClose:()=>void;children:ReactNode}) {
   const dialog=useRef<HTMLDialogElement>(null),close=useRef(onClose),locked=useRef(busy);close.current=onClose;locked.current=busy;
-  useEffect(()=>{
-    if(dialog.current&&!dialog.current.open)dialog.current.showModal();
-    const navigate=()=>{if(!locked.current)close.current();};
-    window.addEventListener("popstate",navigate);
-    return()=>window.removeEventListener("popstate",navigate);
-  },[]);
+  useEffect(()=>attachEditorLifecycle(dialog.current,()=>close.current(),()=>locked.current),[]);
   return <dialog ref={dialog} className="procurement-editor" aria-labelledby={id} onCancel={event=>{event.preventDefault();if(!busy)onClose();}}>
     <div className="modal-head"><h2 id={id}>{title}</h2><button type="button" aria-label={id==="request-form-title"?"关闭需求表单":"关闭报价表单"} disabled={busy} onClick={onClose}>×</button></div>{children}
   </dialog>;
