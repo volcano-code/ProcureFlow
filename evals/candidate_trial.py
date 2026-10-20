@@ -111,7 +111,8 @@ def candidate(case, config):
 
     try:
         settings = Settings(data_dir=Path(config['directory']), mode='demo', erp_mode='mock')
-        db = Database(settings.database_url)
+        # This process owns a freshly created temporary SQLite DB, never an existing deployment.
+        db = Database(settings.database_url, create_schema=True)
         service = ProcurementService(db, settings, NoERP())
         candidates = CandidateService(service)
         principal = Principal(**settings.auth_tokens['demo-buyer'])
@@ -173,6 +174,7 @@ def run(case, config):
     except Exception:
         # Raw exception values/keys/provider text are NEVER exported.
         result = empty_record(case, config['mode'], 'TRIAL_FAILED')
-        result.update(status='failed', provider_requests=None, network_attempted=None)
+        result.update(status='failed', provider_requests=0 if config['mode'] == 'baseline' else None,
+                      network_attempted=None if config['mode'] == 'live' else False)
     result['elapsed_seconds'] = round(time.monotonic() - start, 3)
     return result

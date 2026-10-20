@@ -223,3 +223,19 @@ def test_direct_worker_cannot_implicitly_enable_network(tmp_path):
         input=json.dumps(dict(case=case,config=cfg)),text=True,capture_output=True,timeout=10)
     assert json.loads(p.stdout)['reason']=='INVALID_WORKER_CONFIGURATION'
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize('mode', ['baseline', 'fixture', 'live'])
+def test_unexpected_failure_preserves_network_scope_without_echoing_error(monkeypatch, mode):
+    from evals import candidate_trial
+    def fail(*args):
+        raise RuntimeError('PRIVATE-CANARY-MUST-NOT-LEAK')
+    monkeypatch.setattr(candidate_trial, 'baseline', fail)
+    monkeypatch.setattr(candidate_trial, 'candidate', fail)
+    case=load_inputs(SUITE)['cases'][0]
+    result=candidate_trial.run(case, {'mode': mode})
+    assert result['status']=='failed' and result['reason']=='TRIAL_FAILED'
+    assert result['network_attempted'] is (None if mode == 'live' else False)
+    assert result['provider_requests'] is (0 if mode == 'baseline' else None)
+    assert 'PRIVATE-CANARY' not in json.dumps(result)
+    validate_record(result, case, mode)
