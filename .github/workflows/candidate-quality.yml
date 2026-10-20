@@ -1,0 +1,100 @@
+name: candidate-extraction-quality
+on:
+  push:
+    branches: ['develop/remediation-candidate-quality']
+  pull_request:
+    paths: ['evals/candidate12/**', 'evals/candidate_quality.py', 'evals/candidate_trial.py', 'scripts/evaluate_candidates.py', 'tests/test_candidate_quality.py', '.github/workflows/candidate-quality.yml']
+  workflow_dispatch:
+    inputs:
+      allow_live:
+        description: 'Authorize up to 48 provider requests on SYNTHETIC inputs; provider charges may apply.'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: candidate-quality-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Independent grader and actual candidate-runtime fixture
+        run: python -m pytest -q tests/test_candidate_quality.py --junitxml=evals/reports/ci/candidate-quality/tests.xml
+      - name: Validate public Dev inputs and measure real deterministic parser
+        run: |
+          python scripts/evaluate_candidates.py validate --output evals/reports/ci/candidate-quality/inputs.json
+          python scripts/evaluate_candidates.py run --mode baseline --output evals/reports/ci/candidate-quality/baseline.json
+          python scripts/evaluate_candidates.py grade --observations evals/reports/ci/candidate-quality/baseline.json --output evals/reports/ci/candidate-quality/baseline-scores.json
+      - name: Prove default live path blocks before networking
+        run: |
+          set +e
+          python scripts/evaluate_candidates.py run --mode live --output evals/reports/ci/candidate-quality/default-blocked.json
+          result=$?
+          set -e
+          test "$result" -eq 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('evals/reports/ci/candidate-quality/default-blocked.json').read_text())
+          assert r['status']=='blocked' and r['known_provider_requests']==0
+          assert len(r['cases'])==12 and all(x['network_attempted'] is False for x in r['cases'])
+          PY
+      - name: Bind exact tested source identity
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/candidate-quality
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/candidate-quality/source-identity.txt
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/candidate-quality-source.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-quality-offline-evidence
+          path: evals/reports/ci/candidate-quality
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-quality-source
+          path: ${{ runner.temp }}/candidate-quality-source.zip
+          if-no-files-found: error
+  authorized-live:
+    if: github.event_name == 'workflow_dispatch' && inputs.allow_live
+    needs: offline
+    environment: procureflow-model-eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Baseline on the same exact implementation
+        run: python scripts/evaluate_candidates.py run --mode baseline --output evals/reports/authorized/candidate-quality/baseline.json
+      - name: Explicitly authorized synthetic provider trials (no automatic retry)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          PF_EVAL_APPROVED_HOST: ${{ vars.PF_EVAL_APPROVED_HOST }}
+          LLM_THINKING_MODE: ${{ vars.LLM_THINKING_MODE || 'default' }}
+        run: python scripts/evaluate_candidates.py run --mode live --allow-network --max-requests 48 --output evals/reports/authorized/candidate-quality/live.json
+      - name: Independently grade even partial or blocked attempts
+        if: always()
+        run: |
+          python scripts/evaluate_candidates.py grade --observations evals/reports/authorized/candidate-quality/live.json --output evals/reports/authorized/candidate-quality/live-scores.json
+          python scripts/evaluate_candidates.py compare --baseline-observations evals/reports/authorized/candidate-quality/baseline.json --observations evals/reports/authorized/candidate-quality/live.json --output evals/reports/authorized/candidate-quality/paired.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-quality-authorized-live-evidence
+          path: evals/reports/authorized/candidate-quality
+          if-no-files-found: error
