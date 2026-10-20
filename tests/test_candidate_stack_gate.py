@@ -158,3 +158,11 @@ def test_fixture_compose_uses_worker_namespace_without_host_provider_port():
     runner=(ROOT/"scripts/verify_candidate_stack.py").read_text()
     assert "page.route(" not in runner and ".fulfill(" not in runner
     assert 'compose("kill","-s","SIGKILL","candidate-worker")' in runner
+
+def test_browser_gate_waits_for_new_request_and_uses_enabled_upload_button():
+    runner=(ROOT/"scripts/verify_candidate_stack.py").read_text()
+    assert 'name="Candidate stack " + scenario, exact=True' in runner
+    assert 'expect(upload).to_be_enabled()' in runner
+    assert 'page.expect_file_chooser()' in runner
+    assert 'set_input_files(' not in runner
+    assert 'r.url.endswith(f"/requests/{request[\'id\']}/candidate-runs")' in runner

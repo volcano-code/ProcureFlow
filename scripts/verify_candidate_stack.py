@@ -157,6 +157,8 @@ def exercise(output_dir):
                 return response.json()
 
             def create(scenario):
+                nonlocal phase
+                phase = scenario + "-create"
                 page.get_by_role("button", name="＋ 新建采购需求").click()
                 form = page.get_by_test_id("request-form")
                 form.locator('[name="title"]').fill("Candidate stack " + scenario)
@@ -167,10 +169,20 @@ def exercise(output_dir):
                 require(response.value.status == 201, "REQUEST_CREATE_FAILED")
                 request = response.value.json()
                 expect(form).to_have_count(0)
-                expect(page.get_by_test_id("candidate-panel")).to_be_visible()
+                # The modal closes before the new request's asynchronous refresh.
+                # Wait for its actual header and enabled upload control, not the
+                # previous request's still-visible hidden input.
+                phase = scenario + "-upload"
+                expect(page.locator(".request-panel").get_by_role("heading",
+                    name="Candidate stack " + scenario, exact=True)).to_be_visible()
+                panel = page.get_by_test_id("candidate-panel")
+                upload = panel.get_by_role("button", name="上传候选原文", exact=True)
+                expect(upload).to_be_enabled()
+                with page.expect_file_chooser() as chooser:
+                    upload.click()
                 with page.expect_response(lambda r: r.request.method == "POST" and
-                        r.url.endswith("/candidate-runs")) as response:
-                    page.get_by_test_id("candidate-file").set_input_files({
+                        r.url.endswith(f"/requests/{request['id']}/candidate-runs")) as response:
+                    chooser.value.set_files({
                         "name":scenario+".txt","mimeType":"text/plain",
                         "buffer":(TEXT+"\nfixture-case: "+scenario).encode()})
                 require(response.value.status == 201, "RUN_RESERVE_FAILED")
@@ -255,7 +267,7 @@ def exercise(output_dir):
             result = call("GET",f"/candidate-runs/{inflight['id']}")
             require(result["status"] == "CANCELLED" and result["output"] is None
                     and provider_control()["calls"] == 3,"LATE_OUTPUT_ACCEPTED")
-            report["runs"].append({"scenario":"inflight_cancel","id":inflight["id"],"status":"CANCELLED"})
+            report["runs"].append({"scenario":"inflight_cancel","id":inflight['id'],"status":"CANCELLED"})
             report["steps"].append(STEPS[7])
 
             phase = "sigkill"
