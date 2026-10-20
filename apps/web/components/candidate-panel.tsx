@@ -1,6 +1,6 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
-import {api,type Capabilities,type ProcurementRequest,type QuoteValues,type Credential} from "@/lib/api";
+import {api,type Capabilities,type ProcurementRequest,type QuoteValues,type SessionScope} from "@/lib/api";
 
 type SourceRef={fragment_id:string;text:string;document_sha256:string;page?:number;line?:number;origin:string};
 type CandidateRun={id:string;revision:number;status:string;filename:string;can_import:boolean;current:boolean;
@@ -17,7 +17,7 @@ const labels:Record<string,string>={supplier_id:"供应商",sku:"物料标识",q
 
 /** Keyed by identity, request ID and version. Unmount aborts browser waits only, never asserts server cancellation. */
 export default function CandidatePanel({request,token,cap,buyer,disabled,onImported}:{request:ProcurementRequest;
-  token:Credential;cap:Capabilities;buyer:boolean;disabled:boolean;onImported:()=>void}) {
+  token:SessionScope;cap:Capabilities;buyer:boolean;disabled:boolean;onImported:()=>void}) {
   const [runs,setRuns]=useState<CandidateRun[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState("");
   const [allowModel,setAllowModel]=useState(false),[ack,setAck]=useState(false),[reason,setReason]=useState("");
   const input=useRef<HTMLInputElement>(null),active=useRef(true),lock=useRef(false),epoch=useRef(0);

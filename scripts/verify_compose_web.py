@@ -17,6 +17,8 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "test_native_candidate_source_reservation_cancel_and_no_business_write",
+    "test_native_candidate_scope_cleared_on_identity_change",
     "test_native_advice_stop_waiting_for_reservation_never_starts_late_paid_work",
     "test_native_advice_stop_waiting_for_process_reads_saved_state_without_replay",
     "test_native_advice_process_wait_timeout_reads_receipt_without_replay",
