@@ -1,0 +1,27 @@
+name: remediation-batch2
+on:
+  push:
+    branches: ['develop/remediation-r1-batch2']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tracked-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive Git tracked source only
+        run: |
+          mkdir -p "$RUNNER_TEMP/pf-source"
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/pf-source/source.zip"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/pf-source/source-identity.txt"
+          sha256sum "$RUNNER_TEMP/pf-source/source.zip" > "$RUNNER_TEMP/pf-source/source-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remediation-batch2-source
+          path: ${{ runner.temp }}/pf-source
+          if-no-files-found: error
+          retention-days: 30
