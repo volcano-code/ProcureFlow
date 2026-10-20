@@ -180,10 +180,34 @@ def test_runtime_baseline_uses_actual_parser_not_gold():
     assert runner.execute_case(changed,cfg)['fields']['unit_price']['value_sha256']==value_digest('unit_price','29')
 
 
-def test_runtime_model_fixture_uses_actual_candidate_queue():
+def test_runtime_model_fixture_uses_actual_candidate_queue(monkeypatch):
+    # Only the synthetic fixture is observed here; preserve safe failure category
+    # without exposing model prose or weakening receipt validation.
+    original = runner.subprocess.run
+    diagnostics = []
+    def inspect_worker(*args, **kwargs):
+        response = original(*args, **kwargs)
+        if args and args[0][-1] == '--_worker':
+            try:
+                payload = json.loads(response.stdout)
+                case = load_inputs(SUITE)['cases'][0]
+                validate_record(payload, case, 'fixture')
+                diagnostics.append({'returncode': response.returncode, 'valid_receipt': True,
+                                    'status': payload['status'], 'reason': payload['reason']})
+            except (ValueError, TypeError, KeyError) as error:
+                # Only locally defined validation codes, never arbitrary error text.
+                safe_codes = {'INVALID_RECORD_KEYS', 'INVALID_RECORD_IDENTITY', 'INVALID_RECORD_STATUS',
+                    'INVALID_ACCOUNTING', 'INVALID_REQUEST_COUNT', 'INVALID_DURATION', 'INVALID_TOOL_PATH',
+                    'INVALID_USAGE', 'INVALID_FIELDS', 'INCOMPLETE_OBSERVED_FIELDS', 'INVALID_FIELD_OBSERVATION',
+                    'INVALID_REFERENCES', 'INVALID_LOCATOR', 'INVALID_CLARIFICATIONS', 'INVALID_SIDE_EFFECTS',
+                    'OFFLINE_MODE_NETWORK_MISMATCH', 'BASELINE_MODEL_CALL'}
+                diagnostics.append({'returncode': response.returncode,
+                    'validation_code': str(error) if str(error) in safe_codes else 'MALFORMED_WORKER_JSON'})
+        return response
+    monkeypatch.setattr(runner.subprocess, 'run', inspect_worker)
     r=runner.run_suite(load_inputs(SUITE),mode='fixture',limit=1,max_requests=4)
     case=r['cases'][0]
-    assert case['status']=='observed',case
+    assert case['status']=='observed', diagnostics
     assert case['provider_requests']==2 and case['network_attempted'] is False
     assert case['tool_path']==['get_request','get_evidence']
     assert case['side_effects']==dict(quotes=0,approvals=0,operations=0,erp_attempts=0)
