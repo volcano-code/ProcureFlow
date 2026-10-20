@@ -1430,3 +1430,77 @@ def test_native_candidate_scope_cleared_on_identity_change(page):
     expect(page.get_by_test_id('candidate-run')).to_have_count(0)
     expect(page.get_by_test_id('candidate-panel')).to_have_count(0)
     expect(page.get_by_test_id('quote-row')).to_have_count(0)
+
+
+def candidate_queue_ui_fixture(page):
+    """Emulate queue receipts only; API/process Worker behavior has a separate gate."""
+    state={'run':None,'status':None,'enqueues':0,'polls':0,'legacy_calls':0}
+    def respond(route,body,status=200):
+        route.fulfill(status=status,json=body,headers={'Access-Control-Allow-Origin':URL,
+            'Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS'})
+    def handle(route):
+        path=route.request.url.split('/api/v1',1)[-1].split('?',1)[0]
+        method=route.request.method
+        if path=='/capabilities' and method=='GET':
+            response=route.fetch(); body=response.json();body['candidate_queue_enabled']=True
+            route.fulfill(response=response,json=body);return
+        if path.endswith('/candidate-runs') and method=='GET':
+            response=route.fetch();body=response.json()
+            if body:
+                state['run']=body[0]
+                if state['status']:
+                    state['polls']+=1
+                    body[0].update(status=state['status'],revision=2)
+            route.fulfill(response=response,json=body);return
+        if '/candidate-runs/' in path:
+            if path.endswith('/enqueue'):
+                state['enqueues']+=1;state['status']='QUEUED'
+                respond(route,{**state['run'],'status':'QUEUED','revision':2},202);return
+            if path.endswith('/process'):state['legacy_calls']+=1
+            if path.endswith('/cancel'):
+                state['status']='CANCELLED'
+                respond(route,{**state['run'],'status':'CANCELLED','revision':3});return
+            if method=='GET' and state['run']:
+                respond(route,{**state['run'],'status':state['status'] or 'PENDING','revision':2});return
+        route.continue_()
+    page.route('**/api/v1/**',handle)
+    return state
+
+
+def test_native_candidate_queue_polls_receipt_and_never_uses_inline_process(page):
+    state=candidate_queue_ui_fixture(page)
+    prepare_table_import(page)
+    page.get_by_test_id('candidate-file').set_input_files({'name':'queue-ui-fixture.txt','mimeType':'text/plain',
+        'buffer':b'Synthetic advisory input, no confirmed fact or procurement authority.'})
+    run=page.get_by_test_id('candidate-run');expect(run).to_have_count(1)
+    page.get_by_test_id('candidate-panel').get_by_label('我允许将本任务原文发送给服务端配置的模型；可能产生费用').check()
+    run.get_by_role('button',name='开始候选提取').click()
+    expect(run).to_contain_text('已排队，等待独立 Worker')
+    before=state['polls'];state['status']='RUNNING'
+    expect(run).to_contain_text('提取中',timeout=7000)
+    assert state['polls']>before
+    state['status']='INTERRUPTED'
+    expect(run).to_contain_text('执行中断，禁止自动重放',timeout=7000)
+    assert state['enqueues']==1 and state['legacy_calls']==0
+    expect(run.get_by_role('button',name='开始候选提取')).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+
+
+def test_native_candidate_queued_cancel_and_scope_change_stop_polling(page):
+    state=candidate_queue_ui_fixture(page)
+    prepare_table_import(page)
+    page.get_by_test_id('candidate-file').set_input_files({'name':'queue-cancel-fixture.txt','mimeType':'text/plain',
+        'buffer':b'Synthetic candidate cancelled before any external dispatch.'})
+    run=page.get_by_test_id('candidate-run');expect(run).to_have_count(1)
+    page.get_by_test_id('candidate-panel').get_by_label('我允许将本任务原文发送给服务端配置的模型；可能产生费用').check()
+    run.get_by_role('button',name='开始候选提取').click()
+    expect(run).to_contain_text('已排队，等待独立 Worker')
+    run.get_by_role('button',name='取消候选任务').click()
+    expect(run).to_contain_text('已取消')
+    settled=state['polls'];page.wait_for_timeout(2300)
+    assert state['polls']==settled
+    page.get_by_label('访问令牌').fill('demo-other-tenant')
+    page.get_by_role('button',name='登录',exact=True).click()
+    expect(page.get_by_test_id('candidate-panel')).to_have_count(0)
+    expect(page.get_by_test_id('candidate-run')).to_have_count(0)
+    assert state['enqueues']==1 and state['legacy_calls']==0

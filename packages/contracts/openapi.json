@@ -606,10 +606,63 @@
         }
       }
     },
+    "/api/v1/candidate-runs/{run_id}/enqueue": {
+      "post": {
+        "summary": "Enqueue Candidate",
+        "operationId": "enqueue_candidate_api_v1_candidate_runs__run_id__enqueue_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateProcess"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/candidate-runs/{run_id}/process": {
       "post": {
         "summary": "Process Candidate",
         "operationId": "process_candidate_api_v1_candidate_runs__run_id__process_post",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
