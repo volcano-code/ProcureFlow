@@ -9,7 +9,7 @@ type CandidateRun={id:string;revision:number;status:string;filename:string;can_i
     clarifications:{field:string;question:string;reason:string}[];
     calculation:{total:string|null;missing:string[];violations:string[]};model_calls:number;tool_calls:number;
     usage_complete:boolean;semantic_factuality_verified:false;output_hash:string}|null};
-const status:Record<string,string>={PENDING:"已预留，未调用模型",RUNNING:"提取中",NEEDS_REVIEW:"等待人工核对",
+const status:Record<string,string>={PENDING:"已预留，未调用模型",QUEUED:"已排队，等待独立 Worker",RUNNING:"提取中",NEEDS_REVIEW:"等待人工核对",
   NEEDS_CLARIFICATION:"有缺失或冲突，待补充",IMPORTED:"已导入未确认报价",CANCELLED:"已取消",FAILED:"提取失败",
   STALE:"输入版本已失效",INTERRUPTED:"执行中断，禁止自动重放"};
 const labels:Record<string,string>={supplier_id:"供应商",sku:"物料标识",quantity:"数量",uom:"单位",unit_price:"单价",
@@ -34,6 +34,18 @@ export default function CandidatePanel({request,token,cap,buyer,disabled,onImpor
   useEffect(()=>{active.current=true;void refresh().catch(e=>{if(active.current&&token.active)setError(String(e));});
     return()=>{active.current=false;epoch.current++;controllers.current.forEach(c=>c.abort());};
   },[refresh,token]);
+  const watching=runs.some(run=>["QUEUED","RUNNING"].includes(run.status)&&run.current&&!run.expired);
+  useEffect(()=>{
+    if(!watching||!token.active)return;
+    let stopped=false;let timer:ReturnType<typeof setTimeout>;
+    const poll=async()=>{
+      try{await refresh();}
+      catch(e){if(!stopped&&active.current&&token.active)setError(String(e));}
+      if(!stopped&&active.current&&token.active)timer=setTimeout(()=>void poll(),2000);
+    };
+    timer=setTimeout(()=>void poll(),2000);
+    return()=>{stopped=true;clearTimeout(timer);};
+  },[watching,refresh,token]);
   async function act(work:()=>Promise<void>) {
     if(lock.current||!token.active)return;lock.current=true;setBusy(true);setError("");
     try {await work();}
@@ -45,7 +57,7 @@ export default function CandidatePanel({request,token,cap,buyer,disabled,onImpor
     <h2>非标准报价 · 候选核对</h2>
     <p>上传 TXT 或文本 PDF，提取结果只供人工核对。引用位置有效不等于字段语义正确，采纳后仍须确认报价并独立审批。</p>
     {multi?<p role="note">当前候选入口仅支持单物料；多物料请使用表格映射。</p>:null}
-    {!cap.candidate_model_configured?<p role="note">服务端未启用候选模型。可保存原文和预留任务，但不会自动调用模型或产生费用。</p>:null}
+    {!cap.candidate_queue_enabled?<p role="note">服务端未启用候选模型队列。可保存原文和预留任务，但不会自动调用模型或产生费用。</p>:<p role="note">开始后仅将任务排入队列；模型由独立 Worker 执行。排队不表示已经调用成功。</p>}
     <input ref={input} type="file" hidden accept=".txt,.pdf" data-testid="candidate-file" onChange={e=>{
       const file=e.target.files?.[0];e.target.value="";if(!file)return;
       void act(async()=>{
@@ -65,11 +77,11 @@ export default function CandidatePanel({request,token,cap,buyer,disabled,onImpor
       <h3>{run.filename} · {status[run.status]||run.status}</h3><small>{run.id} · 版本 {run.revision}</small>
       {!run.current||run.expired?<p role="alert">输入已变化或任务已过期，不能采纳。请基于最新需求重新预留。</p>:null}
       {run.error_code?<p role="alert">{run.error_code}。失败任务不会自动重放；费用未知时不按零统计。</p>:null}
-      {run.status==="PENDING"?<button type="button" disabled={!buyer||disabled||busy||!allowModel||!cap.candidate_model_configured||!run.current||run.expired}
-        onClick={()=>void act(async()=>{await call(`/candidate-runs/${run.id}/process`,"POST",{
+      {run.status==="PENDING"?<button type="button" disabled={!buyer||disabled||busy||!allowModel||!cap.candidate_queue_enabled||!run.current||run.expired}
+        onClick={()=>void act(async()=>{await call(`/candidate-runs/${run.id}/enqueue`,"POST",{
           expected_revision:run.revision,acknowledge_external_model:true});await refresh();})}>开始候选提取</button>:null}
-      {["PENDING","RUNNING"].includes(run.status)?<button type="button" disabled={!buyer||disabled} onClick={()=>{
-        // Cancellation remains available while the synchronous model request is awaiting.
+      {["PENDING","QUEUED","RUNNING"].includes(run.status)?<button type="button" disabled={!buyer||disabled} onClick={()=>{
+        // Cancellation remains available while the independent worker is pending/running.
         void call<CandidateRun>(`/candidate-runs/${run.id}`).then(current=>{
           if(!active.current||!token.active)return;
           return call(`/candidate-runs/${run.id}/cancel`,"POST",{expected_revision:current.revision});
@@ -98,6 +110,6 @@ export default function CandidatePanel({request,token,cap,buyer,disabled,onImpor
         </>:null}
       </>:null}
     </article>)}
-    <p className="muted">离开页面只停止浏览器等待，不表示服务端已取消，也不会自动重试已开始的模型调用。</p>
+    <p className="muted">离开页面只停止轮询。取消阻止后续处理或丢弃晚到结果，不保证已发出的模型请求不产生费用；中断的调用不会自动重放。</p>
   </section>;
 }

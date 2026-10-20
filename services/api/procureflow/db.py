@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 from .database_config import normalize_database_url
-from sqlalchemy import JSON, Boolean, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, create_engine, event, text
+from sqlalchemy import JSON, Boolean, ForeignKey, ForeignKeyConstraint, Integer, String, Text, Index, UniqueConstraint, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -192,7 +192,8 @@ class AdviceRunRow(Base):
 class QuoteCandidateRunRow(Base):
     """Durable advisory candidates, separate from confirmed quotes/approvals."""
     __tablename__ = "quote_candidate_runs"
-    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key", name="uq_candidate_run_key"),)
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key", name="uq_candidate_run_key"),
+        Index("ix_candidate_dispatch", "status", "created_at", "id"))
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(80), index=True)
     request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
@@ -210,6 +211,8 @@ class QuoteCandidateRunRow(Base):
     lease_until: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[str] = mapped_column(String(40), default=now)
     completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    queued_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    dispatch_authority: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class TenantPolicyRow(Base):

@@ -188,6 +188,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
                 "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
+                "candidate_queue_enabled": os.getenv("PF_ALLOW_CANDIDATE_QUEUE") == "1",
                 "candidate_model_configured": bool(os.getenv("PF_ALLOW_CANDIDATE_MODEL") == "1" and os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
                 "candidate_scope": "single-item-text-pdf-advisory-v1",
                 "advice_runtime": RUNTIME, "advice_runtime_version": LANGGRAPH_VERSION,
@@ -264,7 +265,11 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     def get_candidate(run_id: str, principal=Depends(identity)):
         return candidate_service.get(principal, run_id)
 
-    @app.post("/api/v1/candidate-runs/{run_id}/process")
+    @app.post("/api/v1/candidate-runs/{run_id}/enqueue", status_code=202)
+    def enqueue_candidate(run_id: str, command: CandidateProcess, principal=Depends(identity)):
+        return candidate_service.enqueue(principal, run_id, command)
+
+    @app.post("/api/v1/candidate-runs/{run_id}/process", deprecated=True)
     def process_candidate(run_id: str, command: CandidateProcess, principal=Depends(identity)):
         return candidate_service.process(principal, run_id, command, CandidateAgent.from_env)
 

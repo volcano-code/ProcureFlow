@@ -1,0 +1,63 @@
+name: native-candidate-stack-validation
+on:
+  push:
+    branches: ['develop/remediation-candidate-worker']
+  pull_request:
+    paths: ['services/api/**', 'apps/web/**', 'scripts/**', 'tests/**', 'compose*.yaml', '.github/workflows/candidate-stack.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-candidate-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: pf-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+      PF_CANDIDATE_STACK_FIXTURE: '1'
+      PF_CANDIDATE_WORKER_ENV_FILE: .env.candidate-fixture
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Fixture and fail-closed evidence regressions
+        run: |
+          mkdir -p evals/reports/ci/candidate-stack
+          python -m pytest -q tests/test_candidate_stack_gate.py --junitxml=evals/reports/ci/candidate-stack/fixture-tests.xml
+      - name: Create disposable DB and synthetic worker configuration
+        run: |
+          python scripts/init_postgres_env.py
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          os.umask(0o077)
+          with Path('.env.candidate-fixture').open('x') as output:
+              output.write('LLM_BASE_URL=http://127.0.0.1:19090\n')
+              output.write('LLM_MODEL=candidate-stack-fixture-v1\n')
+              output.write('LLM_API_KEY=synthetic-candidate-stack-key-not-a-provider-secret\n')
+          PY
+      - name: Build and start actual native UI, PG and candidate Worker containers
+        run: |
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml -f compose.candidate-worker.yaml -f compose.candidate-fixture.yaml up --build -d --wait --wait-timeout 180
+      - name: Real browser, durable queue, cancellation and actual worker SIGKILL
+        run: python scripts/verify_candidate_stack.py --fixture --output evals/reports/ci/candidate-stack/roundtrip.json
+      - name: Reject missing or incomplete evidence
+        if: always()
+        run: python scripts/check_candidate_stack.py --report evals/reports/ci/candidate-stack/roundtrip.json > evals/reports/ci/candidate-stack/acceptance.json
+      - name: Capture synthetic container state and logs
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/candidate-stack
+          docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml -f compose.candidate-worker.yaml -f compose.candidate-fixture.yaml logs --no-color > evals/reports/ci/candidate-stack/containers.log 2>&1
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/candidate-stack/source-identity.txt
+      - name: Destroy this disposable project only
+        if: always()
+        run: docker compose --env-file .env.postgres -f compose.postgres.yaml -f compose.web.yaml -f compose.candidate-worker.yaml -f compose.candidate-fixture.yaml down -v --remove-orphans
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-candidate-stack-evidence
+          path: evals/reports/ci/candidate-stack
+          if-no-files-found: error

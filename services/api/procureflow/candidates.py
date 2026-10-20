@@ -2,11 +2,12 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
+import os
 from pathlib import Path
 from sqlalchemy import select, func
 from .advice import SAFE_ERRORS
-from .candidate_contracts import CandidateProposal, FIELDS
-from .contracts import QuoteValues
+from .candidate_contracts import CandidateProposal, CandidateProcess, FIELDS
+from .contracts import QuoteValues, Principal
 from .db import DocumentRow, QuoteRow, QuoteVersionRow, QuoteCandidateRunRow, audit, now, uid
 from .domain import digest, offer_check
 from .errors import DomainError
@@ -76,6 +77,8 @@ class CandidateService:
                 'error_code': 'CANDIDATE_INTERRUPTED' if timed_out else row.error_code,
                 'can_import': current and not expired and row.status in {'NEEDS_REVIEW', 'NEEDS_CLARIFICATION'},
                 'created_at': row.created_at, 'completed_at': row.completed_at, 'expires_at': row.expires_at,
+                'queued_at': row.queued_at,
+                'dispatch_mode': 'independent_worker' if row.dispatch_authority else 'inline_legacy',
                 'advisory_only': True, 'semantic_factuality_verified': False, 'auto_confirmed': False}
 
     def upload(self, principal, request_id, filename, data):
@@ -181,16 +184,119 @@ class CandidateService:
                 raise DomainError('FORBIDDEN', 'Only the candidate initiator can cancel its run', 403)
             if row.revision != command.expected_revision:
                 raise DomainError('VERSION_CONFLICT', 'Refresh the candidate run', 409)
-            if row.status in {'PENDING', 'RUNNING'}:
+            if row.status in {'PENDING', 'QUEUED', 'RUNNING'}:
                 self._finish(session, principal, row, 'CANCELLED')
             return self._view(session, principal, row, request)
+
+    def _dispatch_binding(self, principal, row):
+        # Server-owned identity references only. Never persist bearer tokens/invites.
+        binding = {'schema': 'candidate-dispatch-v1', 'run_id': row.id,
+            'input_hash': row.input_hash, 'mode': self.p.settings.mode,
+            'tenant_id': principal.tenant_id, 'user_id': principal.user_id,
+            'role': principal.role, 'session_id': principal.session_id,
+            'auth_version': principal.auth_version}
+        return {**binding, 'binding_hash': digest(binding)}
+
+    def _queued_principal(self, session, row):
+        """Revalidate the enqueue authority; a stored ID is never itself authority."""
+        data = row.dispatch_authority
+        expected = {'schema', 'run_id', 'input_hash', 'mode', 'tenant_id', 'user_id',
+                    'role', 'session_id', 'auth_version', 'binding_hash'}
+        if (not isinstance(data, dict) or set(data) != expected
+                or data.get('schema') != 'candidate-dispatch-v1'
+                or data.get('binding_hash') != digest({k:v for k,v in data.items() if k != 'binding_hash'})
+                or data.get('run_id') != row.id or data.get('input_hash') != row.input_hash
+                or data.get('tenant_id') != row.tenant_id or data.get('user_id') != row.creator_id
+                or data.get('role') != 'buyer' or data.get('mode') != self.p.settings.mode):
+            raise DomainError('CANDIDATE_DISPATCH_INVALID', 'Queue authorization requires review', 409)
+        principal = Principal(tenant_id=row.tenant_id, user_id=row.creator_id, role='buyer')
+        principal._session_id, principal._auth_version = data['session_id'], data['auth_version']
+        if self.p.settings.mode != 'pilot':
+            if (principal.session_id is not None or principal.auth_version is not None
+                    or not self.p.identities.actor_valid(session, row.tenant_id, row.creator_id, 'buyer')):
+                raise DomainError('CANDIDATE_AUTH_REVOKED', 'Queue actor is no longer authorized', 403)
+        return self.p.identities.validate_principal(session, principal, lock=True)
+
+    def enqueue(self, principal, run_id, command):
+        """Persist explicit permission to process; this method never creates an agent."""
+        require(principal, 'buyer')
+        if os.getenv('PF_ALLOW_CANDIDATE_QUEUE') != '1':
+            raise DomainError('CANDIDATE_QUEUE_DISABLED', 'Operator must explicitly enable the candidate queue', 503)
+        with self.p.transaction(principal, write=True) as session:
+            row = self._run(session, principal, run_id)
+            request = self.p._request(session, principal, row.request_id, lock=True)
+            row = self._run(session, principal, run_id, lock=True)
+            if row.creator_id != principal.user_id:
+                raise DomainError('FORBIDDEN', 'Only the initiating buyer can enqueue this run', 403)
+            if row.status != 'PENDING':
+                if row.dispatch_authority and row.dispatch_authority != self._dispatch_binding(principal, row):
+                    raise DomainError('CANDIDATE_DISPATCH_BOUND', 'Run is bound to another authorization context', 409)
+                return self._view(session, principal, row, request)
+            if row.revision != command.expected_revision:
+                raise DomainError('VERSION_CONFLICT', 'Refresh the candidate run', 409)
+            current, reason = self._fresh(session, principal, request, row)
+            if not current or row.expires_at <= now():
+                self._finish(session, principal, row, 'STALE', reason or 'CANDIDATE_INPUT_CHANGED')
+                return self._view(session, principal, row, request)
+            active = session.scalar(select(func.count()).select_from(QuoteCandidateRunRow).where(
+                QuoteCandidateRunRow.tenant_id == principal.tenant_id,
+                QuoteCandidateRunRow.status.in_(['QUEUED', 'RUNNING']),
+                QuoteCandidateRunRow.expires_at > now()))
+            if active >= 5:
+                raise DomainError('CANDIDATE_QUEUE_LIMIT', 'At most five outstanding candidates per workspace', 429)
+            row.dispatch_authority = self._dispatch_binding(principal, row)
+            row.status, row.queued_at = 'QUEUED', now()
+            row.revision += 1
+            audit(session, principal, row.request_id, 'CANDIDATE_ENQUEUED',
+                  {'run_id': row.id, 'input_hash': row.input_hash, 'advisory_only': True})
+            return self._view(session, principal, row, request)
+
+    def dispatch(self, tenant_id, run_id, factory):
+        """Trusted worker entrypoint. Claim once, never retry an uncertain model call."""
+        actor = Principal(tenant_id=tenant_id, user_id='candidate-worker', role='auditor')
+        with self.db.activity(write=True):
+            with self.db.transaction(write=True) as session:
+                row = self._run(session, actor, run_id)
+                # Pilot identity lock order is tenant -> identity -> request -> run.
+                try:
+                    principal = self._queued_principal(session, row)
+                    denied = None
+                except (DomainError, ValueError, TypeError):
+                    principal, denied = actor, 'CANDIDATE_AUTH_REVOKED'
+                self.p._request(session, actor, row.request_id, lock=True)
+                row = self._run(session, actor, run_id, lock=True)
+                if row.status == 'RUNNING' and (not row.lease_until or row.lease_until <= now()):
+                    self._finish(session, actor, row, 'INTERRUPTED', 'CANDIDATE_INTERRUPTED')
+                if row.status != 'QUEUED':
+                    return {'id': row.id, 'status': row.status}
+                if denied:
+                    self._finish(session, actor, row, 'FAILED', denied)
+                    return {'id': row.id, 'status': row.status}
+                revision = row.revision
+            try:
+                self._process(principal, run_id, CandidateProcess(expected_revision=revision,
+                    acknowledge_external_model=True), factory, queued=True)
+            except DomainError as exc:
+                if exc.code == 'WRITES_PAUSED':
+                    raise
+                # Authorization can expire between transactions or after result storage.
+                # Do not call an agent again or expose the failed actor's output here.
+                with self.db.transaction(write=True) as session:
+                    row = self._run(session, actor, run_id)
+                    self.p._request(session, actor, row.request_id, lock=True)
+                    row = self._run(session, actor, run_id, lock=True)
+                    if row.status == 'QUEUED':
+                        self._finish(session, actor, row, 'FAILED', 'CANDIDATE_AUTH_REVOKED')
+            with self.db.transaction() as session:
+                row = self._run(session, actor, run_id)
+                return {'id': row.id, 'status': row.status}
 
     def process(self, principal, run_id, command, factory):
         require(principal, 'buyer')
         with self.db.activity(write=True):
             return self._process(principal, run_id, command, factory)
 
-    def _process(self, principal, run_id, command, factory):
+    def _process(self, principal, run_id, command, factory, *, queued=False):
         with self.p.transaction(principal, write=True) as session:
             row = self._run(session, principal, run_id)
             request = self.p._request(session, principal, row.request_id, lock=True)
@@ -199,8 +305,10 @@ class CandidateService:
                 raise DomainError('FORBIDDEN', 'Only the run initiator can start a model call', 403)
             if row.status == 'RUNNING' and (not row.lease_until or row.lease_until <= now()):
                 self._finish(session, principal, row, 'INTERRUPTED', 'CANDIDATE_INTERRUPTED')
-            if row.status != 'PENDING':
+            if row.status != ('QUEUED' if queued else 'PENDING'):
                 return self._view(session, principal, row, request)
+            if queued:
+                self._queued_principal(session, row)
             if row.revision != command.expected_revision:
                 raise DomainError('VERSION_CONFLICT', 'Refresh the candidate run', 409)
             current, reason = self._fresh(session, principal, request, row)
@@ -220,8 +328,10 @@ class CandidateService:
                 with self.p.transaction(principal, consistent=True) as session:
                     req = self.p._request(session, principal, request_id, lock=True)
                     row = self._run(session, principal, run_id)
+                    if queued:
+                        self._queued_principal(session, row)
                     current, _ = self._fresh(session, principal, req, row)
-                    return not current or row.status != 'RUNNING' or row.lease_until <= now()
+                    return row.expires_at <= now() or not current or row.status != 'RUNNING' or row.lease_until <= now()
             except DomainError:
                 return True
 
@@ -280,6 +390,8 @@ class CandidateService:
             authorized = True
             try:
                 self.p.identities.validate_principal(session, principal, lock=True)
+                if queued:
+                    self._queued_principal(session, self._run(session, principal, run_id))
             except DomainError:
                 authorized = False
             req = self.p._request(session, principal, request_id, lock=True)
@@ -287,7 +399,7 @@ class CandidateService:
             current, reason = self._fresh(session, principal, req, row)
             if row.status == 'RUNNING':
                 if not authorized:self._finish(session, principal, row, 'FAILED', 'MODEL_CANCELLED')
-                elif not current:self._finish(session, principal, row, 'STALE', reason)
+                elif not current or row.expires_at <= now():self._finish(session, principal, row, 'STALE', reason or 'CANDIDATE_INPUT_CHANGED')
                 elif row.lease_until <= now():self._finish(session, principal, row, 'INTERRUPTED','CANDIDATE_INTERRUPTED')
                 elif error:self._finish(session, principal, row, 'FAILED', error)
                 else:
