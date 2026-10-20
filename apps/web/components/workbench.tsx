@@ -7,6 +7,7 @@ import type {Credential} from "@/lib/session.mjs";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
+import CandidatePanel from "@/components/candidate-panel";
 import RecoveryPanel from "@/components/recovery-panel";
 import {RequestEditor,QuoteEditor} from "@/components/procurement-editors";
 import QuoteLineDetails from "@/components/quote-line-details";
@@ -465,6 +466,8 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
                 })}>处理 / 只读核对</button>}</>}
             </> : <p className="subtle-empty">核对报价后生成方案；需求、报价或策略变化后需要重新生成和审批。</p>}
           </div></section></div>
+          <CandidatePanel key={`candidate-${token.id}-${selected.id}-${selected.version}`} request={selected}
+            token={token} cap={cap} buyer={buyer} disabled={busy||frozen} onImported={()=>void act(()=>refresh(selected.id))}/>
           <EvaluationPanel key={token+"\n"+selected.id} token={token} requestId={selected.id} policyHash={policy?.policy_hash||null} refreshEvent={freshnessEvent}/>
           <AdvicePanel key={token+"\n"+selected.id+"\n"+selected.version} request={selected} token={token} cap={cap} buyer={buyer} workflowBusy={busy}
             quotes={quotes} freshnessEvent={freshnessEvent} policyHash={policy?.policy_hash||null}

@@ -207,6 +207,8 @@ class ProcurementService(RecoveryServiceMixin, TableImportServiceMixin):
                     DocumentRow.tenant_id == principal.tenant_id, DocumentRow.sha256 == parsed["sha256"]))
                 if duplicate:
                     qv = session.scalar(select(QuoteVersionRow).where(QuoteVersionRow.document_id == duplicate.id).order_by(QuoteVersionRow.version.desc()))
+                    if qv is None:
+                        raise DomainError("SOURCE_PENDING_CANDIDATE", "This source belongs to candidate review; import its candidate explicitly", 409)
                     return self._quote_view(session, session.get(QuoteRow, qv.quote_id), qv, request)
                 path.write_bytes(data)
                 path.chmod(0o600)

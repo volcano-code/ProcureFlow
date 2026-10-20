@@ -278,17 +278,29 @@ def main():
         # Trusted application imports happen before filesystem access is denied.
         # The isolated interpreter never imports from an uploaded archive.
         document_parser = None
-        if sys.argv[1] == "document":
+        if sys.argv[1] in {"document", "fragments"}:
             sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             import pypdf  # Preload its lazy PDF import before denying file opens.
-            from procureflow.parsers import parse_document as document_parser
+            from procureflow.parsers import parse_document as document_parser, fragments_from_file
             from procureflow.errors import DomainError
         restrict_worker()
         data = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(data) > MAX_INPUT:
             raise ParseError("FILE_TOO_LARGE", "File exceeds the 2 MiB import limit", 413)
         kind = sys.argv[1]
-        if kind == "document":
+        if kind == "fragments":
+            if not sys.argv[2].lower().endswith((".txt", ".pdf")):
+                raise ParseError("UNSUPPORTED_FILE", "Candidate source must be text or text PDF", 415)
+            try:
+                fragments = fragments_from_file(sys.argv[2], data)
+            except DomainError as error:
+                raise ParseError(error.code, error.message, error.status_code) from error
+            if not fragments or len(fragments) > 128 or sum(len(x["text"]) for x in fragments) > 16000:
+                raise ParseError("CANDIDATE_SOURCE_LIMIT", "Source needs 1-128 fragments and at most 16000 text characters", 413)
+            for i, fragment in enumerate(fragments):
+                fragment["id"] = f"{sys.argv[3]}:f{i:04d}"
+            result = {"ok": True, "fragments": fragments}
+        elif kind == "document":
             # The compatibility route must not bypass the table route's archive,
             # XML, external-link or formula-range validation.
             if sys.argv[2].lower().endswith(".xlsx"):

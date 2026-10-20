@@ -17,6 +17,9 @@ from starlette.formparsers import MultiPartException
 from . import __version__
 from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
+from .candidate_agent import CandidateAgent
+from .candidate_contracts import CandidateReserve, CandidateProcess, CandidateImport, CandidateCancel
+from .candidates import CandidateService
 from .auth import IdentityService
 from .config import Settings
 from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, LoginCommand, Principal,
@@ -79,6 +82,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
     service = ProcurementService(db, settings, erp)
     advice_service = AdviceService(service)
+    candidate_service = CandidateService(service)
     identities = IdentityService(db, settings)
 
     @asynccontextmanager
@@ -92,6 +96,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         description="Evidence-first procurement local alpha. Mock ERP and deterministic baseline by default; no live ordering.")
     app.state.service, app.state.settings = service, settings
     app.state.identities = identities
+    app.state.candidates = candidate_service
     app.add_middleware(BoundedRequestBody, limit=settings.max_upload_bytes + 65536)
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.web_origins),
                        allow_credentials=False, allow_methods=["GET", "POST", "PUT"],
@@ -183,6 +188,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return {"mode": settings.mode, "erp_mode": erp.mode,
                 "demo_samples": settings.mode == "demo" and erp.mode == "mock",
                 "advice_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
+                "candidate_model_configured": bool(os.getenv("PF_ALLOW_CANDIDATE_MODEL") == "1" and os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
+                "candidate_scope": "single-item-text-pdf-advisory-v1",
                 "advice_runtime": RUNTIME, "advice_runtime_version": LANGGRAPH_VERSION,
                 "erp_draft_writes_enabled": writable and (erp.mode == "mock" or settings.erp_allow_draft_writes),
                 "approval_authority": "business-database", "production_ready": False}
@@ -237,6 +244,37 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         data = await file.read(settings.max_upload_bytes + 1)
         await file.close()
         return await asyncio.to_thread(service.import_quote, principal, request_id, file.filename or "upload.txt", data)
+
+    @app.post("/api/v1/requests/{request_id}/candidate-sources", status_code=201)
+    async def upload_candidate_source(request_id: str, file: UploadFile = File(...), principal=Depends(identity)):
+        require(principal, "buyer")
+        data = await file.read(settings.max_upload_bytes + 1)
+        await file.close()
+        return await asyncio.to_thread(candidate_service.upload, principal, request_id, file.filename or "source.txt", data)
+
+    @app.post("/api/v1/requests/{request_id}/candidate-runs", status_code=201)
+    def reserve_candidate(request_id: str, command: CandidateReserve, principal=Depends(identity)):
+        return candidate_service.reserve(principal, request_id, command)
+
+    @app.get("/api/v1/requests/{request_id}/candidate-runs")
+    def list_candidates(request_id: str, principal=Depends(identity)):
+        return candidate_service.list(principal, request_id)
+
+    @app.get("/api/v1/candidate-runs/{run_id}")
+    def get_candidate(run_id: str, principal=Depends(identity)):
+        return candidate_service.get(principal, run_id)
+
+    @app.post("/api/v1/candidate-runs/{run_id}/process")
+    def process_candidate(run_id: str, command: CandidateProcess, principal=Depends(identity)):
+        return candidate_service.process(principal, run_id, command, CandidateAgent.from_env)
+
+    @app.post("/api/v1/candidate-runs/{run_id}/cancel")
+    def cancel_candidate(run_id: str, command: CandidateCancel, principal=Depends(identity)):
+        return candidate_service.cancel(principal, run_id, command)
+
+    @app.post("/api/v1/candidate-runs/{run_id}/import")
+    def import_candidate(run_id: str, command: CandidateImport, principal=Depends(identity)):
+        return candidate_service.import_quote(principal, run_id, command)
 
     @app.post("/api/v1/requests/{request_id}/table-imports", status_code=201)
     async def upload_table(request_id: str, file: UploadFile = File(...), principal=Depends(identity)):

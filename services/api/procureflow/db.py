@@ -189,6 +189,29 @@ class AdviceRunRow(Base):
     completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
+class QuoteCandidateRunRow(Base):
+    """Durable advisory candidates, separate from confirmed quotes/approvals."""
+    __tablename__ = "quote_candidate_runs"
+    __table_args__ = (UniqueConstraint("tenant_id", "request_id", "idempotency_key", name="uq_candidate_run_key"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("procurement_requests.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"))
+    creator_id: Mapped[str] = mapped_column(String(80))
+    idempotency_key: Mapped[str] = mapped_column(String(80))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    quote_id: Mapped[str | None] = mapped_column(ForeignKey("quotes.id"), nullable=True)
+    expires_at: Mapped[str] = mapped_column(String(40))
+    lease_until: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class TenantPolicyRow(Base):
     """Tenant serialization anchor. Lock before any request aggregate lock."""
     __tablename__ = "tenant_policies"

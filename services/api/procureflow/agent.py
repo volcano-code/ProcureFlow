@@ -81,6 +81,18 @@ class AdviceGraphState(TypedDict):
 
 
 class ReadOnlyAgent:
+    # Trusted subclasses may narrow/replace read-only tools and output contracts.
+    # These definitions are never accepted from HTTP or model output.
+    tool_schemas = SCHEMAS
+    tool_definitions = TOOLS
+    system_prompt = SYSTEM
+    user_prompt = "请读取比较结果、制度和必要证据，解释推荐与缺失项；不要执行任何写入。"
+    runtime_name = RUNTIME
+    output_contract = Narrative
+
+    def decode_output(self, content):
+        return self.output_contract.model_validate_json(content)
+
     def __init__(self, base_url: str, api_key: str, model: str,
                  max_model_calls=4, max_tool_calls=8, max_wall_seconds=35,
                  transport: httpx.BaseTransport | None = None, *, thinking_mode="default",
@@ -96,7 +108,7 @@ class ReadOnlyAgent:
             raise ValueError("Invalid thinking mode")
         if type(max_reported_tokens) is not int or not 1600 <= max_reported_tokens <= 200000:
             raise ValueError("Invalid reported-token budget")
-        if not set(required_tools).issubset(SCHEMAS):
+        if not set(required_tools).issubset(self.tool_schemas):
             raise ValueError("Required tools must be read-only tools")
         self.thinking_mode = thinking_mode
         self.max_reported_tokens = max_reported_tokens
@@ -132,8 +144,8 @@ class ReadOnlyAgent:
         grounding = (" Read every cited fragment through get_evidence before finishing. When source fragments exist, "
                      "cite at least one relevant fragment; comparison output alone does not satisfy this check."
                      if self.require_evidence_reads else "")
-        messages = [{"role": "system", "content": SYSTEM + grounding},
-                    {"role": "user", "content": "请读取比较结果、制度和必要证据，解释推荐与缺失项；不要执行任何写入。"}]
+        messages = [{"role": "system", "content": self.system_prompt + grounding},
+                    {"role": "user", "content": self.user_prompt}]
         started = time.monotonic()
         trace = []
         # Keep all private content outside graph channels. Even debug callbacks
@@ -160,7 +172,7 @@ class ReadOnlyAgent:
             check_budget()
             # Never expose graph state, provider text or checkpoint payloads.
             record({"type": "graph_node", "node": node, "model_call": model_call,
-                    "runtime": RUNTIME})
+                    "runtime": self.runtime_name})
 
         def model_node(state: AdviceGraphState):
             model_call = state["model_call"] + 1
@@ -174,7 +186,7 @@ class ReadOnlyAgent:
             if remaining <= 0 or len(json.dumps(messages, ensure_ascii=False)) > 60000:
                 raise DomainError("BUDGET_EXCEEDED", "The explanation context/time budget was reached", 422)
             body = {"model": self.model, "messages": messages,
-                    "tools": TOOLS, "tool_choice": "auto", "response_format": {"type": "json_object"},
+                    "tools": self.tool_definitions, "tool_choice": "auto", "response_format": {"type": "json_object"},
                     "max_tokens": 1600}
             if self.thinking_mode != "default":
                 body["thinking"] = {"type": self.thinking_mode}
@@ -297,11 +309,11 @@ class ReadOnlyAgent:
                 check_budget()
                 function = call.get("function", {})
                 name = function.get("name")
-                if name not in SCHEMAS:
+                if name not in self.tool_schemas:
                     record({"type": "tool_denied", "model_call": model_call, "tool": "undeclared"})
                     raise DomainError("TOOL_POLICY_DENIED", "The model requested a tool outside its read-only scope", 403)
                 try:
-                    arguments = SCHEMAS[name].model_validate_json(function.get("arguments", "{}"))
+                    arguments = self.tool_schemas[name].model_validate_json(function.get("arguments", "{}"))
                 except ValidationError as error:
                     raise DomainError("TOOL_ARGUMENTS_INVALID", "Tool arguments failed validation", 422) from error
                 record({"type": "tool_started", "model_call": model_call, "tool": name,
@@ -339,7 +351,7 @@ class ReadOnlyAgent:
             tool_count = state["tool_count"]
             usage_total, usage_complete = private["usage_total"], private["usage_complete"]
             try:
-                narrative = Narrative.model_validate_json(message.get("content") or "")
+                narrative = self.decode_output(message.get("content") or "")
             except ValidationError as error:
                 raise DomainError("MODEL_SCHEMA_INVALID", "Model output did not match the required schema", 502) from error
             if not set(narrative.evidence_ids).issubset(evidence_ids):
@@ -351,7 +363,7 @@ class ReadOnlyAgent:
                     raise DomainError("EVIDENCE_REQUIRED", "Cite source evidence for this advice run", 502)
                 if not set(narrative.evidence_ids).issubset(read_evidence_ids):
                     raise DomainError("EVIDENCE_NOT_READ", "Read the cited source fragments before returning advice", 502)
-            private["output"] = {**narrative.model_dump(), "runtime": RUNTIME, "runtime_version": LANGGRAPH_VERSION, "llm_used": True,
+            private["output"] = {**narrative.model_dump(mode="json"), "runtime": self.runtime_name, "runtime_version": LANGGRAPH_VERSION, "llm_used": True,
                     "advisory_only": True, "semantic_factuality_verified": False,
                     "evidence_read_verified": bool(self.require_evidence_reads),
                     "model_calls": model_call, "provider_attempts": private["provider_attempts"],
@@ -398,7 +410,7 @@ class ReadOnlyAgent:
         # SQL advice_runs owns claims and crash receipts. No graph retry, cache,
         # checkpointer or resume path: an ambiguous provider call is never replayed.
         # The narrow pre-dispatch retry above never repeats a completed HTTP call.
-        graph = builder.compile(checkpointer=False, name=RUNTIME)
+        graph = builder.compile(checkpointer=False, name=self.runtime_name)
         def execute():
             # A fresh context removes ambient LangChain callbacks/collectors and
             # parent graph configs. The explicit flag also overrides env tracing.
