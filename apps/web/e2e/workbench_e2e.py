@@ -1397,3 +1397,36 @@ def test_native_multi_item_role_cancel_back_and_mobile_dialog_guards(page):
     quote=read_multi_item_quotes(page,request_url)[0]
     assert quote['version']==1 and quote['confirmed_by'] is None
     assert len(quote['values']['lines'])==2 and quote['values']['lines'][0]['unit_price']=='100.25'
+
+
+# These use the actual API with the model disabled, not an emulated LLM.
+def test_native_candidate_source_reservation_cancel_and_no_business_write(page):
+    prepare_table_import(page)
+    panel=page.get_by_test_id('candidate-panel')
+    expect(panel).to_contain_text('服务端未启用候选模型')
+    page.get_by_test_id('candidate-file').set_input_files({'name':'nonstandard-offer.txt','mimeType':'text/plain',
+        'buffer':'供应商 Acme Ltd 报价：STAND-01 二十件，单价100元。运费另议。'.encode()})
+    run=page.get_by_test_id('candidate-run')
+    expect(run).to_have_count(1)
+    expect(run).to_contain_text('已预留，未调用模型')
+    expect(run.get_by_role('button',name='开始候选提取')).to_be_disabled()
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    run.get_by_role('button',name='取消候选任务').click()
+    expect(run).to_contain_text('已取消')
+    page.reload();page.get_by_test_id('login-demo-buyer').click()
+    expect(page.get_by_test_id('candidate-run')).to_contain_text('已取消')
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
+def test_native_candidate_scope_cleared_on_identity_change(page):
+    prepare_table_import(page)
+    page.get_by_test_id('candidate-file').set_input_files({'name':'tenant-private-source.txt','mimeType':'text/plain',
+        'buffer':b'Supplier case: Acme Ltd. Missing freight; no approval granted.'})
+    expect(page.get_by_test_id('candidate-run')).to_have_count(1)
+    page.get_by_label('访问令牌').fill('demo-other-tenant')
+    page.get_by_role('button',name='登录',exact=True).click()
+    expect(page.get_by_test_id('candidate-run')).to_have_count(0)
+    expect(page.get_by_test_id('candidate-panel')).to_have_count(0)
+    expect(page.get_by_test_id('quote-row')).to_have_count(0)

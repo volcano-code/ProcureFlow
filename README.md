@@ -1,3 +1,5 @@
+> **Remediation development branch:** this snapshot preserves the newer remote `9f80786` implementation and adds advisory nonstandard quotation candidates. See [batch 2 scope, migration and limits](docs/remediation-batch2-candidates.md). Candidate outputs are not confirmed facts and cannot approve or write ERP. Real-model task quality has not been certified by fixture tests. Earlier reports and application version strings below remain historical.
+
 # ProcureFlow · 可验证采购工作台
 
 **开发 Alpha，FastAPI + 原生 Next.js + 独立 Python Worker。不是生产采购系统。**

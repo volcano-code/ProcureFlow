@@ -50,7 +50,7 @@ def run(output: Path) -> int:
         junit_path.unlink(missing_ok=True)
         start = time.monotonic()
         cmd = [sys.executable, str(ROOT / "scripts/test.py"), "tests/test_workflow.py", "tests/test_postgres.py",
-               "tests/test_advice_runs.py", "tests/test_policy_versions.py", "tests/test_policy_adversarial.py",
+               "tests/test_advice_runs.py", "tests/test_quote_candidates.py", "tests/test_policy_versions.py", "tests/test_policy_adversarial.py",
                "tests/test_table_imports.py", "tests/test_pilot_workflow.py", "tests/test_pilot_auth.py",
                "tests/test_retention.py", "tests/test_maintenance.py", "tests/test_backup_recovery.py",
                "tests/test_backup_protection.py::" + PROTECTION_TEST,

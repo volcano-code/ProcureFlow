@@ -37,7 +37,7 @@ export interface RecoveryReconciliation {operation_id:string;ledger_sha256:strin
   status:"verified"|"missing"|"mismatch"|"blocked"|"unavailable";reason?:string;simulated:boolean;network_attempted:boolean;
   external_write_attempted:false;replay_permitted:false;remote_id:string|null;expected:Record<string,unknown>;observed:Record<string,unknown>|null;
   differences:{field:string;expected:unknown;observed:unknown;reason:string}[];matches_snapshot:boolean;draft_verified:boolean}
-export interface Capabilities {mode:"demo"|"private"|"pilot";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"langgraph-read-only-v1";advice_runtime_version:string}
+export interface Capabilities {candidate_model_configured?:boolean;candidate_scope?:string;mode:"demo"|"private"|"pilot";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"langgraph-read-only-v1";advice_runtime_version:string}
 export interface AdviceOutput {
   summary:string;evidence_ids:string[];runtime:string;llm_used:boolean;advisory_only:true;
   semantic_factuality_verified:false;evidence_read_verified?:boolean;model_calls:number;provider_attempts?:number;tool_calls:number;

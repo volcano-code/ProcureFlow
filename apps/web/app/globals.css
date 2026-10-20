@@ -8,3 +8,8 @@ dialog[open]{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);marg
 .topbar{flex-wrap:wrap;gap:10px}button:disabled{cursor:not-allowed;opacity:.5}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid currentColor;outline-offset:3px}
 @media(max-width:700px){.identity{flex-wrap:wrap;max-width:100%}.identity input{max-width:190px}.confirm-values{grid-template-columns:1fr}.heading-actions{flex-wrap:wrap}}
+
+/* Candidate content is untrusted text: constrain long identifiers without hiding evidence. */
+.candidate-panel{min-width:0}.candidate-panel label{display:block;margin:12px 0}.candidate-panel input:not([type=checkbox]){width:100%;box-sizing:border-box}
+.candidate-run{margin-top:16px;padding:12px;border:1px solid var(--border,#d4dbe7);border-radius:8px;min-width:0;overflow-wrap:anywhere}
+.candidate-panel .table-scroll{max-width:100%;overflow-x:auto}.candidate-panel table{min-width:600px;width:100%}.candidate-panel details p{white-space:pre-wrap;max-width:38rem}

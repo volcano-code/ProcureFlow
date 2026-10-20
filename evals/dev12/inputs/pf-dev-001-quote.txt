@@ -1,0 +1,11 @@
+supplier_id: Office-Aa
+sku: Clip-Aa
+quantity: 10
+uom: EA
+unit_price: 100.00
+tax_mode: excluded
+tax_rate: 0.13
+shipping_cost: 20.00
+discount: 10.00
+delivery_days: 7
+currency: CNY
