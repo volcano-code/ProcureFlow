@@ -79,6 +79,9 @@ def candidate(case, config):
         """Offline protocol fixture only: uses the legacy parser, not gold."""
         body = json.loads(request.content)
         messages = [x for x in body['messages'] if x['role'] == 'tool']
+        if config.get('strategy') == 'single_shot':
+            source = json.loads(body['messages'][1]['content'])['source']
+            messages = [{'role': 'tool', 'content': json.dumps({'data': source})}]
         if not messages:
             message = {'role': 'assistant', 'tool_calls': [
                 {'id': 'fixture-request', 'type': 'function', 'function': {'name': 'get_request', 'arguments': '{}'}},
@@ -123,10 +126,16 @@ def candidate(case, config):
         candidates.enqueue(principal, run['id'], CandidateProcess(expected_revision=run['revision'], acknowledge_external_model=True))
         transport = CountedTransport()
         def factory():
-            agent = CandidateAgent(config['base_url'], config['api_key'], config['model'],
-                transport=transport, thinking_mode=config['thinking_mode'], max_connection_retries=0,
-                max_model_calls=config['max_calls'], max_tool_calls=12,
-                max_wall_seconds=config['wall_seconds'], max_reported_tokens=config['token_budget'], require_usage=True)
+            if config.get('strategy') == 'single_shot':
+                from evals.candidate_single_shot import SingleShotCandidate
+                agent = SingleShotCandidate(config['base_url'], config['api_key'], config['model'],
+                    transport=transport, thinking_mode=config['thinking_mode'],
+                    max_wall_seconds=config['wall_seconds'], max_reported_tokens=config['token_budget'])
+            else:
+                agent = CandidateAgent(config['base_url'], config['api_key'], config['model'],
+                    transport=transport, thinking_mode=config['thinking_mode'], max_connection_retries=0,
+                    max_model_calls=config['max_calls'], max_tool_calls=12,
+                    max_wall_seconds=config['wall_seconds'], max_reported_tokens=config['token_budget'], require_usage=True)
             original = agent.run
             def run_with_trace(invoke, evidence_ids, observer=None):
                 def observe(event):
@@ -144,6 +153,10 @@ def candidate(case, config):
             evidence = {k: [locator(ref, doc['sha256']) for ref in refs] for k, refs in output['evidence'].items()}
             report.update(status='observed', reason=None, fields=seal_fields(output['values'], evidence),
                 clarifications={x['field']: x['reason'] for x in output['clarifications']}, usage=output.get('usage'))
+            if config.get('collect_review'):
+                config['_review_material'] = {'values': {k: output['values'][k] for k in FIELDS},
+                    'questions': output['clarifications']}
+
         else:
             code = receipt.get('error_code')
             report.update(status='failed', reason=code if code in SAFE_ERRORS else 'CANDIDATE_FAILED')

@@ -55,11 +55,18 @@ def write_json(path, value):
 
 def load_inputs(directory):
     data = load_json(Path(directory) / 'inputs.json')
-    require(data.get('schema_version') == 1 and data.get('split') == 'Dev'
+    if data.get('schema_version') == 2:
+        require(data.get('suite') == 'candidate-extraction-dev20-v1', 'INVALID_SUITE')
+        base = load_inputs(Path(directory).parent / 'candidate12')
+        require(data.get('base_input_sha256') == fingerprint(base), 'BASE_INPUT_DRIFT')
+        require(len(data.get('cases', [])) == 8, 'EXPECTED_EIGHT_ADDITIONS')
+        data = {**data, 'schema_version': 1, 'cases': base['cases'] + data['cases']}
+    expected = {'candidate-extraction-dev12-v1': 12, 'candidate-extraction-dev20-v1': 20}.get(data.get('suite'))
+    require(expected is not None and data.get('schema_version') == 1 and data.get('split') == 'Dev'
             and data.get('synthetic_only') is True, 'INVALID_SUITE')
     cases = data.get('cases')
-    require(isinstance(cases, list) and len(cases) == 12, 'EXPECTED_TWELVE_CASES')
-    require(len({x['id'] for x in cases}) == 12, 'DUPLICATE_CASE')
+    require(isinstance(cases, list) and len(cases) == expected, 'INVALID_CASE_COUNT')
+    require(len({x['id'] for x in cases}) == expected, 'DUPLICATE_CASE')
     for case in cases:
         require(re.fullmatch(r'cq-[0-9]{3}', case['id']) is not None, 'INVALID_CASE_ID')
         require(isinstance(case['text'], str) and 0 < len(case['text'].encode()) <= 12000,
@@ -166,9 +173,19 @@ def validate_record(record, case, mode):
     return record
 
 
+def load_gold(directory):
+    gold = load_json(Path(directory) / 'gold.json')
+    if gold.get('schema_version') == 2:
+        base = load_json(Path(directory).parent / 'candidate12' / 'gold.json')
+        require(gold.get('base_gold_sha256') == fingerprint(base), 'BASE_GOLD_DRIFT')
+        require(len(gold.get('cases', [])) == 8, 'EXPECTED_EIGHT_GOLD_ADDITIONS')
+        gold = {**gold, 'schema_version': 1, 'cases': base['cases'] + gold['cases']}
+    return gold
+
+
 def grade(directory, report):
     inputs = load_inputs(directory)
-    gold = load_json(Path(directory) / 'gold.json')
+    gold = load_gold(directory)
     require(gold.get('suite') == inputs['suite'], 'GOLD_SUITE_MISMATCH')
     require(report.get('input_sha256') == fingerprint(inputs), 'REPORT_SOURCE_MISMATCH')
     require(report.get('schema_version') == 1 and report.get('attempt') == 1, 'INVALID_ATTEMPT')

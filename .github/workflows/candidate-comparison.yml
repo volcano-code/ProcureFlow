@@ -1,0 +1,66 @@
+name: candidate-method-comparison
+on:
+  push:
+    branches: ['develop/remediation-completion']
+  pull_request:
+    paths: ['evals/candidate*', 'evals/candidate20/**', 'scripts/evaluate_candidates.py', 'scripts/compare_candidate_methods.py', 'tests/test_candidate_methods.py', '.github/workflows/candidate-comparison.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Original and new grading, one-shot, runtime and human-review tests
+        run: python -m pytest -q tests/test_candidate_quality.py tests/test_candidate_methods.py --junitxml=evals/reports/ci/method-comparison/tests.xml
+      - name: Validate references and run actual twenty-task deterministic baseline
+        run: |
+          python scripts/compare_candidate_methods.py validate-gold --output evals/reports/ci/method-comparison/gold-structure.json
+          python scripts/evaluate_candidates.py run --suite evals/candidate20 --mode baseline --output evals/reports/ci/method-comparison/A.json
+          python scripts/evaluate_candidates.py grade --suite evals/candidate20 --observations evals/reports/ci/method-comparison/A.json --output evals/reports/ci/method-comparison/A-scores.json
+      - name: Real-provider paths remain blocked without explicit opt-in
+        run: |
+          set +e
+          python scripts/evaluate_candidates.py run --suite evals/candidate20 --mode live --strategy single_shot --output evals/reports/ci/method-comparison/B.json
+          b=$?
+          python scripts/evaluate_candidates.py run --suite evals/candidate20 --mode live --strategy agent --output evals/reports/ci/method-comparison/C.json
+          c=$?
+          python scripts/compare_candidate_methods.py compare --baseline evals/reports/ci/method-comparison/A.json --single-shot evals/reports/ci/method-comparison/B.json --agent evals/reports/ci/method-comparison/C.json --output evals/reports/ci/method-comparison/paired.json
+          pair=$?
+          set -e
+          test "$b" -eq 2 && test "$c" -eq 2 && test "$pair" -eq 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('evals/reports/ci/method-comparison')
+          for name in ['B','C']:
+              report=json.loads((root/(name+'.json')).read_text())
+              assert len(report['cases'])==20 and report['known_provider_requests']==0
+              assert all(r['status']=='blocked' and r['network_attempted'] is False for r in report['cases'])
+          paired=json.loads((root/'paired.json').read_text())
+          assert paired['C_minus_B_tasks'] is None and not paired['real_model_comparison_complete']
+          PY
+      - name: Bind tested source (no runtime database or private review packet)
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/method-comparison
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/method-comparison/source-identity.txt
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/method-comparison-source.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-method-comparison-evidence
+          path: evals/reports/ci/method-comparison
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-method-comparison-source
+          path: ${{ runner.temp }}/method-comparison-source.zip
+          if-no-files-found: error
