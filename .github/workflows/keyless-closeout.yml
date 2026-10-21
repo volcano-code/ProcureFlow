@@ -1,0 +1,90 @@
+name: keyless-closeout
+on:
+  push:
+    branches: ['develop/remediation-no-key-closeout']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate-procurement:
+    name: candidate-pilot-pg-erp-${{ matrix.replica }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-only
+          POSTGRES_DB: procureflow_joint_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procureflow_joint_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      COMPOSE_PROJECT_NAME: pf-joint-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.replica }}
+      PF_TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-disposable-only@127.0.0.1:5432/procureflow_joint_test
+      PF_ALLOW_DATABASE_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-postgres.txt
+      - run: python -m pytest -q tests/test_candidate_procurement.py --junitxml=evals/reports/ci/closeout/tests.xml
+      - run: python -m playwright install --with-deps chromium
+      - run: npm ci --prefix apps/web
+      - name: Prepare an isolated marked ERP sandbox
+        id: lab
+        run: |
+          python scripts/init_erp_sandbox.py --create-ephemeral
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml up -d
+          mkdir -p evals/reports/ci/closeout .data
+          set -o pipefail
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/seed.py | tee evals/reports/ci/closeout/seed.json
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp erp-backend:/tmp/pf-erp-sandbox-credentials.json .data/erp-sandbox.json
+          chmod 600 .data/erp-sandbox.json
+      - name: Native candidate to independent approval and real ERP with PostgreSQL
+        id: roundtrip
+        run: python scripts/verify_candidate_procurement.py --ephemeral-test --output evals/reports/ci/closeout/roundtrip.json
+      - name: Independent ERP database audit
+        if: always() && steps.roundtrip.outcome == 'success'
+        run: |
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml cp evals/reports/ci/closeout/roundtrip.json erp-backend:/tmp/pf-candidate-result.json
+          docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml exec -T erp-backend /home/frappe/frappe-bench/env/bin/python /opt/pf-sandbox/candidate_audit.py > evals/reports/ci/closeout/database-audit.json
+      - name: Reject missing or inconsistent final evidence
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/closeout
+          python scripts/check_candidate_procurement.py --directory evals/reports/ci/closeout > evals/reports/ci/closeout/acceptance.json
+      - name: Bind source and check immutable frontend configuration
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/closeout
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/closeout/source-identity.txt
+          git diff --exit-code -- apps/web/package-lock.json apps/web/package.json apps/web/tsconfig.json
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/keyless-closeout-source.zip"
+      - name: Destroy only this disposable sandbox
+        if: always()
+        run: |
+          if [ -f .env.erp-sandbox ]; then
+            docker compose --env-file .env.erp-sandbox -f compose.erp-sandbox.yaml down -v --remove-orphans
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: keyless-closeout-${{ matrix.replica }}
+          path: evals/reports/ci/closeout
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.replica == 1
+        with:
+          name: keyless-closeout-source
+          path: ${{ runner.temp }}/keyless-closeout-source.zip
+          if-no-files-found: error
