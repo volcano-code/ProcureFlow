@@ -190,8 +190,8 @@ def exercise(data):
                             proposal=result['proposal'];require(proposal['total']=='2000.00' and result['llm_used'] is False,'COMPARISON_MISMATCH')
                             call(token,'POST','/requests/'+req['id']+'/execute',{'snapshot_hash':proposal['snapshot_hash']},409)
                             call(token,'POST','/requests/'+req['id']+'/approval',{'snapshot_hash':proposal['snapshot_hash']},403)
-                            # Approver context existed before this request: explicitly refresh its list.
-                            approver.get_by_role('button',name='刷新状态',exact=True).click()
+                            # Fresh independent login loads the newly created request; no role switching.
+                            observer=login(approver,web_url,identities.issue_invite('lab',users['approver'])['credential'],'approver')['token']
                             approver.locator('#request-list').get_by_role('button').filter(has_text=title).click()
                             expect(approver.get_by_test_id('proposal-body')).to_contain_text('2000.00')
                             post_ui(approver,'/approval',lambda:approver.get_by_test_id('approve').click())

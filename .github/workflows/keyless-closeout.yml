@@ -1,7 +1,7 @@
 name: keyless-closeout
 on:
-  push:
-    branches: ['develop/remediation-no-key-closeout']
+  pull_request:
+    paths: ['scripts/verify_candidate_procurement.py', 'scripts/check_candidate_procurement.py', 'integrations/erpnext/sandbox/candidate_audit.py', 'tests/test_candidate_procurement.py', '.github/workflows/keyless-closeout.yml']
   workflow_dispatch:
 permissions:
   contents: read
