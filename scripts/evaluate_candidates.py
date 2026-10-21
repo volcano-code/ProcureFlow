@@ -30,7 +30,7 @@ DEFAULT_SUITE = ROOT / 'evals/candidate12'
 
 def implementation_hash():
     paths = sorted((ROOT / 'services/api/procureflow').glob('*.py'))
-    paths += [ROOT / x for x in ('evals/candidate_quality.py', 'evals/candidate_trial.py', 'scripts/evaluate_candidates.py', 'evals/candidate_single_shot.py', 'evals/candidate_review.py', 'evals/candidate_methods.py')]
+    paths += [ROOT / x for x in ('evals/candidate_quality.py', 'evals/candidate_trial.py', 'scripts/evaluate_candidates.py', 'evals/candidate_single_shot.py', 'evals/candidate_review.py', 'evals/candidate_methods.py', 'evals/candidate_grouping.py')]
     return fingerprint({p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
 
 
@@ -109,9 +109,9 @@ def run_suite(inputs, *, mode, allow_network=False, limit=None, max_requests=Non
     require(strategy in {'agent', 'single_shot'}, 'INVALID_STRATEGY')
     per_calls = 1 if strategy == 'single_shot' else 4
     limit = len(inputs['cases']) if limit is None else limit
-    max_requests = len(inputs['cases'])*per_calls if max_requests is None else max_requests
+    max_requests = min(80, len(inputs['cases'])*per_calls) if max_requests is None else max_requests
     require(mode in {'baseline', 'fixture', 'live'} and type(limit) is int and 1 <= limit <= len(inputs['cases'])
-            and type(max_requests) is int and per_calls <= max_requests <= 80, 'INVALID_RUN_BUDGET')
+            and type(max_requests) is int and per_calls <= max_requests <= max(80, len(inputs['cases'])*per_calls) and max_requests <= 120, 'INVALID_RUN_BUDGET')
     require(review_records is None or (mode != 'baseline' and isinstance(review_records, list) and not review_records), 'INVALID_REVIEW_TARGET')
     require(not allow_network or mode == 'live', 'NETWORK_FLAG_REQUIRES_LIVE_MODE')
     config = {'mode': mode, 'allow_network': allow_network, 'approved_host': '', 'max_calls': per_calls, 'strategy': strategy, 'collect_review': review_records is not None, 'wall_seconds': 45, 'token_budget': 16000,

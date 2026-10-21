@@ -55,14 +55,21 @@ def write_json(path, value):
 
 def load_inputs(directory):
     data = load_json(Path(directory) / 'inputs.json')
+    if data.get('schema_version') == 3:
+        from .candidate_grouping import load_partition
+        data = load_partition(directory)
     if data.get('schema_version') == 2:
         require(data.get('suite') == 'candidate-extraction-dev20-v1', 'INVALID_SUITE')
         base = load_inputs(Path(directory).parent / 'candidate12')
         require(data.get('base_input_sha256') == fingerprint(base), 'BASE_INPUT_DRIFT')
         require(len(data.get('cases', [])) == 8, 'EXPECTED_EIGHT_ADDITIONS')
         data = {**data, 'schema_version': 1, 'cases': base['cases'] + data['cases']}
-    expected = {'candidate-extraction-dev12-v1': 12, 'candidate-extraction-dev20-v1': 20}.get(data.get('suite'))
-    require(expected is not None and data.get('schema_version') == 1 and data.get('split') == 'Dev'
+    specification = {'candidate-extraction-dev12-v1': (12, 'Dev'), 'candidate-extraction-dev20-v1': (20, 'Dev'),
+        'candidate-extraction-grouped-dev30-v1': (30, 'Dev'),
+        'candidate-extraction-grouped-validation10-v1': (10, 'Validation'),
+        'candidate-extraction-grouped-evaluation20-v1': (20, 'Evaluation')}.get(data.get('suite'))
+    expected, split = specification or (None, None)
+    require(expected is not None and data.get('schema_version') == 1 and data.get('split') == split
             and data.get('synthetic_only') is True, 'INVALID_SUITE')
     cases = data.get('cases')
     require(isinstance(cases, list) and len(cases) == expected, 'INVALID_CASE_COUNT')
@@ -175,6 +182,9 @@ def validate_record(record, case, mode):
 
 def load_gold(directory):
     gold = load_json(Path(directory) / 'gold.json')
+    if gold.get('schema_version') == 3:
+        from .candidate_grouping import load_partition
+        return load_partition(directory, gold=True)
     if gold.get('schema_version') == 2:
         base = load_json(Path(directory).parent / 'candidate12' / 'gold.json')
         require(gold.get('base_gold_sha256') == fingerprint(base), 'BASE_GOLD_DRIFT')
@@ -262,7 +272,7 @@ def grade(directory, report):
                        'passed': exact, 'correct_fields': correct, 'fields': len(FIELDS),
                        'clarification_exact': questions == answer['clarifications'],
                        'citation_checks': support_ok, 'zero_side_effects_observed': safe})
-    return {'schema_version': 1, 'suite': inputs['suite'], 'split': 'Dev', 'mode': report['mode'],
+    return {'schema_version': 1, 'suite': inputs['suite'], 'split': inputs['split'], 'mode': report['mode'],
         'input_sha256': fingerprint(inputs), 'gold_sha256': fingerprint(gold),
         'observation_sha256': fingerprint(report), 'implementation_sha256': report['implementation_sha256'],
         'status': 'measured' if all(x['status'] != 'blocked' for x in records) else 'incomplete',
@@ -275,7 +285,7 @@ def grade(directory, report):
             and any(x['network_attempted'] is True for x in records),
         'cost': None, 'reference_review': gold['review_status'], 'cases': scores,
         'limitations': ['Extraction-only, no policy selection or ERP acceptance.',
-            'Public developer-authored Dev answers, not Holdout/generalization evidence.',
+            'Public developer-authored answers, not independently unseen Holdout/generalization evidence.',
             'A valid location and a matching gold span are not general semantic entailment.',
             'Fixture scores NEVER certify real-model quality. No best-of retries.']}
 
@@ -288,7 +298,7 @@ def compare(directory, baseline, candidate):
         'candidate_status': b['status']} for a, b in zip(left['cases'], right['cases'])]
     complete = left['status'] == right['status'] == 'measured' and right['model_quality_measured']
     return {'schema_version': 1, 'status': 'measured' if complete else 'blocked_or_partial',
-        'scope': 'Paired extraction Dev tasks, not general procurement performance.',
+        'scope': 'Paired extraction tasks in the declared public partition, not general procurement performance.',
         'input_sha256': left['input_sha256'], 'baseline': left['counts'], 'candidate': right['counts'],
         'paired_net_improvement': (right['counts']['passed'] - left['counts']['passed']) if complete else None,
         'cases': paired, 'real_model_acceptance': complete, 'cost': None}
