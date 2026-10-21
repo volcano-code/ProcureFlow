@@ -7,6 +7,7 @@ import sys
 import pytest
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT),str(ROOT/'scripts')]
 from closeout import package,joint_receipts,readiness
+from joint_evidence import required_cases
 spec=importlib.util.spec_from_file_location('joint_record_examples',ROOT/'tests/test_candidate_procurement.py')
 fixtures=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixtures)
 
@@ -15,10 +16,16 @@ def dirs(tmp_path):
     paths=[]
     for i in range(3):
         p=tmp_path/str(i);p.mkdir();run,audit=fixtures.records()
-        for op in run['operations']:op['operation_id']+=f'-{i}'
+        for op in run['operations']:
+            op['operation_id']+=f'-{i}';op['candidate_run_id']+=f'-{i}'
         audit['operation_ids']=[x['operation_id'] for x in run['operations'][:2]]
         fixtures.write(p,run,audit);(p/'source-identity.txt').write_text('b'*40+'\n'+'a'*40+'\n')
-        (p/'tests.xml').write_text('<testsuite>'+''.join(f'<testcase name="case{x}"/>' for x in range(34))+'</testsuite>')
+        _,names=required_cases()
+        (p/'tests.xml').write_text(f'<testsuite tests="{len(names)}" failures="0" errors="0" skipped="0">'+''.join(
+            f'<testcase classname="tests.test_candidate_procurement" name="{name}"/>' for name in sorted(names))+'</testsuite>')
+        (p/'execution.json').write_text(json.dumps({'schema_version':1,'source_commit':'b'*40,
+            'source_tree':'a'*40,'repository':'volcano-code/ProcureFlow','run_id':'123','run_attempt':'1',
+            'replica':i+1,'project':f'pf-joint-123-1-{i+1}'}))
         paths.append(p)
     return paths
 

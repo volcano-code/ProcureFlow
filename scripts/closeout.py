@@ -18,11 +18,12 @@ sys.path[:0]=[str(ROOT),str(ROOT/'scripts')]
 from evals.candidate_quality import write_json,require
 from evals.candidate_grouping import audit
 from check_candidate_procurement import check,load
+from joint_evidence import check_junit, check_execution, read_json
 
 
 def joint_receipts(tree,directories):
     require(len(directories)==3 and len({Path(p).resolve() for p in directories})==3,'THREE_DISTINCT_RECORDS_REQUIRED')
-    receipts=[];ids=set()
+    receipts=[];ids=set();candidate_ids=set();executions=[]
     for directory in directories:
         result=check(directory);run,_=load(Path(directory)/'roundtrip.json')
         require(result['source_tree']==tree,'STALE_JOINT_EVIDENCE')
@@ -30,11 +31,14 @@ def joint_receipts(tree,directories):
         require(len(identity)==2 and re.fullmatch('[0-9a-f]{40}',identity[0]) and identity[1]==tree,'SOURCE_IDENTITY_MISMATCH')
         current={op['operation_id'] for op in run['operations']}
         require(not ids & current,'REUSED_JOINT_EXECUTION');ids.update(current)
-        xml=ET.parse(Path(directory)/'tests.xml').getroot()
-        tests=xml.findall('.//testcase')
-        require(len(tests)>=34 and not xml.findall('.//failure') and not xml.findall('.//error')
-                and not xml.findall('.//skipped'),'JOINT_TESTS_INCOMPLETE')
-        receipts.append({'source_commit':identity[0],**result})
+        candidates={op['candidate_run_id'] for op in run['operations']}
+        require(not candidate_ids & candidates,'REUSED_CANDIDATE_EXECUTION');candidate_ids.update(candidates)
+        execution=read_json(Path(directory)/'execution.json')
+        executions.append(check_execution(execution,identity[0],tree))
+        junit=check_junit(Path(directory)/'tests.xml')
+        receipts.append({'source_commit':identity[0],'execution':execution,'test_evidence':junit,**result})
+    require(len({item[:2] for item in executions})==1 and {item[2] for item in executions}=={1,2,3},
+            'MIXED_OR_REUSED_CI_EXECUTIONS')
     return receipts
 
 
@@ -42,7 +46,7 @@ def readiness(tree,directories):
     grouped=audit(ROOT/'evals/candidate60')
     try:
         records=joint_receipts(tree,directories);status='selected_keyless_gates_passed';blocks=[]
-    except (OSError,ValueError,KeyError,TypeError,ET.ParseError):
+    except (OSError,ValueError,KeyError,TypeError,AttributeError,ET.ParseError):
         records=[];status='blocked';blocks=['CURRENT_TREE_THREE_JOINT_RECORDS_REQUIRED']
     return {'schema_version':1,'status':status,'source_tree':tree,'grouped_data':grouped,'joint_records':records,
         'blocking_engineering_evidence':blocks,'product_release_approved':False,

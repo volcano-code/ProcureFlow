@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -65,18 +66,53 @@ def provider(data):
     finally: server.shutdown(); server.server_close(); thread.join(timeout=5)
 
 
+def check_candidate_bindings(rows, versions, operations, cancelled):
+    """Independently bind every imported field to its own persisted source/run.
+
+    Merely checking that an evidence ID occurs somewhere in the run set is not
+    sufficient: empty evidence and links to another task must fail.
+    """
+    require(len(rows)==4 and len({r['id'] for r in rows})==4, 'CANDIDATE_COUNTS')
+    imported={r['id']:r for r in rows if r['status']=='IMPORTED'}
+    cancelled_rows=[r for r in rows if r['status']=='CANCELLED']
+    require(len(imported)==3 and len(cancelled_rows)==1 and cancelled_rows[0]['id']==cancelled,
+            'CANDIDATE_COUNTS')
+    require(cancelled_rows[0]['output'] is None and cancelled_rows[0]['quote_id'] is None,
+            'CANCELLED_OUTPUT')
+    require({op['candidate_run_id'] for op in operations}==set(imported), 'CANDIDATE_OPERATION_BINDING')
+    require(len(versions)==3 and len({v['quote_id'] for v in versions})==3 and
+            {v['quote_id'] for v in versions}=={r['quote_id'] for r in imported.values()}, 'QUOTE_COUNTS')
+    for version in versions:
+        run,=[r for r in imported.values() if r['quote_id']==version['quote_id']]
+        require(bool(version['confirmed_by']) and version['document_id']==run['document_id'],
+                'QUOTE_SOURCE_BINDING')
+        output=run['output'];snapshot=run['input_snapshot'];evidence=version['evidence']
+        require(isinstance(snapshot,dict) and isinstance(snapshot.get('document_sha256'),str) and
+                re.fullmatch('[0-9a-f]{64}',snapshot['document_sha256']), 'QUOTE_SOURCE_BINDING')
+        require(isinstance(output,dict) and version['values']==output.get('values'), 'CANDIDATE_VALUE_DRIFT')
+        require(isinstance(evidence,dict) and set(evidence)==set(VALUES), 'CANDIDATE_PROVENANCE')
+        for ref in evidence.values():
+            require(isinstance(ref,dict) and ref.get('candidate_run_id')==run['id'] and
+                    ref.get('document_id')==run['document_id'] and
+                    ref.get('document_sha256')==snapshot['document_sha256'] and ref.get('origin')=='model_candidate',
+                    'CANDIDATE_PROVENANCE')
+            sources=ref.get('sources')
+            require(isinstance(sources,list) and bool(sources), 'CANDIDATE_PROVENANCE')
+            for source in sources:
+                require(isinstance(source,dict) and source.get('document_id')==run['document_id'] and
+                        source.get('document_sha256')==snapshot.get('document_sha256') and
+                        isinstance(source.get('fragment_id'),str) and bool(source['fragment_id']) and
+                        source.get('origin')=='model_candidate', 'CANDIDATE_PROVENANCE')
+    return True
+
+
 def audit_pg(db, operations, cancelled):
     from sqlalchemy import text
     with db.engine.connect() as conn:
-        rows = conn.execute(text('SELECT id,status,quote_id,output FROM quote_candidate_runs')).mappings().all()
-        require(len(rows)==4 and sum(r['status']=='IMPORTED' for r in rows)==3
-                and sum(r['status']=='CANCELLED' for r in rows)==1, 'CANDIDATE_COUNTS')
-        require(any(r['id']==cancelled and r['output'] is None for r in rows), 'CANCELLED_OUTPUT')
-        quotes = conn.scalar(text('SELECT count(*) FROM quotes'))
-        versions = conn.execute(text('SELECT confirmed_by,evidence FROM quote_versions')).mappings().all()
-        require(quotes==3 and len(versions)==3 and all(r['confirmed_by'] for r in versions), 'QUOTE_COUNTS')
-        for version in versions:
-            require(all(ref.get('candidate_run_id') in {r['id'] for r in rows} for ref in version['evidence'].values()), 'CANDIDATE_PROVENANCE')
+        rows = conn.execute(text('SELECT id,status,quote_id,document_id,input_snapshot,output FROM quote_candidate_runs')).mappings().all()
+        require(conn.scalar(text('SELECT count(*) FROM quotes'))==3, 'QUOTE_COUNTS')
+        versions = conn.execute(text('SELECT quote_id,document_id,"values",confirmed_by,evidence FROM quote_versions')).mappings().all()
+        check_candidate_bindings(rows,versions,operations,cancelled)
         actual = conn.execute(text('SELECT id,status,remote_id,attempts,approval_id FROM external_operations')).mappings().all()
         require(len(actual)==3, 'OPERATION_COUNTS')
         for expected in operations:

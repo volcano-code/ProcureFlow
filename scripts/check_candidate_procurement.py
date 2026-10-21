@@ -35,6 +35,11 @@ def check(directory):
     require(type(run.get('provider_requests')) is int and run['provider_requests']==6
             and type(run.get('erp_post_attempts')) is int and run['erp_post_attempts']==2,'CALL_COUNTS')
     operations=run.get('operations',[])
+    require(isinstance(operations,list) and all(isinstance(op,dict) for op in operations),'INVALID_OPERATIONS')
+    for op in operations:
+        for field in ('operation_id','candidate_run_id'):
+            value=op.get(field)
+            require(isinstance(value,str) and re.fullmatch('[A-Za-z0-9_-]{1,64}',value),'INVALID_OPERATION_ID')
     require(len(operations)==3 and [x.get('scenario') for x in operations]==['normal','lost-receipt','revoked'],'SCENARIOS')
     require(len({x.get('operation_id') for x in operations})==3 and len({x.get('candidate_run_id') for x in operations})==3,'DUPLICATE_IDENTITIES')
     for index,op in enumerate(operations):
