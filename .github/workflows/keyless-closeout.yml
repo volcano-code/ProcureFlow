@@ -1,10 +1,15 @@
 name: keyless-closeout
 on:
+  push:
+    branches: ['develop/remediation-no-key-closeout']
   pull_request:
     paths: ['scripts/**', 'evals/**', 'tests/**', 'services/api/**', 'apps/web/**', 'integrations/erpnext/**', '.github/workflows/keyless-closeout.yml']
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: keyless-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   offline-evaluation-release:
     runs-on: ubuntu-latest
@@ -56,6 +61,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         replica: [1, 2, 3]
     services:
@@ -148,20 +154,20 @@ jobs:
           JOINT: ${{ needs.candidate-procurement.result }}
         run: test "$OFFLINE" = success && test "$JOINT" = success
       - uses: actions/download-artifact@v4
-        with: {name: keyless-closeout-1, path: evals/reports/ci/receipt1}
+        with: {name: keyless-closeout-1, path: "${{ runner.temp }}/keyless-receipt1"}
       - uses: actions/download-artifact@v4
-        with: {name: keyless-closeout-2, path: evals/reports/ci/receipt2}
+        with: {name: keyless-closeout-2, path: "${{ runner.temp }}/keyless-receipt2"}
       - uses: actions/download-artifact@v4
-        with: {name: keyless-closeout-3, path: evals/reports/ci/receipt3}
+        with: {name: keyless-closeout-3, path: "${{ runner.temp }}/keyless-receipt3"}
       - name: Check same-tree evidence and package tracked source only
         run: |
-          python scripts/closeout.py readiness --joint evals/reports/ci/receipt1 --joint evals/reports/ci/receipt2 --joint evals/reports/ci/receipt3 --output evals/reports/ci/closeout-final/readiness.json
+          python scripts/closeout.py readiness --joint "$RUNNER_TEMP/keyless-receipt1" --joint "$RUNNER_TEMP/keyless-receipt2" --joint "$RUNNER_TEMP/keyless-receipt3" --output "$RUNNER_TEMP/closeout-final/readiness.json"
           python scripts/closeout.py package --output "$RUNNER_TEMP/closeout-package"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: keyless-final-records
           path: |
-            evals/reports/ci/closeout-final
+            ${{ runner.temp }}/closeout-final
             ${{ runner.temp }}/closeout-package
           if-no-files-found: error
