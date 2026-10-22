@@ -1,0 +1,75 @@
+name: protocol-interop
+on:
+  pull_request:
+    paths: ['integrations/protocols/**', 'services/api/**', '.github/workflows/protocol-interop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  official-sdk-interop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PF_MODE: demo
+      PF_ERP_MODE: mock
+      ERP_ALLOW_DRAFT_WRITES: 'false'
+      PF_DATA_DIR: ${{ runner.temp }}/pf-protocol-bootstrap
+      PYTHONPATH: services/api:.
+      PF_AUTH_TOKENS: '{}'
+      LLM_API_KEY: ''
+      ERP_API_KEY: ''
+      ERP_API_SECRET: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install actual pinned SDKs and application dependencies
+        run: |
+          python -m pip install -r services/api/requirements-dev.txt -r integrations/protocols/requirements.txt
+          python -m pip check
+      - name: Actual MCP subprocess, application HTTP and AG-UI consumer
+        run: |
+          mkdir -p "$RUNNER_TEMP/protocol-evidence"
+          python -m pytest -q integrations/protocols/tests --junitxml="$RUNNER_TEMP/protocol-evidence/tests.xml"
+      - name: Keep the original API contract unchanged
+        run: python scripts/export_contracts.py --check
+      - name: Verify test outcomes and archive tracked source
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m
+          import json, os, pathlib, subprocess, xml.etree.ElementTree as ET
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'protocol-evidence'
+          root = ET.parse(out / 'tests.xml').getroot()
+          cases = list(root.iter('testcase'))
+          assert cases and all(not any(c.find(tag) is not None for tag in ('failure','error','skipped')) for c in cases)
+          required = {'test_official_mcp_client_real_subprocess','test_agui_real_http_official_consumer',
+              'test_agui_durable_pilot_revocation_stops_stream','test_agui_official_models_and_no_side_effects',
+              'test_evidence_cannot_escape_selected_request','test_token_file_private_and_not_symlink'}
+          assert required <= {c.attrib['name'] for c in cases}
+          for suite in root.iter('testsuite'):
+              assert all(int(suite.attrib.get(k, 0)) == 0 for k in ('failures','errors','skipped'))
+          git = lambda *args: subprocess.check_output(['git',*args],text=True).strip()
+          result = {'status':'passed','commit':git('rev-parse','HEAD'),'tree':git('rev-parse','HEAD^{tree}'),
+              'tests':len(cases),'failures':0,'errors':0,'skipped':0,
+              'sdk_versions':{p:m.version(p) for p in ('mcp','ag-ui-protocol','httpx','pydantic')},
+              'mcp_transport':'stdio','agui_mode':'read-only-observation','real_model_called':False,
+              'real_erp_called':False,'production_release':False}
+          (out/'verification.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result))
+          subprocess.run(['git','archive','--format=zip','--prefix=procureflow/','HEAD','-o',str(out/'source.zip')],check=True)
+          PY
+      - name: Preserve exact run records, including failures
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/protocol-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/protocol-evidence/source-identity.txt"
+          python -m pip freeze > "$RUNNER_TEMP/protocol-evidence/environment.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-interop-evidence
+          path: ${{ runner.temp }}/protocol-evidence
+          if-no-files-found: error

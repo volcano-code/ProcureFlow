@@ -1,0 +1,4 @@
+# Optional protocol runtime. Install alongside services/api/requirements-dev.txt.
+# The maintained MCP 1.x SDK API is deliberately pinned; this is not a v2 adapter.
+mcp==1.30.0
+ag-ui-protocol==1.0.0
