@@ -4,6 +4,8 @@ import {API, api, loadDemo, watchAudit, type Capabilities, type ProcurementReque
   type Quote, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
 import SessionBoundary,{type AuthenticatedProps} from "@/components/session-boundary";
 import type {Credential} from "@/lib/session.mjs";
+import KnowledgePanel from "@/components/knowledge-panel";
+import {knowledgeBinding,citationPath} from "@/lib/knowledge.mjs";
 import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
@@ -136,11 +138,18 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
     bindingCurrent(run,policyHash) && run.request_version === request.version;
   const activeRun = runs.some(run=>isCurrent(run) && ["PENDING","RUNNING"].includes(run.status));
   const citationDocument = (id:string) => quotes.find(quote=>id.startsWith(quote.document_id+":"));
-  const openCitation = async(id:string) => {
-    const scope=context.current,quote=citationDocument(id);
-    if (!scope || !scopeIsActive(scope) || !quote || citationBusy) return;
+  const openCitation = async(id:string,run:AdviceRun) => {
+    const scope=context.current,quote=citationDocument(id),binding=knowledgeBinding(run.input_snapshot,id);
+    if (!scope || !scopeIsActive(scope) || (!quote&&!binding) || citationBusy) return;
     const ticket=beginEvidence();setCitationBusy(true);setCitationError("");
     try {
+      if(binding){
+        const source=await api<{document:{content_hash:string;id:string};chunk:{text:string;line_start:number}}>(citationPath(id,binding.corpusHash,binding.scope),token,"GET",undefined,scope.controller.signal);
+        if(source.document.content_hash!==binding.documentHash||source.document.id!==binding.versionId||source.chunk.text!==binding.text)throw new Error("SOURCE_INTEGRITY_FAILED");
+        if(scopeIsActive(scope))onEvidence({kind:"policy_document",fragment_id:id,text:source.chunk.text,line:source.chunk.line_start,document_sha256:source.document.content_hash},ticket);
+        return;
+      }
+      if(!quote)return;
       const source = await waitForAdvice(signal=>api<DocumentEvidence>(`/documents/${quote.document_id}/evidence`,token,"GET",undefined,signal),
         {signal:scope.controller.signal});
       const fragment=source.fragments.find(item=>item.id === id);
@@ -195,8 +204,8 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
           <p style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",marginTop:12}}>{run.output.summary}</p>
           <p>仅供参考 · 语义真实性未验证 · {run.output.evidence_read_verified ? "引用片段存在且已在运行中读取" : "引用只校验来源 ID 存在"}</p>
           <div data-testid="advice-citations" className="source-meta">引用来源：{run.output.evidence_ids.length ? run.output.evidence_ids.map(id=><div key={id}>
-            {citationDocument(id) ? <button className="field-link" data-testid="advice-citation" disabled={citationBusy||workflowBusy}
-              style={{textAlign:"left",overflowWrap:"anywhere"}} onClick={()=>void openCitation(id)}>核验并查看 {id}</button>
+            {(citationDocument(id)||knowledgeBinding(run.input_snapshot,id)) ? <button className="field-link" data-testid="advice-citation" disabled={citationBusy||workflowBusy}
+              style={{textAlign:"left",overflowWrap:"anywhere"}} onClick={()=>void openCitation(id,run)}>核验并查看 {id}</button>
               : <span>{id}（不在当前报价来源中，无法打开）</span>}</div>) : "未引用来源片段"}</div>
           <p>模型对话 {run.output.model_calls} 轮 · {providerAttemptExplanation(run.output)} · 只读工具调用 {run.output.tool_calls} 次 · {run.output.usage_complete && run.output.usage
             ? `提供方报告 token 总量 ${run.output.usage.total_tokens}` : "token 用量不完整或未知"} · 费用未知</p>
@@ -393,6 +402,7 @@ function AuthenticatedWorkbench({token,me,cap,authControls}:AuthenticatedProps) 
         {error && <div role="alert" className="form-error">{error}</div>}
         {me && <PolicyPanel key={token.id} token={token} approver={me.role==="approver"} workflowBusy={busy}
           refreshEvent={policyRefresh+events.filter(event=>event.type==="POLICY_CHANGED").length} onRead={onPolicyRead}/>}
+        {me && <KnowledgePanel key={`knowledge-${token.id}`} token={token} approver={me.role==="approver"} workflowBusy={busy}/>}
         <RecoveryPanel key={`recovery-${token.id}`} token={token} workflowBusy={busy} onOpenRequest={id=>void act(()=>choose(id))}/>
         <div className="metrics">{[["采购需求",requests.length],["报价版本",quotes.length],["已确认",quotes.filter(q=>q.confirmed_by).length],["审计记录",events.length]].map(([label,count])=>
           <div className="metric" key={label}><label>{label}</label><strong>{count}</strong></div>)}</div>

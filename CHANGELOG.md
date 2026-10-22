@@ -1,3 +1,10 @@
+## Unreleased — versioned document evidence retrieval
+
+- Add immutable tenant document revisions, explicit publication/retirement and migration b51d09e37a24.
+- Add keyless lexical/character-vector ranking, current-corpus citations, native management/search and shared optional policy queries.
+- Bind advice freshness and source-read checks to active document context without changing enforcing policy rules.
+- Add service, migration, real API/PostgreSQL, official MCP protocol and native browser cases; actual results are separate from this implementation list.
+
 # Changelog
 
 ## 本地开发增量：模型异常处理

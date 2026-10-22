@@ -55,7 +55,7 @@ def run(output: Path) -> int:
                "tests/test_retention.py", "tests/test_maintenance.py", "tests/test_backup_recovery.py",
                "tests/test_backup_protection.py::" + PROTECTION_TEST,
                "tests/test_recovery_diagnostics.py", "tests/test_multi_item_procurement.py",
-               "tests/test_multi_item_imports.py", "tests/test_multi_item_erp.py",
+               "tests/test_multi_item_imports.py", "tests/test_multi_item_erp.py", "tests/test_knowledge_http.py",
                "tests/test_advice_grounding.py::test_durable_api_uses_real_adapter_and_persists_source_read_receipt",
                "tests/test_graph_runtime.py::test_durable_api_graph_receipts_are_safe_and_never_replayed",
                *("tests/test_model_failures.py::" + name for name in MODEL_FAILURE_TESTS),

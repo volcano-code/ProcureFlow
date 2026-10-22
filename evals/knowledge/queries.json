@@ -1,0 +1,102 @@
+[
+  {
+    "id": "kd-01",
+    "query": "运费未知怎么办",
+    "expected_key": "freight"
+  },
+  {
+    "id": "kd-02",
+    "query": "偏远地区附加费",
+    "expected_key": "freight"
+  },
+  {
+    "id": "kd-03",
+    "query": "未税报价税率",
+    "expected_key": "tax"
+  },
+  {
+    "id": "kd-04",
+    "query": "发票类型要求",
+    "expected_key": "tax"
+  },
+  {
+    "id": "kd-05",
+    "query": "交货天数",
+    "expected_key": "delivery"
+  },
+  {
+    "id": "kd-06",
+    "query": "供应商营业执照",
+    "expected_key": "supplier"
+  },
+  {
+    "id": "kd-07",
+    "query": "本人采购能否本人审批",
+    "expected_key": "separation"
+  },
+  {
+    "id": "kd-08",
+    "query": "旧版报价作废后怎么办",
+    "expected_key": "revision"
+  },
+  {
+    "id": "kd-09",
+    "query": "外币 USD",
+    "expected_key": "currency"
+  },
+  {
+    "id": "kd-10",
+    "query": "折扣待议",
+    "expected_key": "discount"
+  },
+  {
+    "id": "kd-11",
+    "query": "质保期限",
+    "expected_key": "warranty"
+  },
+  {
+    "id": "kd-12",
+    "query": "破损数量和现场照片",
+    "expected_key": "damaged"
+  },
+  {
+    "id": "kd-13",
+    "query": "lost draft creation reply",
+    "expected_key": "receipt"
+  },
+  {
+    "id": "kd-14",
+    "query": "immutable evidence retention",
+    "expected_key": "retention"
+  },
+  {
+    "id": "kd-15",
+    "query": "东西坏了找谁修",
+    "expected_key": "warranty"
+  },
+  {
+    "id": "kd-16",
+    "query": "包邮但送到山里还收费吗",
+    "expected_key": "freight"
+  },
+  {
+    "id": "kd-17",
+    "query": "卖方什么时候把货送到",
+    "expected_key": "delivery"
+  },
+  {
+    "id": "kd-18",
+    "query": "量子纠缠实验",
+    "expected_key": null
+  },
+  {
+    "id": "kd-19",
+    "query": "xyzzqqvvu",
+    "expected_key": null
+  },
+  {
+    "id": "kd-20",
+    "query": "宇航员轨道力学",
+    "expected_key": null
+  }
+]

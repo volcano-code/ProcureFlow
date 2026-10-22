@@ -20,6 +20,8 @@ from .advice import AdviceService
 from .candidate_agent import CandidateAgent
 from .candidate_contracts import CandidateReserve, CandidateProcess, CandidateImport, CandidateCancel
 from .candidates import CandidateService
+from .knowledge import KnowledgeService
+from .knowledge_routes import register_knowledge_routes
 from .auth import IdentityService
 from .config import Settings
 from .contracts import (AdviceRunCommand, AnalyzeCommand, ApprovalCommand, ExecuteCommand, LoginCommand, Principal,
@@ -84,6 +86,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     advice_service = AdviceService(service)
     candidate_service = CandidateService(service)
     identities = IdentityService(db, settings)
+    knowledge = KnowledgeService(service)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -319,6 +322,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.get("/api/v1/documents/{document_id}/evidence")
     def evidence(document_id: str, principal=Depends(identity)):
         return service.evidence(principal, document_id)
+
+    register_knowledge_routes(app, knowledge, identity)
 
     @app.get("/api/v1/policy")
     def policy(principal=Depends(identity)):

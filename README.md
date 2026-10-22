@@ -1,3 +1,5 @@
+> **文档检索增量**：新增版本化制度原文、明确发布/撤回、租户过滤、精确引用和原生检索面板；`search_policy` 可携带 query 查询绑定文档。当前采用本地 BM25＋字符 TF-IDF，不是神经语义向量或 pgvector。文档不自动改变执行规则。见 [运行与边界](docs/versioned-document-retrieval.md)。以下历史交付记录保留，不作为本次 CI 证明。
+
 > **只读 MCP（本地 stdio）**：新增官方 SDK 协议入口，共享现有工具注册表并绑定一份建议记录；每次读取重新鉴权。见 [接入、权限与验收范围](docs/remediation-readonly-mcp.md)。不提供 MCP HTTP/OAuth，也不代表已完成向量 RAG 或 AG-UI。
 
 > Candidate Worker continuation: [durable queue, cancellation and recovery scope](docs/remediation-candidate-worker.md). New UI uses enqueue; real-model quality is still a separate acceptance gate.

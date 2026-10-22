@@ -16,6 +16,7 @@ from .policies import effective_policy
 from .errors import DomainError
 from .service import require
 from .read_tools import invoke_snapshot
+from .knowledge import capture_corpus
 
 LEASE_SECONDS = 90
 # Only fixed application codes can become a durable failure receipt.
@@ -66,6 +67,11 @@ class AdviceService:
         result = {"request": {"id": request.id, "version": request.version, **request.data},
                   "quotes": quotes, "documents": documents, "policy": policy,
                   "quote_collection_hash": digest(quotes)}
+        corpus = capture_corpus(session, principal.tenant_id)
+        # No empty member added: preserve byte-identical legacy snapshots when
+        # there are no active document sources in the workspace.
+        if corpus["documents"]:
+            result["knowledge"] = corpus
         if len(json.dumps(result, ensure_ascii=False)) > 200000:
             raise DomainError("ADVICE_CONTEXT_LIMIT", "Advice source context exceeds its limit", 422)
         return deepcopy(result)
@@ -170,6 +176,8 @@ class AdviceService:
 
         documents = snapshot["documents"]
         evidence_ids = {fragment["id"] for document in documents.values() for fragment in document["fragments"]}
+        evidence_ids.update(chunk["id"] for document in snapshot.get("knowledge", {}).get("documents", [])
+                            for chunk in document["chunks"])
         def invoke(name, arguments):
             with self.procurement.transaction(principal):
                 pass

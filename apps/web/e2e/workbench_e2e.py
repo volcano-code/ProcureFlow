@@ -1504,3 +1504,38 @@ def test_native_candidate_queued_cancel_and_scope_change_stop_polling(page):
     expect(page.get_by_test_id('candidate-panel')).to_have_count(0)
     expect(page.get_by_test_id('candidate-run')).to_have_count(0)
     assert state['enqueues']==1 and state['legacy_calls']==0
+
+
+def test_native_knowledge_draft_publish_search_and_retire(page):
+    from uuid import uuid4
+    key='freight-'+uuid4().hex[:12]
+    page.goto(URL)
+    page.get_by_test_id('login-demo-buyer').click()
+    page.get_by_label('切换演示身份').select_option('demo-approver')
+    panel=page.get_by_test_id('knowledge-panel')
+    expect(panel).to_be_visible()
+    panel.get_by_role('button',name='查看文档版本').click()
+    form=panel.get_by_test_id('knowledge-create')
+    form.locator('[name=document_key]').fill(key)
+    form.locator('[name=title]').fill('测试运费 '+key)
+    form.get_by_test_id('knowledge-text').fill('运费必须明确约定。未知运费不能填零。'+key)
+    form.get_by_test_id('knowledge-save').click()
+    expect(panel.get_by_test_id('knowledge-notice')).to_contain_text('尚未生效')
+    page.on('dialog',lambda dialog:dialog.accept())
+    # Find the version row belonging to this test, not previously seeded data.
+    row=panel.locator('[data-testid^=knowledge-version-]').filter(has_text=key)
+    row.get_by_test_id('knowledge-publish').click()
+    expect(panel.get_by_test_id('knowledge-notice')).to_contain_text('状态已更新')
+    panel.get_by_test_id('knowledge-query').fill(key)
+    panel.get_by_test_id('knowledge-search').click()
+    expect(panel.get_by_test_id('knowledge-results')).to_contain_text('未知运费不能填零')
+    panel.get_by_test_id('knowledge-verify').first.click()
+    expect(panel.get_by_test_id('knowledge-notice')).to_contain_text('重新核对')
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth+1')
+    # Retirement clears cached results; next retrieval must not expose this source.
+    row=panel.locator('[data-testid^=knowledge-version-]').filter(has_text=key)
+    row.get_by_test_id('knowledge-retire').click()
+    expect(panel.get_by_test_id('knowledge-notice')).to_contain_text('状态已更新')
+    panel.get_by_test_id('knowledge-search').click()
+    expect(panel.get_by_test_id('knowledge-results')).not_to_contain_text('未知运费不能填零。'+key)
