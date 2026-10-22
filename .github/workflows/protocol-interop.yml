@@ -13,7 +13,6 @@ jobs:
       PF_MODE: demo
       PF_ERP_MODE: mock
       ERP_ALLOW_DRAFT_WRITES: 'false'
-      PF_DATA_DIR: ${{ runner.temp }}/pf-protocol-bootstrap
       PYTHONPATH: services/api:.
       PF_AUTH_TOKENS: '{}'
       LLM_API_KEY: ''
@@ -26,6 +25,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Set isolated runtime data directory
+        run: echo "PF_DATA_DIR=$RUNNER_TEMP/pf-protocol-bootstrap" >> "$GITHUB_ENV"
       - name: Install actual pinned SDKs and application dependencies
         run: |
           python -m pip install -r services/api/requirements-dev.txt -r integrations/protocols/requirements.txt
