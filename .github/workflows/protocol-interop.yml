@@ -1,7 +1,7 @@
 name: protocol-interop
 on:
   pull_request:
-    paths: ['integrations/protocols/**', 'services/api/**', '.github/workflows/protocol-interop.yml']
+    paths: ['integrations/protocols/**', 'services/api/**', 'README.md', 'docs/protocol-interop.md', '.github/workflows/protocol-interop.yml']
   workflow_dispatch:
 permissions:
   contents: read

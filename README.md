@@ -1,90 +1,49 @@
-> Candidate Worker continuation: [durable queue, cancellation and recovery scope](docs/remediation-candidate-worker.md). New UI uses enqueue; real-model quality is still a separate acceptance gate.
-
-> **Remediation development branch:** this snapshot preserves the newer remote `9f80786` implementation and adds advisory nonstandard quotation candidates. See [batch 2 scope, migration and limits](docs/remediation-batch2-candidates.md). Candidate outputs are not confirmed facts and cannot approve or write ERP. Real-model task quality has not been certified by fixture tests. Earlier reports and application version strings below remain historical.
-
 # ProcureFlow · 可验证采购工作台
 
-**开发 Alpha，FastAPI + 原生 Next.js + 独立 Python Worker。不是生产采购系统。**
+**开发 Alpha：FastAPI + 原生 Next.js/React + PostgreSQL/SQLite + 独立 Python Worker。不是生产采购系统。**
 
-从固定键值报价或显式映射的普通表格中提取字段和来源证据，用确定性 Decimal 规则比较成本，让独立审批人批准具体快照，再通过持久化操作账本创建并独立核对 ERP 草稿。可选只读 Agent 通过真实 LangGraph 图执行，只能解释与读取证据，不能审批、下单或支付。
+将报价原文转为可核对的字段与证据，由确定性 Decimal 规则计算，再让独立身份批准具体快照，最后创建并回读 ERPNext 报价草稿。模型只生成建议或候选，不能审批、确认事实或获得 ERP 写权限。默认演示不调用真实模型、不连接真实 ERP。
 
-默认不调用真实模型、不连接真实 ERP。无需密钥即可运行完整 mock 演示。仓库保留早期 a1/a2 报告作为历史快照；其测试数字、环境限制和“未实现”说明不能代表当前代码。
+本说明对应协议集成开发分支。旧 README 原字节保存在 [历史快照](docs/history/README-before-protocol-interop.md)；历史材料中的“当前”、测试数和否定结论只适用于其记录的提交。应用版本仍沿用 `0.1.0a2`，不是一次正式发布声明。
 
-## 当前能力与边界
+## 能力与证据边界
 
-- CNY、EA，单物料兼容，以及最多 20 个唯一 SKU 的完整供应商报价篮子：多行需求、CSV/XLSX 显式多行映射、逐行来源/修正/确认、逐行税折扣与整单运费、完整覆盖比较/审批/草稿/读回。缺行、额外行或数量不符不参与推荐；不跨供应商拼单、不自动合并重复 SKU、不做 OCR 或单位/币种换算。原生 Next 支持多物料；轻量静态 demo 保持单物料。详见 [阶段十七](docs/stage17-multi-item-procurement.md)
-- 原文件 SHA-256、页/行/单元格证据、人工修正历史与显式确认；未知值不会被默认为零
-- 版本化需求、租户隔离的不可变政策/预约生效与变更历史，预算/交期上限及最低有效供应商数；完整报价集合和政策绑定的审批、失效/撤权检查（见 [阶段十一](docs/stage11-tenant-policy.md)）
-- 受控 pilot 登录：一次性邀请、短期内存会话、退出／到期／跨进程撤权、用户／租户／角色展示；买方与审批方授权版本在首次 ERP 写入前重验（见 [阶段十四](docs/stage14-pilot-sessions.md)），不自动发放真实账号
-- SQLite 与 PostgreSQL 业务存储；Alembic 迁移；独立 Worker、事务 Outbox、持久化幂等键及不确定结果只读恢复
-- 过期未导入预览的可逆归档与有效配额；数据库＋来源文件的成对备份、校验和新隔离目标恢复；新增可选 A256GCM 加密和固定公钥 Ed25519 签名验证，CLI 必须显式选择保护模式（见 [阶段十八](docs/stage18-backup-protection.md)）。恢复默认暂停写入并永久拦截旧待处理操作重放；[恢复诊断工作台](docs/stage16-recovery-diagnostics.md) 提供待处理 hold、证据和只读 ERP 字段差异，不释放 hold 或授权写入。见 [预览保留](docs/table-preview-retention.md) 和 [备份恢复](docs/stage15-recovery.md)。归档不回收磁盘，不支持原地覆盖恢复或永久清除
-- ERPNext Supplier Quotation 草稿和独立读回。支持范围与税/运费/折扣合同以 [费用映射边界](docs/erp-cost-mapping.md) 和 [ERP 说明](integrations/erpnext/README.md) 为准；没有 Submit、Purchase Order、删除或支付功能
-- 原生 Next.js 工作台，以及 FastAPI 提供的轻量静态演示页；锁定 npm 安装、类型检查、生产构建、浏览器与容器验收入口
-- 持久化只读建议：一次性领取、来源读取、过期/中断回执、不自动重放；真实 LangGraph 节点和有界工具白名单。不是逐工具 checkpoint 或跨进程模型恢复
-- 只读模型故障处理：有限的发送前连接重试、逐块时限/取消检查、拒绝/空输出与协议分类、未知计量和安全诊断；Next 可停止等待并回读建议记录（见 [阶段十九](docs/stage19-model-failure-handling.md) 与 [发布续记](docs/stage19-publication.md)）。离线故障测试不代表真实模型质量
-- [10 个冻结合成开发案例](docs/stage10-evaluation.md)、确定性与协议评分、独立解释评分流程。fixture 通过不证明真实模型质量，未选择真实提供方/型号/费用预算；不是 60-task benchmark 或 Holdout
+| 范围 | 已有实现 | 不应据此宣称 |
+|---|---|---|
+| 报价与证据 | 固定键值文本、文本 PDF、显式 CSV/XLSX 列映射；哈希、页/行/单元格定位；人工修订、确认、版本历史 | 任意扫描件、OCR、多模态或任意布局自动理解 |
+| 业务计算 | CNY/EA；单物料及最多20个唯一SKU的完整供应商篮子；明确税折扣与运费；未知不补零 | 通用税务模型、币种/单位换算、跨供应商自动拼单 |
+| 权限与执行 | 租户隔离、pilot邀请/会话/撤权、审批快照、事务Outbox、独立Worker、不确定结果只读恢复 | 企业SSO、全自主采购、采购订单提交、删除或支付 |
+| 候选 Agent | 原文候选存储、排队、独立Worker、取消、人工采纳为未确认报价；有界工具、证据与权限复核 | 模型生成即为已确认事实、重启自动重放不确定调用 |
+| 建议编排 | LangGraph节点、建议运行记录和中断状态 | 逐工具持久化checkpoint或任意中断位置的模型恢复 |
+| 评测 | A规则/B单次LLM/C工具Agent运行与比较、Dev20及60条分组提取数据、私有人工审阅工具 | 脚本提供方成绩等于真实模型效果；公开合成Evaluation等于未见Holdout |
+| **MCP（本分支新增）** | **官方SDK的本地stdio服务；一个指定需求、五个只读工具** | 远端HTTP MCP/OAuth、自动调用采购写操作 |
+| **AG-UI（本分支新增）** | **官方事件模型与编码器；鉴权后的有限时长只读观察流、游标续读和撤权停止** | 原生工作台已换为AG-UI；观察结束等于Agent或采购成功 |
+| 政策 | 租户隔离、版本化结构化规则、预约生效、审批绑定 | 文档向量RAG、语义检索或LLM直接发布规则 |
 
-本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP/AG-UI、向量 RAG、Celery/Redis 或真实模型质量/费用结论。
+MCP和AG-UI为可选依赖与独立启动入口，**不修改默认应用、数据库迁移、既有前端或采购权限**。完整接口、测试和限制见 [协议互通说明](docs/protocol-interop.md)。
 
-## 当前备份保护发布验收
+尚未完成：文档向量检索、远端MCP认证传输、原生UI的AG-UI消费者、实际模型效果与费用对照、真人语义校准、外部试用、独立未见样本和正式发布审核。结构化政策、协议通过或大量工程测试不能代替这些工作。
 
-基于远端已验收 `a35f78713777016e8d76338391b18e0d558aa850` 新增 [备份保护](docs/stage18-backup-protection.md)：标准 JOSE 格式、调用方管理的本地密钥、验证完成前不创建恢复目标，以及显式明文兼容选项。仅使用合成数据和临时测试密钥；本地源码已原样公开为 `ea09ffaa2601e000a86c2427747e9ac4be66310e`，正在进行当前提交的 CI 验收，见 [发布续记](docs/stage18-publication.md)。未合并或部署，独立安全审查未完成。下列阶段十七结果是历史基线，不代表本增量通过。新保护模式原始备份上限 32 MiB，旧版明文上限保持 256 MiB。
+## 立即运行：不需要模型密钥
 
-## 验收证据如何读
-
-先看**被测试的确切提交**，再看该提交的 CI 和原始记录。测试命令或 workflow 存在不代表已运行；mock/fixture 不能替代真实服务；不同提交、数据库后端和重叠测试数量不能相加成采购任务数。
-
-当前本地多物料增量基于已核对的 `fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf`，远端 PR #1 在开始工作时指向相同提交。基线与之前阶段的 CI 仅是历史证据，不能证明本增量通过。当前结果和未运行门槛见 [阶段十七](docs/stage17-multi-item-procurement.md) 与 [本地证据索引](docs/evidence/stage17-local-verification.json)。当前改动尚未推送、合并或部署，独立安全审查未完成。
-
-多物料真实 ERPNext 费用映射在本阶段严格限定为显式零税率、零行折扣、相同税价模式、整数 EA 与受限金额；多行税/折扣比较和 MockERP 已实现，但不能据此声称真实 ERP 支持同等范围。只运行合成 transport 测试，不是实时 ERP 验收。
-
-## 立即运行，不需要模型密钥或 ERPNext
-
-推荐 Python 3.13、Node 22。项目根目录：
+Linux/POSIX环境，Python 3.13；原生前端另需Node 22。从项目根目录：
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -r services/api/requirements.txt
 python scripts/start.py
 ```
 
-解析上传需要 POSIX 资源限制支持（例如 Linux）；不支持这些限制的系统会安全拒绝解析，不会回退到无隔离执行。
+打开 `http://127.0.0.1:8000`，这是FastAPI提供的轻量静态演示页；API文档在 `/docs`。默认绑定回环地址、数据在 `.data/`，启动脚本不会自动加载 `.env.example`。
 
-打开 `http://127.0.0.1:8000`；API 文档为 `/docs`。默认绑定回环地址，数据保存在 `.data/`。可指定 `--port 8010 --data-dir ./my-local-data`。`.env.example` 是配置说明，启动脚本不会自动加载它。
+演示身份 `demo-buyer`、`demo-approver`、`demo-auditor` 只用于隔离本地演示，不可暴露公网或用于真实ERP。用户角色由服务端决定，不能靠前端切换获得真实权限。解析上传需要POSIX资源限制；不支持的系统会拒绝解析，不回退无隔离模式。
 
-演示身份：`demo-buyer`、`demo-approver`、`demo-auditor`。它们只供隔离本地演示，不可用于公网或真实 ERP。服务端解析角色，不信任客户端自报身份。
+载入三份示例并分别核对/确认后，可进行确定性比较。B缺运费，不参与最低价推荐；预期选择SUP-C，合成总价24,200.00元。金额与数量使用十进制字符串，不在前端重新用浮点数计算。
 
-点击“载入三份示例”，查看证据并逐份确认，然后生成方案。报价 B 运费未知，确认后仍不能参加最低价推荐；本例推荐 SUP-C：
+### 原生 Next.js 页面
 
-| 样例 | 成本合同 | 可比较总价 |
-| --- | --- | --- |
-| A | 20 × 1,200.00，含税，最终含税运费 800.00 | 24,800.00 |
-| B | 20 × 1,120.00，不含税，税率 0.13，运费未知 | 未知 |
-| C | 20 × 1,180.00，含税，最终含税运费 600.00 | 24,200.00 |
-
-所有金额/数量在 API 使用十进制字符串。先将商品金额舍入到分、扣除明确商品折扣；不含税时按明确税率计算商品税额，最后加最终含税运费。见 [架构与业务合同](docs/architecture.md)。这不是通用税务模型或税务建议。
-
-固定文本布局：
-
-```text
-supplier_id: SUP-A
-sku: STAND-01
-quantity: 20
-uom: EA
-unit_price: 1200.00
-tax_mode: included
-tax_rate: 0.13
-shipping_cost: 800.00
-discount: 0.00
-delivery_days: 7
-currency: CNY
-```
-
-供应商/物料 ID 大小写原样保留；只规范化币种和 UOM。原“上传报价”入口保留 CSV 两列键/值与 XLSX A/B 列；原生 Next 新增“导入普通表格”，要求明确选择工作表、表头行、报价行与列映射，先预览，再创建未确认报价。字段冲突、公式、缺失运费或不明确税价不会被补成零。上传最多 2 MiB，文本 PDF 最多 10 页；解析进程限制和实际保证见 [安全边界](docs/stage12-tabular-import.md#安全边界)，仍不宣称适合公开不可信上传。
-
-## 原生 Next.js 工作台
+保持后端运行，在另一个终端：
 
 ```bash
 cd apps/web
@@ -94,9 +53,50 @@ npm run build
 npm run dev
 ```
 
-保持后端运行；开发前端默认连接 `http://127.0.0.1:8000`。可通过 `NEXT_PUBLIC_API_BASE_URL` 指定地址；服务端 `PF_WEB_ORIGINS` 限制浏览器 origin，不替代身份验证。包含需求、证据、确认/修正、租户政策/变更历史、历史评估与失效提示、审批/拒绝、执行、独立 ERP 回读、持久化建议和审计。恢复诊断入口只在已有有效授权下使用；恢复后应先离线审核并按操作员流程恢复新授权，浏览器不能登录绕过 RECOVERY 或直接恢复写入。
+前端默认地址 `http://127.0.0.1:3000`。它提供需求、来源、修订、确认、政策、历史评估、审批、执行、独立回读、候选任务、建议和审计工作台；仍使用既有业务事件接口，不自动启用本分支新增AG-UI路由。
 
-## 回归与验收
+### PostgreSQL＋原生前端容器
+
+仅在新建本地演示目录操作；已有 `.env.postgres` 不要重新生成，已有数据不要用 `down -v` 删除：
+
+```bash
+python scripts/init_postgres_env.py
+docker compose --env-file .env.postgres \
+  -f compose.postgres.yaml -f compose.web.yaml \
+  up --build -d --wait
+```
+
+`.env.postgres`含本地数据库密码，不要提交或分享。默认仍是模拟ERP。真实ERP映射与费用限制见 [费用合同](docs/erp-cost-mapping.md) 和 [ERP集成](integrations/erpnext/README.md)；多物料/非零费用源码不代表每种组合都已通过真实ERP验收。
+
+## 可选协议互通
+
+```bash
+python -m pip install -r services/api/requirements-dev.txt \
+  -r integrations/protocols/requirements.txt
+export PYTHONPATH="$PWD/services/api:$PWD"
+python -m pytest -q integrations/protocols/tests
+```
+
+MCP只读工具为 `get_request`、`get_quotes`、`get_comparison`、`get_policy`、`get_evidence`。启动前由操作者设置固定API源、需求ID和仅本人可读的令牌文件；使用MCP客户端启动 `python -m integrations.protocols.mcp_server`。证据是数据，不是指令；源文件不会获得审批权限。
+
+AG-UI通过可选factory启用：
+
+```bash
+python -m uvicorn integrations.protocols.agui:create_protocol_app \
+  --factory --host 127.0.0.1 --port 8000
+```
+
+新增GET接口 `/api/v1/requests/{request_id}/ag-ui/events`，沿用现有身份与工作区检查。只发状态与允许的审计元数据；`RUN_FINISHED`表示本次观察结束，**不是采购或模型任务完成**。不要与同端口的默认API同时启动。
+
+## 模型与评测
+
+生产候选/建议模块和离线评测分开。真实调用需要服务端提供方配置与显式授权，密钥不得进入聊天、Git、前端或公开报告。默认CI不会调用付费模型。
+
+[候选队列](docs/remediation-candidate-worker.md)、[候选原生容器验收](docs/remediation-candidate-stack.md)、[候选提取评测](docs/remediation-candidate-quality.md)、[B对照与人工审阅](docs/remediation-completion.md) 和 [分组数据/收尾](docs/keyless-closeout.md) 分别说明范围。
+
+已公开数据是开发者编写的合成数据。规则解析器的7/20及分组Dev30=7/30、Validation10=0/10、Evaluation20=0/20属于历史基线测量；不是模型成功率或真实采购成功率。未识别输入保留在分母，人工语义评价未完成时保持未知。重复尝试、重叠套件和三个重复实验不能算成新增独立任务。
+
+## 验收与升级
 
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
@@ -105,53 +105,23 @@ python scripts/export_contracts.py --check
 npm run test:unit --prefix apps/web
 python scripts/smoke.py
 python scripts/web_http_smoke.py
-python scripts/verify_model_acceptance.py --fixture
-python scripts/evaluate_procurement.py --fixture --output evals/reports/local/procurement-development.json
-python scripts/verify_recovery.py --protection plain --output evals/reports/local/recovery-acceptance.json
-python scripts/verify_multi_item.py --output evals/reports/local/multi-item-acceptance.json
 ```
 
-安装 Chromium 后运行严格浏览器门槛：
+严格浏览器与数据库入口见 `scripts/verify_next.py`、`scripts/verify_postgres.py` 和 `.github/workflows/`。每次验收必须绑定确切HEAD或同树PR合并提交，读取原始JUnit/JSON，不把文件存在或workflow成功但测试跳过当作通过。
+
+基线 `3401ace` 已有三套独立环境的原生页面/pilot身份/PostgreSQL/两个Worker/真实ERPNext联合记录，模型使用无上游脚本服务。这是工程闭环，不是真实LLM或真人研究；本分支协议验收是另一项独立工作，不继承旧提交作为本次通过证明。见 [收尾修复记录](docs/keyless-closeout-repair.md)。
+
+升级已有数据前，停止相关进程，备份并在副本验证迁移：
 
 ```bash
-python -m playwright install chromium
-PF_REQUIRE_BROWSER=1 python scripts/test.py -q -m browser
-python scripts/verify_next.py --output evals/reports/local/next-gate
-```
-
-默认可跳过缺失的浏览器环境；严格模式必须失败，不能把 skipped 算通过。Node transport 和 HTTP smoke 不是浏览器测试。原生 gate 会执行类型检查、生产构建、真实 Next 服务和浏览器，不回退到静态 demo。
-
-PostgreSQL、Compose 与真实 ERP 各有独立严格入口及临时数据保护，见 [阶段三](docs/stage3-postgres.md)、[阶段七联合验收](docs/stage7-combined-acceptance.md) 和 `.github/workflows/`。不得把测试脚本指向生产数据库/ERP。离线环境清单：`python scripts/preflight.py`。
-
-## 可选只读 Agent
-
-[阶段八](docs/stage8-durable-advice.md) 说明建议账本和迁移；[阶段九](docs/stage9-langgraph-runtime.md) 说明实际 LangGraph 图与隔离模型协议入口。
-
-服务端配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 和可选 `LLM_THINKING_MODE` 后，用户仍须显式新建/执行建议。凭据不进入前端或仓库。真实调用前须单独确定提供方、型号、数据范围和费用授权；日常测试不会读取真实模型配置或调用付费服务。
-
-只读工具为 `get_comparison`、`search_policy`、`get_evidence`；默认上限 4 次模型调用和 8 次工具调用。审批、外部草稿写入、shell 和浏览器不在模型权限内。引用存在且已读取不等于推理成立，`semantic_factuality_verified=false` 保留。提供方 token 仅为报告值，不能替代账单或硬金额上限。
-
-## 数据、迁移与安全
-
-```bash
-PYTHONPATH=services/api PF_DATA_DIR="$PWD/.data" python -m procureflow.worker --once
-# 不带 --once 持续 drain
 cd services/api
 PYTHONPATH=. python -m alembic upgrade head
 ```
 
-对已有实例先停止相关进程、备份并在副本验证迁移。 V1 `.pfb` 严格绑定源码指纹；本增量修改源码后，旧版本（包括 `fc9750e`）备份仍须使用匹配的可信基线代码恢复，不提供旧包兼容迁移或放宽校验，见 [版本兼容边界](docs/stage16-recovery-diagnostics.md#exact-version-backup-compatibility)。政策版本增量需执行新的迁移（使用 `alembic heads` 核对当前迁移头）；不要用覆盖源码替代数据库迁移。降级会删除相应历史，不应无备份执行。
+保留 [版本绑定的成对备份恢复](docs/stage15-recovery.md) 与 [可选加密/签名保护](docs/stage18-backup-protection.md) 限制。不能通过改快照或重新发送旧任务来绕过恢复hold；查询不到远端单据也不代表可以安全重发。协议增量没有新增业务迁移。
 
-Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没查到不等于没创建，不盲目重发。建议运行亦不自动重放中断/失败调用。旧 private 静态令牌模式和新 pilot 受控会话模式都不是企业 SSO；演示身份被禁止访问真实 ERP。详细限制见 [威胁模型](docs/threat-model.md)。
+## 目录
 
-## 目录与历史
+`services/api/procureflow/`为业务内核、API与Worker；`apps/web/`为原生前端；`apps/demo/`为静态演示；`integrations/protocols/`为可选只读协议；`integrations/erpnext/`为受限映射与一次性沙箱；`evals/`、`tests/`、`scripts/`为任务数据、独立检查和验收；`docs/`保留各阶段范围与原始历史。
 
-- `services/api/procureflow/`：合同、规则、状态机、API、Worker、只读 Agent、ERP 适配器
-- `services/api/tests/`、`scripts/`：回归、验收、合同导出
-- `apps/web/`、`apps/demo/`：原生工作台与静态演示
-- `packages/contracts/`：Pydantic/FastAPI 生成的合同与漂移门槛
-- `integrations/erpnext/`：受限映射与一次性真实沙箱
-- `evals/`：合成 fixtures、评测和历史原始记录
-- `docs/stage*.md`：按阶段保留的实现/验收说明，阶段性否定结论以其时间范围为准
-
-版本元数据中的 `0.1.0a2` 是沿用的 Alpha 标识，不代表后续开发分支增量不存在，也不代表已发布新版本。根 [MANIFEST.json](MANIFEST.json) 仅指向固定基线和证据；旧 a2 文件清单已按原字节保存在 [历史清单](docs/history/MANIFEST-0.1.0a2.json)，其中哈希不能用于验证当前源码。未合并、未部署的修改只应称为待验收开发增量。
+当前开发分支并不等于默认main、已合并版本或正式发布。默认主线保护、生产运维认证、企业SSO、通用自主采购与真实效果结论仍未由本项目证明。
