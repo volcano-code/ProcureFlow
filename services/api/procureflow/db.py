@@ -308,6 +308,38 @@ for _model in (PolicyVersionRow, EvaluationRow):
     event.listen(_model, "before_delete", _immutable_receipt)
 
 
+class KnowledgeDocumentRow(Base):
+    """One tenant-scoped document family; publication never rewrites its text."""
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (UniqueConstraint("tenant_id", "document_key", name="uq_knowledge_document_key"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    document_key: Mapped[str] = mapped_column(String(80))
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class KnowledgeVersionRow(Base):
+    __tablename__ = "knowledge_versions"
+    __table_args__ = (UniqueConstraint("document_id", "version", name="uq_knowledge_version"),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(160))
+    scope: Mapped[str] = mapped_column(String(80))
+    text: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    record_hash: Mapped[str] = mapped_column(String(64))
+    chunks: Mapped[list] = mapped_column(JSON)
+    state: Mapped[str] = mapped_column(String(16))
+    effective_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40))
+    created_by: Mapped[str] = mapped_column(String(80))
+    published_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    retired_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class Database:
     def __init__(self, url: str, create_schema: bool = False):
         url = normalize_database_url(url)

@@ -128,7 +128,7 @@ class ReadOnlyAgent:
 
     def run(self, invoke_tool: Callable[[str, dict], dict | list], evidence_ids: set[str],
             observer: Callable[[dict], None] | None = None) -> dict:
-        grounding = (" Read every cited fragment through get_evidence before finishing. When source fragments exist, "
+        grounding = (" Read every cited quote fragment through get_evidence or policy document chunk through search_policy before finishing. When source fragments exist, "
                      "cite at least one relevant fragment; comparison output alone does not satisfy this check."
                      if self.require_evidence_reads else "")
         messages = [{"role": "system", "content": self.system_prompt + grounding},
@@ -322,6 +322,10 @@ class ReadOnlyAgent:
                         read_evidence_ids.update(fragment["id"] for fragment in fragments
                             if isinstance(fragment, dict) and isinstance(fragment.get("id"), str)
                             and fragment["id"] in evidence_ids)
+                if name == "search_policy" and isinstance(output, dict):
+                    # Only actually returned authorized chunks count as read.
+                    read_evidence_ids.update(hit["citation_id"] for hit in output.get("hits", [])
+                        if isinstance(hit, dict) and hit.get("citation_id") in evidence_ids)
                 tool_count += 1
                 completed_tools.add(name)
                 record({"type": "tool_completed", "model_call": model_call, "tool": name,

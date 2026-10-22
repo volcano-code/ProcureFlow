@@ -201,3 +201,33 @@ def test_same_tenant_other_request_document_cannot_be_read(pilot_api):
         async with session_for(api) as session:
             assert error_code(await session.call_tool("get_evidence",{"document_id":doc}))=="TOOL_SCOPE_DENIED"
     asyncio.run(scenario())
+
+
+def test_official_sdk_queries_versioned_documents_and_refuses_retired_snapshot(pilot_api):
+    api=pilot_api;identity=api['identities']
+    identity.set_membership('mcp-test','doc-author','approver')
+    invite=identity.issue_invite('mcp-test','doc-author')
+    logged=api['client'].post('/api/v1/auth/login',json={'credential':invite['credential']})
+    assert logged.status_code==200
+    headers={'Authorization':'Bearer '+logged.json()['token']}
+    row=api['client'].post('/api/v1/knowledge/versions',headers=headers,json={
+        'document_key':'freight','expected_version':0,'title':'Freight evidence',
+        'text':'Freight must be explicit. Unknown shipping is not zero.'})
+    assert row.status_code==201;row=row.json()
+    published=api['client'].post(f'/api/v1/knowledge/versions/{row["id"]}/publish',headers=headers,json={'expected_document_version':1})
+    assert published.status_code==200
+    reserved=api['client'].post(f'/api/v1/requests/{api["request"]["id"]}/advice-runs',headers=api['headers'],json={
+        'expected_version':api['request']['version'],'idempotency_key':'knowledge-mcp-test-02'})
+    assert reserved.status_code==201
+    api['receipt']=reserved.json()
+    async def scenario():
+        async with session_for(api) as session:
+            result=await session.call_tool('search_policy',{'query':'unknown shipping','top_k':3})
+            assert not result.isError
+            hit=result.structuredContent['result']['hits'][0]
+            assert hit['version_id']==row['id'] and hit['trust']=='untrusted_source_content'
+            assert 'Unknown shipping is not zero' in hit['text']
+            response=api['client'].post(f'/api/v1/knowledge/versions/{row["id"]}/retire',headers=headers,json={'expected_document_version':1})
+            assert response.status_code==200
+            assert error_code(await session.call_tool('search_policy',{'query':'shipping'}))=='MCP_CONTEXT_STALE'
+    asyncio.run(scenario())

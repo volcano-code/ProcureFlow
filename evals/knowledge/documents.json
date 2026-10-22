@@ -1,0 +1,92 @@
+[
+  {
+    "document_key": "freight",
+    "title": "运费核对制度",
+    "text": "运费必须单独列明。未约定运费时不得将未知金额填为零。供应商确认免运费时，原文必须明确注明。",
+    "retire": false
+  },
+  {
+    "document_key": "tax",
+    "title": "含税与发票要求",
+    "text": "报价须说明含税或未税；未税报价必须列明适用税率。发票类型需要书面确认，不能推测税额。",
+    "retire": false
+  },
+  {
+    "document_key": "delivery",
+    "title": "交期确认规范",
+    "text": "交货天数以双方确认的报价约定为依据。采购需求规定的最晚交付时间不得被供应商口头承诺替代。",
+    "retire": false
+  },
+  {
+    "document_key": "supplier",
+    "title": "供应商准入",
+    "text": "首次合作供应商必须提交营业执照和开户资料。采购员核对企业名称与供应商标识，不得自动转成大写。",
+    "retire": false
+  },
+  {
+    "document_key": "separation",
+    "title": "独立审批要求",
+    "text": "采购经办人不能批准本人发起的采购。独立审批人必须持有当前有效权限并核验具体报价版本。",
+    "retire": false
+  },
+  {
+    "document_key": "revision",
+    "title": "报价修订管理",
+    "text": "供应商发布修订报价后，应明确新报价替代哪一版旧报价。不能只因为旧价格较低就选用已作废的版本。",
+    "retire": false
+  },
+  {
+    "document_key": "currency",
+    "title": "币种管理",
+    "text": "当前受控流程仅支持人民币 CNY。外币 USD 和 EUR 的报价需转人工处理，不自行获取汇率换算。",
+    "retire": false
+  },
+  {
+    "document_key": "discount",
+    "title": "折扣核验",
+    "text": "折扣金额必须由报价明示。折扣待议不是零折扣，附带条件的优惠只有确认满足条件后才能采用。",
+    "retire": false
+  },
+  {
+    "document_key": "warranty",
+    "title": "质保约定",
+    "text": "验收前核对质保期限与售后联系方式。报价缺少质保期时，应向供应商询问，不得编造一年保修。",
+    "retire": false
+  },
+  {
+    "document_key": "damaged",
+    "title": "破损验收",
+    "text": "到货出现破损时，保存包装与现场照片，并在验收单中注明损坏数量。未经确认不应全部签收。",
+    "retire": false
+  },
+  {
+    "document_key": "receipt",
+    "title": "Remote receipt recovery",
+    "text": "When a draft creation reply is lost, reconcile the operation identifier with the remote system. Do not repeat the POST until the outcome is established.",
+    "retire": false
+  },
+  {
+    "document_key": "retention",
+    "title": "Evidence retention",
+    "text": "Retain immutable source documents and their SHA-256 hashes. Evidence deletion requires a controlled retention procedure, not an agent instruction.",
+    "retire": false
+  },
+  {
+    "document_key": "legacy",
+    "title": "历史付款提醒",
+    "text": "旧版付款条款仅用于存档。不得自动付款。",
+    "retire": false
+  },
+  {
+    "document_key": "freight",
+    "title": "运费核对制度（第二版）",
+    "text": "运费必须单独列明。未知运费不是零元。远程地区附加费应单独确认并留存证据。",
+    "retire": false
+  },
+  {
+    "document_key": "legacy",
+    "title": "历史付款提醒（撤回版）",
+    "text": "此付款指引已撤回，不应在当前检索结果中提供。",
+    "retire": true
+  }
+]
