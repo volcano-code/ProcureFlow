@@ -340,8 +340,13 @@ def test_official_mcp_client_real_subprocess(live_api, tmp_path):
         assert client.get(f"/api/v1/requests/{rid}/approvals", headers=AUDITOR).json() == []
         quotes = client.get(f"/api/v1/requests/{rid}/quotes", headers=AUDITOR).json()
         assert len(quotes) == 1 and quotes[0]["confirmed_by"] is None
-    with sqlite3.connect(data / "procureflow.sqlite3") as conn:
-        assert conn.execute("select count(*) from operations").fetchone()[0] == 0
+    # Independently inspect the real application ledger, never create a new DB
+    # accidentally while checking for absence of writes.
+    db_file = data / "procureflow.sqlite3"
+    assert db_file.is_file()
+    with sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True) as conn:
+        assert conn.execute("select count(*) from external_operations").fetchone()[0] == 0
+        assert conn.execute("select count(*) from approvals").fetchone()[0] == 0
 
 
 def test_agui_real_http_official_consumer(live_api):
