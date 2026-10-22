@@ -1,0 +1,57 @@
+name: policy-documents-source-transfer
+on:
+  push:
+    branches: ['build/policy-documents-transfer']
+    paths: ['.github/workflows/policy-documents-transfer.yml']
+permissions:
+  contents: write
+jobs:
+  stage-objects:
+    if: github.repository == 'volcano-code/ProcureFlow' && github.ref == 'refs/heads/build/policy-documents-transfer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 20ecc84b92634fca46a8d6cfc769f8f919d49ff4
+          persist-credentials: false
+      - name: Apply exact reviewed local patch to exact existing baseline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^{tree})" = dd892a7cb33ffb8e6add8aafbfc20c56a4741f3c
+          curl --fail --silent --show-error --proto '=https' --max-time 60 --max-filesize 200000 'https://7a1dbdde-05a7-4e38-bda3-96b84a91c526.sandbox.floot.app/_cdn/static/321859f8-abf0-4dec-81f1-b399721ded46-policy-documents-from-20ecc84.patch' -o "$RUNNER_TEMP/source.patch"
+          echo "460c1201fb76a81476dff869e5a7370190a87531e4a1bea17bdbd499a029cb53  $RUNNER_TEMP/source.patch" | sha256sum --check
+          git apply --index "$RUNNER_TEMP/source.patch"
+          test "$(git write-tree)" = 118e0b860781bd3b6a6c38431d46ac061773457d
+          git diff --cached --stat
+      - name: Store verified Git objects only, no commit or ref update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          const git=(...args)=>execFileSync('git',args,{encoding:'utf8'}).trim();
+          const paths=git('diff','--cached','--name-only','-z').split('\0').filter(Boolean);
+          if(paths.length!==29)throw Error('unexpected path count');
+          const root='https://api.github.com/repos/volcano-code/ProcureFlow/git/';
+          const post=async(path,body)=>{const r=await fetch(root+path,{method:'POST',headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(`Git object write ${path}: ${r.status}`);return r.json();};
+          const entries=[];
+          for(const path of paths){
+            if(!fs.lstatSync(path).isFile())throw Error('not a regular source file');
+            const b=await post('blobs',{content:fs.readFileSync(path).toString('base64'),encoding:'base64'});
+            if(b.sha!==git('hash-object',path))throw Error('blob mismatch');
+            entries.push({path,mode:'100644',type:'blob',sha:b.sha});
+          }
+          const t=await post('trees',{base_tree:'dd892a7cb33ffb8e6add8aafbfc20c56a4741f3c',tree:entries});
+          if(t.sha!=='118e0b860781bd3b6a6c38431d46ac061773457d')throw Error('tree mismatch');
+          const record={base:'20ecc84b92634fca46a8d6cfc769f8f919d49ff4',tree:t.sha,patch_sha256:'460c1201fb76a81476dff869e5a7370190a87531e4a1bea17bdbd499a029cb53',entries,validation:'source integrity only; no test results claimed',refs_changed:false};
+          fs.mkdirSync(process.env.RUNNER_TEMP+'/transfer',{recursive:true});fs.writeFileSync(process.env.RUNNER_TEMP+'/transfer/source-tree.json',JSON.stringify(record,null,2));console.log(JSON.stringify({tree:t.sha,paths:entries.length,refs_changed:false}));
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: policy-documents-source-identity
+          path: ${{ runner.temp }}/transfer
+          if-no-files-found: error
+          retention-days: 14
