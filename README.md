@@ -1,3 +1,5 @@
+> **只读 MCP（本地 stdio）**：新增官方 SDK 协议入口，共享现有工具注册表并绑定一份建议记录；每次读取重新鉴权。见 [接入、权限与验收范围](docs/remediation-readonly-mcp.md)。不提供 MCP HTTP/OAuth，也不代表已完成向量 RAG 或 AG-UI。
+
 > Candidate Worker continuation: [durable queue, cancellation and recovery scope](docs/remediation-candidate-worker.md). New UI uses enqueue; real-model quality is still a separate acceptance gate.
 
 > **Remediation development branch:** this snapshot preserves the newer remote `9f80786` implementation and adds advisory nonstandard quotation candidates. See [batch 2 scope, migration and limits](docs/remediation-batch2-candidates.md). Candidate outputs are not confirmed facts and cannot approve or write ERP. Real-model task quality has not been certified by fixture tests. Earlier reports and application version strings below remain historical.
@@ -24,7 +26,7 @@
 - 只读模型故障处理：有限的发送前连接重试、逐块时限/取消检查、拒绝/空输出与协议分类、未知计量和安全诊断；Next 可停止等待并回读建议记录（见 [阶段十九](docs/stage19-model-failure-handling.md) 与 [发布续记](docs/stage19-publication.md)）。离线故障测试不代表真实模型质量
 - [10 个冻结合成开发案例](docs/stage10-evaluation.md)、确定性与协议评分、独立解释评分流程。fixture 通过不证明真实模型质量，未选择真实提供方/型号/费用预算；不是 60-task benchmark 或 Holdout
 
-本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP/AG-UI、向量 RAG、Celery/Redis 或真实模型质量/费用结论。
+本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP HTTP/OAuth、AG-UI、向量 RAG、Celery/Redis 或真实模型质量/费用结论。
 
 ## 当前备份保护发布验收
 

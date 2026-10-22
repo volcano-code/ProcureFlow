@@ -1,0 +1,3 @@
+# Optional local stdio interoperability layer; official SDK's maintained v1 line.
+# Kept separate so API/ERP workers do not import or run an MCP server.
+mcp==1.30.0

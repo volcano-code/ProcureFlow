@@ -15,6 +15,7 @@ from .domain import digest
 from .policies import effective_policy
 from .errors import DomainError
 from .service import require
+from .read_tools import invoke_snapshot
 
 LEASE_SECONDS = 90
 # Only fixed application codes can become a durable failure receipt.
@@ -172,13 +173,7 @@ class AdviceService:
         def invoke(name, arguments):
             with self.procurement.transaction(principal):
                 pass
-            if name == "get_comparison":
-                return {"request": snapshot["request"], "quotes": snapshot["quotes"]}
-            if name == "search_policy":
-                return snapshot["policy"]
-            if name == "get_evidence" and arguments.get("document_id") in documents:
-                return documents[arguments["document_id"]]
-            raise DomainError("TOOL_SCOPE_DENIED", "Document is outside this advice run", 403)
+            return invoke_snapshot(snapshot, name, arguments)
 
         def observe(event):
             # Adapter emits only bounded metadata; no messages/reasoning/tool text.
