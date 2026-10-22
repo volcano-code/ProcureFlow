@@ -25,7 +25,7 @@ from mcp.client.stdio import stdio_client
 from procureflow.read_tools import TOOLS
 
 @pytest.fixture
-def pilot_api(tmp_path,monkeypatch):
+def pilot_api(tmp_path,monkeypatch,request):
     for key in list(os.environ):
         if key.startswith(("PF_","ERP_","LLM_","LANGSMITH_","LANGCHAIN_")):
             monkeypatch.delenv(key,raising=False)
@@ -55,6 +55,10 @@ def pilot_api(tmp_path,monkeypatch):
     thread=threading.Thread(target=server.run,kwargs={"sockets":[sock]},daemon=True);thread.start()
     url=f"http://127.0.0.1:{port}"
     client=httpx.Client(base_url=url,trust_env=False,timeout=15)
+    def cleanup():
+        client.close();server.should_exit=True;thread.join(timeout=5);sock.close()
+        assert not thread.is_alive()
+    request.addfinalizer(cleanup)
     for _ in range(200):
         if server.started:break
         time.sleep(.02)
@@ -74,6 +78,11 @@ def pilot_api(tmp_path,monkeypatch):
     r=client.post(f"/api/v1/requests/{request['id']}/documents",headers=headers,files={"file":("quote.txt",raw)})
     assert r.status_code==201,r.text
     quote=r.json()
+    # Import increments the business version: read current state, do not weaken
+    # the production optimistic concurrency check to accommodate the fixture.
+    r=client.get(f"/api/v1/requests/{request['id']}",headers=headers)
+    assert r.status_code==200
+    request=r.json()
     r=client.post(f"/api/v1/requests/{request['id']}/advice-runs",headers=headers,
         json={"expected_version":request["version"],"idempotency_key":"mcp-bound-test-01"})
     assert r.status_code==201,r.text
@@ -82,12 +91,8 @@ def pilot_api(tmp_path,monkeypatch):
         with db.transaction() as session:
             return {name:session.execute(text(f'SELECT COUNT(*) FROM "{name}"')).scalar()
                     for name in db.engine.dialect.get_table_names(session.connection())}
-    try:
-        yield dict(url=url,client=client,headers=headers,buyer=buyer,auditor=auditor,other=other,
-            request=request,quote=quote,receipt=receipt,counts=counts,identities=identities,tmp=tmp_path)
-    finally:
-        client.close();server.should_exit=True;thread.join(timeout=5);sock.close()
-        assert not thread.is_alive()
+    yield dict(url=url,client=client,headers=headers,buyer=buyer,auditor=auditor,other=other,
+        request=request,quote=quote,receipt=receipt,counts=counts,identities=identities,tmp=tmp_path)
 
 @asynccontextmanager
 async def session_for(api,token=None):
