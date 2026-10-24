@@ -153,6 +153,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
         return response
 
+    from .policy_library_api import create_library_api
+    from .policy_embeddings import configured_encoder
+    app.mount("/api/v1/policy-library", create_library_api(service, identity, configured_encoder()))
+
     @app.get("/health")
     def health():
         return {"status": "ok", "version": __version__, "mode": settings.mode, "erp": erp.mode,

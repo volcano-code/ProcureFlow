@@ -31,7 +31,7 @@ def test_candidate_dispatch_upgrade_and_active_downgrade_guard(tmp_path,status):
     result=migrate('downgrade','f192c4ad8601',success=False)
     assert b'CANDIDATE_DISPATCH_ACTIVE_DOWNGRADE_REFUSED' in result.stderr
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()==('a40c72de1902',)
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()==('b719aa310001',)
         db.execute("UPDATE quote_candidate_runs SET status='CANCELLED'")
     migrate('downgrade','f192c4ad8601')
     with sqlite3.connect(path) as db:
