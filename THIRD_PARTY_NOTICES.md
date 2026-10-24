@@ -24,3 +24,11 @@ license metadata when distributing built images. New transitive snapshot entries
 include cffi 2.1.1 (MIT-0) and pycparser 3.1 (BSD-3-Clause). Sources:
 https://github.com/latchset/jwcrypto and https://github.com/pyca/cryptography.
 This is dependency attribution, not an independent security or license audit.
+
+## Optional local reference embeddings
+
+BAAI/bge-small-zh-v1.5 (MIT), pinned model revision
+7999e1d3359715c523056ef9478215996d62a620. Weights are separately provisioned, not bundled.
+Model card: https://huggingface.co/BAAI/bge-small-zh-v1.5
+SentenceTransformers and Transformers are Apache-2.0; PyTorch uses its BSD-style license.
+Installed package/model license files remain authoritative. No third-party API credential is included.

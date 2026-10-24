@@ -1,3 +1,8 @@
+> Development continuation: versioned reference library, native search/source UI and
+> optional offline BGE hybrid retrieval are implemented. See
+> [reference library scope, migration and verification](docs/remediation-policy-library.md).
+> This does not change executable procurement rules or claim full RAG/AG-UI completion.
+
 > **只读 MCP（本地 stdio）**：新增官方 SDK 协议入口，共享现有工具注册表并绑定一份建议记录；每次读取重新鉴权。见 [接入、权限与验收范围](docs/remediation-readonly-mcp.md)。不提供 MCP HTTP/OAuth，也不代表已完成向量 RAG 或 AG-UI。
 
 > Candidate Worker continuation: [durable queue, cancellation and recovery scope](docs/remediation-candidate-worker.md). New UI uses enqueue; real-model quality is still a separate acceptance gate.

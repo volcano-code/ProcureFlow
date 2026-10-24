@@ -1,4 +1,5 @@
 "use client";
+import PolicyLibrary from "./policy-library";
 import type {Credential} from "@/lib/session.mjs";
 import {useCallback,useEffect,useRef,useState,type FormEvent} from "react";
 import {api,type PolicyVersion} from "@/lib/api";
@@ -136,5 +137,6 @@ export default function PolicyPanel({token,approver,workflowBusy,refreshEvent,on
         <div className="form-actions"><button type="button" className="secondary" disabled={working} onClick={closeForm}>取消</button><button className="primary" data-testid="publish-policy" disabled={working||conflict||loading||readFailed||workflowBusy}>{working?"发布中…":scheduled?"发布未来生效版本":"发布并立即生效"}</button></div>
       </form>
     </dialog>}
+    <PolicyLibrary token={token} approver={approver}/>
   </section>;
 }

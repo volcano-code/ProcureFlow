@@ -299,11 +299,48 @@ class EvaluationRow(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+
+class PolicyDocumentRow(Base):
+    __tablename__ = "policy_documents"
+    __table_args__ = (UniqueConstraint("tenant_id", "document_key", name="uq_policy_document_key"),
+                     UniqueConstraint("id", "tenant_id", name="uq_policy_document_tenant"))
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    document_key: Mapped[str] = mapped_column(String(64))
+    latest_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PolicyDocumentRevisionRow(Base):
+    __tablename__ = "policy_document_revisions"
+    __table_args__ = (UniqueConstraint("document_id", "version", name="uq_policy_doc_revision"),
+        ForeignKeyConstraint(["document_id", "tenant_id"], ["policy_documents.id", "policy_documents.tenant_id"]),)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), index=True)
+    document_id: Mapped[str] = mapped_column(String(40), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(160))
+    source_label: Mapped[str] = mapped_column(String(200))
+    scope: Mapped[str] = mapped_column(String(40))
+    content: Mapped[str] = mapped_column(Text)
+    source_hash: Mapped[str] = mapped_column(String(64))
+    fragments: Mapped[list] = mapped_column(JSON)
+    effective_at: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    withdrawn: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[str] = mapped_column(String(40))
+    created_by: Mapped[str] = mapped_column(String(80))
+    reason: Mapped[str] = mapped_column(String(500))
+    embedding_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    embedding_dimension: Mapped[int] = mapped_column(Integer)
+    embeddings: Mapped[list] = mapped_column(JSON)
+    revision_hash: Mapped[str] = mapped_column(String(64))
+
+
 def _immutable_receipt(*_):
     raise ValueError("IMMUTABLE_HISTORY")
 
 
-for _model in (PolicyVersionRow, EvaluationRow):
+for _model in (PolicyVersionRow, EvaluationRow, PolicyDocumentRevisionRow):
     event.listen(_model, "before_update", _immutable_receipt)
     event.listen(_model, "before_delete", _immutable_receipt)
 

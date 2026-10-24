@@ -1,0 +1,5 @@
+# Optional local learned retrieval. Install torch CPU separately as documented.
+sentence-transformers==5.1.2
+transformers==4.57.3
+huggingface-hub==0.36.0
+safetensors==0.6.2
