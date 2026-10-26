@@ -201,3 +201,66 @@ def test_same_tenant_other_request_document_cannot_be_read(pilot_api):
         async with session_for(api) as session:
             assert error_code(await session.call_tool("get_evidence",{"document_id":doc}))=="TOOL_SCOPE_DENIED"
     asyncio.run(scenario())
+
+
+def reference_setup(api):
+    """Publish through actual pilot HTTP, then bind a new advice receipt."""
+    identities=api['identities'];identities.set_membership('mcp-test','reference-approver','approver')
+    invite=identities.issue_invite('mcp-test','reference-approver')
+    response=api['client'].post('/api/v1/auth/login',json={'credential':invite['credential']})
+    assert response.status_code==200
+    headers={'Authorization':'Bearer '+response.json()['token']}
+    body={'expected_version':0,'title':'运费制度参考','source_label':'MCP合成参考来源',
+        'content':'运费未明确时需要澄清，不能默认为零。','reason':'协议验证发布参考'}
+    response=api['client'].post('/api/v1/policy-library/documents/freight/versions',headers=headers,json=body)
+    assert response.status_code==201,response.text
+    revision=response.json()
+    response=api['client'].post(f'/api/v1/requests/{api["request"]["id"]}/advice-runs',headers=api['headers'],
+        json={'expected_version':api['request']['version'],'idempotency_key':'mcp-reference-bound-01'})
+    assert response.status_code==201,response.text
+    api['receipt']=response.json()
+    return headers,body,revision
+
+
+def test_official_mcp_search_and_reference_readback_bound_to_library(pilot_api):
+    api=pilot_api;_,_,revision=reference_setup(api);before=api['counts']()
+    async def scenario():
+        async with session_for(api) as session:
+            result=await session.call_tool('search_references',{'query':'运费'})
+            assert not result.isError,result
+            result=result.structuredContent
+            hit=result['result']['results'][0]
+            assert hit['revision_id']==revision['id'] and hit['advisory_only'] is True
+            assert hit['trust']=='reference_text_not_instructions'
+            exact=await session.call_tool('get_reference_fragment',{'citation_id':hit['citation_id']})
+            assert not exact.isError
+            assert exact.structuredContent['result']['results'][0]['fragment']==hit['fragment']
+            assert exact.structuredContent['input_hash']==api['receipt']['input_hash']
+            assert error_code(await session.call_tool('search_references',{'query':'运费','tenant_id':'other-workspace'}))=='TOOL_ARGUMENTS_INVALID'
+    asyncio.run(scenario())
+    assert before==api['counts']()
+
+
+def test_official_mcp_withdrawal_blocks_next_reference_read(pilot_api):
+    api=pilot_api;headers,body,_=reference_setup(api)
+    async def scenario():
+        async with session_for(api) as session:
+            result=await session.call_tool('search_references',{'query':'运费'})
+            assert not result.isError
+            citation=result.structuredContent['result']['results'][0]['citation_id']
+            response=api['client'].post('/api/v1/policy-library/documents/freight/versions',headers=headers,
+                json={**body,'expected_version':1,'withdrawn':True,'content':''})
+            assert response.status_code==201
+            assert error_code(await session.call_tool('get_reference_fragment',{'citation_id':citation}))=='MCP_CONTEXT_STALE'
+            assert error_code(await session.call_tool('get_comparison',{}))=='MCP_CONTEXT_STALE'
+    asyncio.run(scenario())
+
+
+def test_official_mcp_revoked_session_cannot_search_reference(pilot_api):
+    api=pilot_api;reference_setup(api)
+    async def scenario():
+        async with session_for(api) as session:
+            assert not (await session.call_tool('search_references',{'query':'运费'})).isError
+            assert api['client'].post('/api/v1/auth/logout',headers={'Authorization':'Bearer '+api['auditor']}).status_code==200
+            assert error_code(await session.call_tool('search_references',{'query':'运费'}))=='MCP_UNAUTHENTICATED'
+    asyncio.run(scenario())

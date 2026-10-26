@@ -81,7 +81,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             settings.erp_url, settings.erp_api_key, settings.erp_api_secret, settings.erp_company, settings.erp_allow_draft_writes,
             tax_account=settings.erp_tax_account, freight_account=settings.erp_freight_account)
     service = ProcurementService(db, settings, erp)
-    advice_service = AdviceService(service)
+    from .policy_embeddings import configured_encoder
+    from .policy_documents import PolicyDocumentService
+    reference_library = PolicyDocumentService(service, configured_encoder())
+    advice_service = AdviceService(service, reference_library)
     candidate_service = CandidateService(service)
     identities = IdentityService(db, settings)
 
@@ -154,8 +157,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         return response
 
     from .policy_library_api import create_library_api
-    from .policy_embeddings import configured_encoder
-    app.mount("/api/v1/policy-library", create_library_api(service, identity, configured_encoder()))
+    app.mount("/api/v1/policy-library", create_library_api(service, identity,
+        reference_library.encoder, advice_service=advice_service))
 
     @app.get("/health")
     def health():

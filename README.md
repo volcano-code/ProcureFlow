@@ -1,3 +1,5 @@
+> **文档检索接入建议与 MCP**：新增 `search_references`、`get_reference_fragment`，与原有三项只读工具共享注册表。新建议绑定参考库版本、检索方式和编码器；引用元数据由服务端记录，撤回/到期/替换使旧建议失效。见 [接入范围与验证](docs/remediation-reference-advice.md)。尚不代表真实 LLM 效果、AG-UI 或正式发布达标。
+
 > Development continuation: versioned reference library, native search/source UI and
 > optional offline BGE hybrid retrieval are implemented. See
 > [reference library scope, migration and verification](docs/remediation-policy-library.md).

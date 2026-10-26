@@ -38,8 +38,17 @@ export interface RecoveryReconciliation {operation_id:string;ledger_sha256:strin
   external_write_attempted:false;replay_permitted:false;remote_id:string|null;expected:Record<string,unknown>;observed:Record<string,unknown>|null;
   differences:{field:string;expected:unknown;observed:unknown;reason:string}[];matches_snapshot:boolean;draft_verified:boolean}
 export interface Capabilities {candidate_queue_enabled?:boolean;candidate_model_configured?:boolean;candidate_scope?:string;mode:"demo"|"private"|"pilot";erp_mode:"mock"|"erpnext";demo_samples:boolean;erp_draft_writes_enabled:boolean;production_ready:boolean;advice_configured:boolean;advice_runtime:"langgraph-read-only-v1";advice_runtime_version:string}
+export interface AdviceReference {
+  citation_id:string;revision_id:string;document_id:string;version:number;title:string;source_label:string;
+  source_hash:string;revision_hash:string;advisory_only:true;trust:"reference_text_not_instructions";
+  fragment:{ordinal:number;start:number;end:number;line_start:number;line_end:number;text:string;sha256:string};
+}
+export interface AdviceReferenceResponse {
+  advice_run_id:string;input_hash:string;request_id:string;result:{results:AdviceReference[];snapshot_hash:string};
+}
 export interface AdviceOutput {
   summary:string;evidence_ids:string[];runtime:string;llm_used:boolean;advisory_only:true;
+  reference_citations?:AdviceReference[];reference_retrievals?:Record<string,unknown>[];reference_binding?:Record<string,unknown>;
   semantic_factuality_verified:false;evidence_read_verified?:boolean;model_calls:number;provider_attempts?:number;tool_calls:number;
   trace:Record<string,unknown>[];usage:{prompt_tokens:number;completion_tokens:number;total_tokens:number}|null;
   usage_complete:boolean;cost:null;

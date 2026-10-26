@@ -1,0 +1,97 @@
+name: version-bound-reference-advice
+on:
+  pull_request:
+    paths: ['services/api/**', 'apps/web/**', 'integrations/reference_advice/**', 'integrations/mcp/**', 'tests/**', 'scripts/**', '.github/workflows/reference-advice.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bound-reference-advice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable-test-only
+          POSTGRES_DB: procureflow_reference_advice_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procureflow_reference_advice_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install pinned application dependencies and official SDK
+        run: |
+          python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-mcp.txt -r services/api/requirements-postgres.txt
+          python -m pip check
+      - name: Actual service, scripted graph and official stdio protocol
+        run: |
+          python -m pytest -q tests/test_advice_references.py tests/test_mcp_bridge.py integrations/reference_advice/tests integrations/mcp/tests --junitxml=evals/reports/ci/reference-advice/feature.xml
+          python scripts/test.py -q tests/test_advice_runs.py tests/test_advice_grounding.py tests/test_graph_runtime.py tests/test_adapters.py --junitxml=../../evals/reports/ci/reference-advice/regression.xml
+      - name: Actual PostgreSQL bound reads and independent business table audit
+        env:
+          PF_TEST_DATABASE_URL: postgresql+psycopg://postgres:disposable-test-only@127.0.0.1:5432/procureflow_reference_advice_test
+          PF_ALLOW_DATABASE_TESTS: '1'
+          PF_TEST_BACKEND: postgresql
+          PF_REQUIRE_POSTGRES: '1'
+        run: python scripts/test.py -q tests/test_advice_references_pg.py --junitxml=../../evals/reports/ci/reference-advice/postgres.xml
+      - name: Contract checks
+        run: |
+          python scripts/export_contracts.py --check
+          python scripts/export_policy_contract.py --check
+      - run: python -m playwright install --with-deps chromium
+      - run: npm ci --prefix apps/web
+      - name: Native browser reference readback and withdrawal
+        run: python scripts/verify_next.py --reference-advice --output evals/reports/ci/reference-advice/browser
+      - name: Source identity and frozen lock files
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/reference-advice
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/reference-advice/source-identity.txt
+          git diff --exit-code -- apps/web/package-lock.json apps/web/tsconfig.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: version-bound-reference-advice
+          path: evals/reports/ci/reference-advice
+          if-no-files-found: error
+  local-neural-bound-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      DO_NOT_TRACK: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-retrieval.txt
+      - name: Explicit pinned public encoder download
+        run: python scripts/prepare_policy_model.py --allow-public-download --output "$RUNNER_TEMP/bge-policy-model"
+      - name: Real learned retrieval inside a scripted advice graph
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          PF_POLICY_EMBEDDING_DIR: ${{ runner.temp }}/bge-policy-model
+        run: python -m pytest -q integrations/reference_advice/tests/test_model_loop.py --junitxml=evals/reports/ci/reference-advice-neural/graph.xml
+      - name: Source identity
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/reference-advice-neural
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/reference-advice-neural/source-identity.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-neural-reference-advice
+          path: evals/reports/ci/reference-advice-neural
+          if-no-files-found: error

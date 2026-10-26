@@ -32,7 +32,8 @@ def specimen():
 
 def test_exact_registry_and_copy_boundary():
     names = {t["function"]["name"] for t in TOOLS}
-    assert names == {"get_comparison","get_evidence","search_policy"}
+    assert names == {"get_comparison","get_evidence","search_policy",
+        "search_references","get_reference_fragment"}
     source=specimen()["input_snapshot"]
     copy=invoke_snapshot(source,"get_comparison",{})
     copy["quotes"].clear()
