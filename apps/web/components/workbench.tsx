@@ -1,7 +1,7 @@
 "use client";
 import {Fragment, useCallback, useEffect, useRef, useState, type FormEvent} from "react";
 import {API, api, loadDemo, watchAudit, type Capabilities, type ProcurementRequest,
-  type Quote, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
+  type Quote, type EvidenceRef, type AuditEvent, type Operation, type AdviceRun, type AdviceReferenceResponse, type DocumentEvidence, type PolicyVersion} from "@/lib/api";
 import SessionBoundary,{type AuthenticatedProps} from "@/components/session-boundary";
 import type {Credential} from "@/lib/session.mjs";
 import PolicyPanel from "@/components/policy-panel";
@@ -152,9 +152,30 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
       if (scopeIsActive(scope)) setCitationError(`${error instanceof Error ? error.message : String(error)}。无法核验此来源，请回读状态或检查原始文件。`);
     } finally {if (scopeIsActive(scope)) setCitationBusy(false);}
   };
+  const openReference = async (run:AdviceRun,id:string) => {
+    const scope=context.current,expected=run.output?.reference_citations?.find(hit=>hit.citation_id===id);
+    if (!scope || !scopeIsActive(scope) || !expected || citationBusy || !isCurrent(run)) return;
+    const ticket=beginEvidence();setCitationBusy(true);setCitationError("");
+    try {
+      const result=await waitForAdvice(signal=>api<AdviceReferenceResponse>(
+        `/policy-library/advice-runs/${run.id}/fragment?citation_id=${encodeURIComponent(id)}`,token,"GET",undefined,signal),
+        {signal:scope.controller.signal});
+      const actual=result.result.results[0];
+      if (result.advice_run_id!==run.id || result.input_hash!==run.input_hash || result.request_id!==request.id ||
+          result.result.results.length!==1 || !actual || actual.citation_id!==id ||
+          actual.source_hash!==expected.source_hash || actual.revision_hash!==expected.revision_hash ||
+          JSON.stringify(actual.fragment)!==JSON.stringify(expected.fragment))
+        throw new Error("ADVICE_REFERENCE_INVALID：制度引用与运行时保存的版本不一致");
+      if (scopeIsActive(scope)) onEvidence({kind:"policy_reference",fragment_id:id,text:actual.fragment.text,
+        line:actual.fragment.line_start,document_sha256:actual.source_hash,
+        reason:`${actual.title} · v${actual.version} · ${actual.source_label}。参考资料，不是执行权限。`},ticket);
+    } catch (error) {
+      if (scopeIsActive(scope)) {setCitationError(error instanceof Error?error.message:String(error));void reload(scope);}
+    } finally {if (scopeIsActive(scope)) setCitationBusy(false);}
+  };
   return <section className="panel quote-panel" data-testid="advice-panel" aria-labelledby="advice-title" aria-busy={loading||working}>
     <div className="section-head"><div><h2 id="advice-title">Agent 只读建议</h2>
-      <p>绑定需求 v{request.version}、报价集合、生效策略与来源快照。建议不会审批、采购、生成 ERP 草稿或改变确定性规则结果。</p></div>
+      <p>绑定需求 v{request.version}、报价集合、生效策略、参考文档库与来源快照。建议不会审批、采购、生成 ERP 草稿或改变确定性规则结果。</p></div>
       <div className="heading-actions"><button className="secondary" data-testid="refresh-advice" disabled={loading||working}
         onClick={()=>{if (context.current) void reload(context.current);}}>回读建议状态</button>
         {working && <button className="secondary" data-testid="stop-advice-wait"
@@ -197,13 +218,18 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
           <div data-testid="advice-citations" className="source-meta">引用来源：{run.output.evidence_ids.length ? run.output.evidence_ids.map(id=><div key={id}>
             {citationDocument(id) ? <button className="field-link" data-testid="advice-citation" disabled={citationBusy||workflowBusy}
               style={{textAlign:"left",overflowWrap:"anywhere"}} onClick={()=>void openCitation(id)}>核验并查看 {id}</button>
-              : <span>{id}（不在当前报价来源中，无法打开）</span>}</div>) : "未引用来源片段"}</div>
+              : run.output?.reference_citations?.some(hit=>hit.citation_id===id)
+                ? <button className="field-link" data-testid="advice-reference-citation" disabled={citationBusy||workflowBusy||!isCurrent(run)}
+                    onClick={()=>void openReference(run,id)}>核验制度原文 {run.output.reference_citations.find(hit=>hit.citation_id===id)?.title}
+                    {` · v${run.output.reference_citations.find(hit=>hit.citation_id===id)?.version}`}</button>
+                : <span>{id}（不在当前报价或参考文档来源中，无法打开）</span>}</div>) : "未引用来源片段"}</div>
           <p>模型对话 {run.output.model_calls} 轮 · {providerAttemptExplanation(run.output)} · 只读工具调用 {run.output.tool_calls} 次 · {run.output.usage_complete && run.output.usage
             ? `提供方报告 token 总量 ${run.output.usage.total_tokens}` : "token 用量不完整或未知"} · 费用未知</p>
           <details><summary>查看只读运行记录</summary><pre>{JSON.stringify({runtime:run.output.runtime,llm_used:run.output.llm_used,
             model_calls:run.output.model_calls,provider_attempts:run.output.provider_attempts??null,
             advisory_only:run.output.advisory_only,evidence_read_verified:run.output.evidence_read_verified,
             semantic_factuality_verified:run.output.semantic_factuality_verified,
+            reference_retrievals:run.output.reference_retrievals,reference_binding:run.output.reference_binding,
             usage:run.output.usage,usage_complete:run.output.usage_complete,trace:run.output.trace},null,2)}</pre></details>
         </div>}
         <details><summary>查看输入快照与确切版本绑定</summary><dl className="binding-grid">

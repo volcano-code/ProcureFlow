@@ -36,6 +36,12 @@ export async function waitForAdvice(operation, {signal, timeoutMs = ADVICE_READ_
 }
 
 const failureMessages = {
+  ADVICE_REFERENCE_UNBOUND: '旧建议未绑定参考文档版本，请显式新建建议。',
+  ADVICE_REFERENCE_INVALID: '制度引用版本或片段校验未通过，未形成有效建议。',
+  DOCUMENT_SEARCH_STALE: '检索期间文档库发生变化，请核对文档后显式新建建议。',
+  EMBEDDING_INDEX_STALE: '本地语义索引与当前模型不一致，不会静默降级。',
+  POLICY_DOCUMENT_INTEGRITY: '参考文档完整性校验失败，请由维护者检查来源。',
+  ADVICE_INPUT_CHANGED: '建议绑定的输入或参考文档已变化，请重新核对。',
   MODEL_TIMEOUT: '模型响应超时，提供方可能仍在处理，费用未知。',
   MODEL_CANCELLED: '服务端已停止等待；无法据此确认提供方已停止处理，费用未知。',
   MODEL_REFUSED: '模型拒绝提供本次建议，请人工核对请求与来源。',

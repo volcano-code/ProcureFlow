@@ -15,7 +15,9 @@ from .domain import digest
 from .policies import effective_policy
 from .errors import DomainError
 from .service import require
-from .read_tools import invoke_snapshot
+from .read_tools import invoke_snapshot, validate_tool_arguments, REFERENCE_TOOLS
+from .advice_references import capture_binding, validate_binding, validate_result, fragment_result
+from .policy_documents import PolicyDocumentService, SearchDocuments
 
 LEASE_SECONDS = 90
 # Only fixed application codes can become a durable failure receipt.
@@ -25,6 +27,9 @@ SAFE_ERRORS = frozenset({
     "MODEL_OUTPUT_INCOMPLETE", "MODEL_USAGE_REQUIRED", "MODEL_RESPONSE_LIMIT", "MODEL_SCHEMA_INVALID",
     "MODEL_GROUNDING_REQUIRED", "BUDGET_EXCEEDED", "EVIDENCE_NOT_FOUND", "EVIDENCE_REQUIRED",
     "EVIDENCE_NOT_READ", "TOOL_POLICY_DENIED", "TOOL_ARGUMENTS_INVALID", "TOOL_SCOPE_DENIED",
+    "ADVICE_REFERENCE_UNBOUND", "ADVICE_REFERENCE_INVALID", "ADVICE_INPUT_CHANGED",
+    "POLICY_DOCUMENT_INTEGRITY", "DOCUMENT_SEARCH_STALE", "EMBEDDING_INDEX_STALE",
+    "EMBEDDING_NOT_CONFIGURED", "EMBEDDING_UNAVAILABLE", "EMBEDDING_TEXT_LIMIT", "EMBEDDING_INVALID", "QUERY_EMPTY",
     "TOOL_CALL_FAILED", "TOOL_OUTPUT_LIMIT", "SOURCE_INTEGRITY_FAILED", "ADVICE_CONTEXT_LIMIT",
 })
 
@@ -34,9 +39,10 @@ def expired(row):
 
 
 class AdviceService:
-    def __init__(self, procurement):
+    def __init__(self, procurement, library=None):
         self.procurement = procurement
         self.db = procurement.db
+        self.library = library or PolicyDocumentService(procurement)
 
     def _run(self, session, principal, run_id, lock=False):
         query = select(AdviceRunRow).where(AdviceRunRow.id == run_id,
@@ -65,7 +71,8 @@ class AdviceService:
                 "sha256": document.sha256, "trust": "untrusted_source_content", "fragments": document.fragments}
         result = {"request": {"id": request.id, "version": request.version, **request.data},
                   "quotes": quotes, "documents": documents, "policy": policy,
-                  "quote_collection_hash": digest(quotes)}
+                  "quote_collection_hash": digest(quotes),
+                  "reference_library": capture_binding(self.library, session, principal)}
         if len(json.dumps(result, ensure_ascii=False)) > 200000:
             raise DomainError("ADVICE_CONTEXT_LIMIT", "Advice source context exceeds its limit", 422)
         return deepcopy(result)
@@ -75,6 +82,8 @@ class AdviceService:
             return False, "LEGACY_INPUT_UNBOUND"
         if digest(row.input_snapshot) != row.input_hash:
             return False, "ADVICE_INPUT_CORRUPTED"
+        if "reference_library" not in row.input_snapshot:
+            return False, "ADVICE_REFERENCE_UNBOUND"
         if request.version != row.request_version:
             return False, "ADVICE_INPUT_CHANGED"
         try:
@@ -90,6 +99,8 @@ class AdviceService:
             current, stale_reason = False, "LEGACY_INPUT_UNBOUND"
         elif digest(row.input_snapshot) != row.input_hash:
             current, stale_reason = False, "ADVICE_INPUT_CORRUPTED"
+        elif "reference_library" not in row.input_snapshot:
+            current, stale_reason = False, "ADVICE_REFERENCE_UNBOUND"
         return {"id": row.id, "request_id": row.request_id, "request_version": row.request_version,
                 "input_hash": row.input_hash, "input_snapshot": row.input_snapshot,
                 "policy_version": (row.input_snapshot or {}).get("policy", {}).get("version"),
@@ -143,6 +154,32 @@ class AdviceService:
             return [self._dto(row, row.input_hash == input_hash,
                     None if row.input_hash == input_hash else reason or "ADVICE_INPUT_CHANGED") for row in rows]
 
+    def reference_tool(self, principal, run_id, name, arguments):
+        """Read-only: bind search to this receipt, never to a model-supplied scope.
+
+        Recheck before and after potentially slow retrieval. Do not hold a
+        database transaction/tenant lock while running a local encoder.
+        """
+        if name not in REFERENCE_TOOLS:
+            raise DomainError("TOOL_POLICY_DENIED", "Reference read tool required", 403)
+        arguments = validate_tool_arguments(name, arguments)
+        before = self.get(principal, run_id)
+        if not before["current"]:
+            raise DomainError(before["stale_reason"] or "ADVICE_INPUT_CHANGED", "Advice inputs are no longer current", 409)
+        binding = validate_binding(before["input_snapshot"].get("reference_library"))
+        if name == "search_references":
+            result = self.library.search(principal, SearchDocuments(**arguments,
+                scope=binding["scope"], method=binding["method"]))
+        else:
+            result = fragment_result(self.library, principal, binding, arguments["citation_id"])
+        validate_result(binding, result, limit=arguments.get("limit", 1))
+        after = self.get(principal, run_id)
+        if not after["current"] or after["input_hash"] != before["input_hash"]:
+            raise DomainError("ADVICE_INPUT_CHANGED", "Advice inputs changed during retrieval", 409)
+        return {"advice_run_id": run_id, "input_hash": before["input_hash"],
+            "request_id": before["request_id"], "arguments_hash": digest(arguments),
+            "tool": name, "advisory_only": True, "result": result}
+
     def process(self, principal, run_id, factory):
         with self.db.activity(write=True):
             return self._process_active(principal, run_id, factory)
@@ -169,11 +206,26 @@ class AdviceService:
             audit(session, principal, request_id, "ADVICE_STARTED", {"run_id": run_id, "advisory_only": True})
 
         documents = snapshot["documents"]
-        evidence_ids = {fragment["id"] for document in documents.values() for fragment in document["fragments"]}
+        quote_evidence_ids = {fragment["id"] for document in documents.values() for fragment in document["fragments"]}
+        evidence_ids = set(quote_evidence_ids)
+        reference_hits, retrievals = {}, []
         def invoke(name, arguments):
             with self.procurement.transaction(principal):
                 pass
+            if name in REFERENCE_TOOLS:
+                envelope = self.reference_tool(principal, run_id, name, arguments)
+                if envelope["input_hash"] != row_input_hash:
+                    raise DomainError("ADVICE_INPUT_CHANGED", "Advice input changed", 409)
+                result = envelope["result"]
+                for hit in result["results"]:
+                    reference_hits[hit["citation_id"]] = deepcopy(hit)
+                    evidence_ids.add(hit["citation_id"])
+                retrievals.append({"tool": name, "arguments_hash": envelope["arguments_hash"],
+                    "snapshot_hash": result["snapshot_hash"], "method": result["method"],
+                    "encoder": result["encoder"], "citation_ids": [h["citation_id"] for h in result["results"]]})
+                return result
             return invoke_snapshot(snapshot, name, arguments)
+        row_input_hash = digest(snapshot)
 
         def observe(event):
             # Adapter emits only bounded metadata; no messages/reasoning/tool text.
@@ -198,6 +250,16 @@ class AdviceService:
             agent.require_evidence_reads = True
             agent.cancelled = cancelled
             output = agent.run(invoke, evidence_ids, observer=observe)
+            # Independently bind returned citation metadata to what was actually
+            # disclosed. Never accept model-supplied source metadata as evidence.
+            cited = set(output.get("evidence_ids", []))
+            if not cited.issubset(evidence_ids):
+                raise DomainError("EVIDENCE_NOT_FOUND", "Unknown advice citation", 502)
+            if quote_evidence_ids and not cited.intersection(quote_evidence_ids):
+                raise DomainError("EVIDENCE_REQUIRED", "Read and cite quotation evidence as well as references", 502)
+            output["reference_citations"] = [deepcopy(reference_hits[x]) for x in sorted(cited) if x in reference_hits]
+            output["reference_retrievals"] = deepcopy(retrievals)
+            output["reference_binding"] = deepcopy(snapshot["reference_library"])
         except DomainError as error:
             error_code = error.code if error.code in SAFE_ERRORS else "ADVICE_FAILED"
         except Exception:

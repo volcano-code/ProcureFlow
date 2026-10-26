@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 import httpx
 from .domain import digest
 from .errors import DomainError
-from .read_tools import invoke_snapshot, validate_tool_arguments
+from .read_tools import invoke_snapshot, validate_tool_arguments, REFERENCE_TOOLS
+from .advice_references import validate_binding, validate_result
 
 MAX_RESPONSE_BYTES = 256_000
 MAX_TOOL_SECONDS = 8.0
@@ -145,6 +146,11 @@ def checked_snapshot(receipt: dict, config: BridgeConfig, previous_hash: str | N
     if (previous_hash and fingerprint != previous_hash) or (
             config.expected_input_hash and fingerprint != config.expected_input_hash):
         raise BridgeError("MCP_CONTEXT_STALE")
+    if "reference_library" in snapshot:
+        try:
+            validate_binding(snapshot["reference_library"])
+        except DomainError as error:
+            raise BridgeError("MCP_CONTEXT_INVALID") from error
     return snapshot, fingerprint
 
 
@@ -169,13 +175,18 @@ class AdviceBridge:
         await self._client.aclose()
 
     async def _read_receipt(self):
-        # All URL components are operator-configured/validated, never model arguments.
-        path = f"api/v1/advice-runs/{self.config.advice_run_id}"
-        async with self._client.stream("GET", path) as response:
+        return await self._read_json(f"api/v1/advice-runs/{self.config.advice_run_id}")
+
+    async def _read_json(self, path, params=None):
+        # Paths are fixed by this module. Model input appears only as validated
+        # query parameters, never as a host, URL or authority field.
+        async with self._client.stream("GET", path, params=params) as response:
             if response.status_code == 401:
                 raise BridgeError("MCP_UNAUTHENTICATED")
             if response.status_code in (403, 404):
                 raise BridgeError("MCP_ACCESS_DENIED")
+            if response.status_code == 409:
+                raise BridgeError("MCP_CONTEXT_STALE")
             if response.status_code != 200:
                 raise BridgeError("MCP_UPSTREAM_UNAVAILABLE")
             if response.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
@@ -201,7 +212,26 @@ class AdviceBridge:
                     self._calls += 1
                     receipt = await self._read_receipt()
                     snapshot, fingerprint = checked_snapshot(receipt, self.config, self._input_hash)
-                    result = invoke_snapshot(snapshot, name, arguments)
+                    if name in REFERENCE_TOOLS:
+                        try:
+                            binding = validate_binding(snapshot.get("reference_library"))
+                            suffix = "search" if name == "search_references" else "fragment"
+                            envelope = await self._read_json(
+                                f"api/v1/policy-library/advice-runs/{self.config.advice_run_id}/{suffix}", arguments)
+                            if (type(envelope) is not dict or envelope.get("advice_run_id") != receipt["id"] or
+                                    envelope.get("request_id") != receipt["request_id"] or
+                                    envelope.get("input_hash") != fingerprint or envelope.get("tool") != name or
+                                    envelope.get("arguments_hash") != digest(arguments) or
+                                    envelope.get("advisory_only") is not True):
+                                raise BridgeError("MCP_CONTEXT_INVALID")
+                            result = validate_result(binding, envelope.get("result"), limit=arguments.get("limit", 1))
+                        except DomainError as error:
+                            raise BridgeError("MCP_CONTEXT_INVALID") from error
+                        # The bound endpoint rechecks too. Re-read after retrieval
+                        # so logout/revision races are denied before MCP disclosure.
+                        checked_snapshot(await self._read_receipt(), self.config, fingerprint)
+                    else:
+                        result = invoke_snapshot(snapshot, name, arguments)
                     payload = {"advisory_only": True, "advice_run_id": self.config.advice_run_id,
                                "request_id": receipt["request_id"], "input_hash": fingerprint,
                                "tool": name, "result": result}

@@ -26,7 +26,7 @@ def port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
-def run(output:Path, *, pilot=False, reference_library=False)->int:
+def run(output:Path, *, pilot=False, reference_library=False, reference_advice=False)->int:
     output.mkdir(parents=True,exist_ok=True)
     report={'scope':'Next.js production build + native React browser E2E','status':'blocked','steps':[],
             'fallback_to_static_demo':False,'browser_verified':False,'live_erp':False,'live_model':False,'auth_mode':'pilot' if pilot else 'demo'}
@@ -80,7 +80,7 @@ def run(output:Path, *, pilot=False, reference_library=False)->int:
                 else:raise RuntimeError(name+' readiness timeout')
             junit=Path(tmp)/'pilot-browser.xml' if pilot else output/'next-browser.xml'
             try:
-                command('next-browser',[sys.executable,'-m','pytest',*(['apps/web/e2e/policy_library_e2e.py'] if reference_library else ['apps/web/e2e/pilot_session_e2e.py'] if pilot else ['apps/web/e2e/workbench_e2e.py', 'apps/web/e2e/retention_e2e.py', 'apps/web/e2e/recovery_e2e.py']),'-q',
+                command('next-browser',[sys.executable,'-m','pytest',*(['apps/web/e2e/reference_advice_e2e.py'] if reference_advice else ['apps/web/e2e/policy_library_e2e.py'] if reference_library else ['apps/web/e2e/pilot_session_e2e.py'] if pilot else ['apps/web/e2e/workbench_e2e.py', 'apps/web/e2e/retention_e2e.py', 'apps/web/e2e/recovery_e2e.py']),'-q',
                          '--junitxml='+str(junit)],env)
             finally:
                 if pilot and junit.is_file():
@@ -111,6 +111,7 @@ if __name__=='__main__':
     parser.add_argument('--output',type=Path,default=ROOT/'evals/reports/next-gate')
     parser.add_argument('--pilot',action='store_true',help='Run durable pilot login/lifecycle browser tests against a migrated disposable database')
     parser.add_argument('--reference-library',action='store_true',help='Run the native reference document UI gate')
+    parser.add_argument('--reference-advice',action='store_true',help='Read and invalidate reference citations in native advice UI')
     args=parser.parse_args()
-    if args.pilot and args.reference_library:parser.error('Select only one scoped browser gate')
-    raise SystemExit(run(args.output.resolve(),pilot=args.pilot,reference_library=args.reference_library))
+    if sum([args.pilot,args.reference_library,args.reference_advice])>1:parser.error('Select only one scoped browser gate')
+    raise SystemExit(run(args.output.resolve(),pilot=args.pilot,reference_library=args.reference_library,reference_advice=args.reference_advice))
