@@ -1,0 +1,32 @@
+name: agui-import-source
+on:
+  push:
+    branches: ['develop/remediation-agui-observer']
+    paths: ['.github/workflows/import-agui-source.yml']
+permissions:
+  contents: write
+jobs:
+  import-exact-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - name: Apply validated non-workflow source patch, remove importer
+        env:
+          PATCH_URL: https://7a1dbdde-05a7-4e38-bda3-96b84a91c526.sandbox.floot.app/_cdn/static/2a676455-1507-4bdc-a38b-20c0b70926bb-procureflow-agui-no-workflow.patch
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 7e68e40b601f590970279766277770a03b19b062
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/import-agui-source.yml
+          curl --fail --silent --show-error --proto '=https' --max-time 40 "$PATCH_URL" -o "$RUNNER_TEMP/agui.patch"
+          echo "303913ca0124ed34b30ef7dd0ada20a7dda66e7bd7f87ae0cc16900963a8ae3b  $RUNNER_TEMP/agui.patch" | sha256sum -c -
+          git rm .github/workflows/import-agui-source.yml
+          git apply --check "$RUNNER_TEMP/agui.patch"
+          git apply --index "$RUNNER_TEMP/agui.patch"
+          test "$(git write-tree)" = 4dbe44ab55f23a4530733edd630815cb0c9d8be7
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "feat: read-only AG-UI observation of durable advice"
+          git push origin HEAD:refs/heads/develop/remediation-agui-observer
