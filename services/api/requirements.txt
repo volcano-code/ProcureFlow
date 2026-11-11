@@ -9,6 +9,8 @@ python-multipart==0.0.29
 langgraph==1.2.12
 # Explicitly disable transitive tracing for private graph state.
 langsmith==0.14.2
+# Authenticated, observer-only AG-UI event transport (not a model executor).
+ag-ui-protocol==1.0.0
 
 # Bounded compact JOSE backup protection; no hosted crypto service.
 jwcrypto==1.6.1

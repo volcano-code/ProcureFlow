@@ -8,6 +8,7 @@ import PolicyPanel from "@/components/policy-panel";
 import EvaluationPanel from "@/components/evaluation-panel";
 import TableImportButton from "@/components/table-import-dialog";
 import CandidatePanel from "@/components/candidate-panel";
+import AGUIObserver from "@/components/agui-observer";
 import RecoveryPanel from "@/components/recovery-panel";
 import {RequestEditor,QuoteEditor} from "@/components/procurement-editors";
 import QuoteLineDetails from "@/components/quote-line-details";
@@ -212,6 +213,7 @@ function AdvicePanel({request,token,cap,buyer,workflowBusy,quotes,freshnessEvent
         {buyer && run.status === "PENDING" && isCurrent(run) && <button className="secondary" data-testid="process-advice"
           disabled={workflowBusy||working||loading||!!readError||!policyHash||!cap?.advice_configured} onClick={()=>void start(run)}>
           {processingRunId === run.id ? "重新提交此运行的处理请求" : "执行此已预留运行"}</button>}
+        {runs[0]?.id===run.id && <AGUIObserver run={run} token={token} />}
         {run.output && <div data-testid="advice-output">
           <p style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",marginTop:12}}>{run.output.summary}</p>
           <p>仅供参考 · 语义真实性未验证 · {run.output.evidence_read_verified ? "引用片段存在且已在运行中读取" : "引用只校验来源 ID 存在"}</p>

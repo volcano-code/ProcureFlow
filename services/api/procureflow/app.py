@@ -17,6 +17,7 @@ from starlette.formparsers import MultiPartException
 from . import __version__
 from .agent import LANGGRAPH_VERSION, RUNTIME, ReadOnlyAgent
 from .advice import AdviceService
+from .agui_observer import ObserveInput, verify_watch, observation_events, encode_frames
 from .candidate_agent import CandidateAgent
 from .candidate_contracts import CandidateReserve, CandidateProcess, CandidateImport, CandidateCancel
 from .candidates import CandidateService
@@ -389,6 +390,32 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     @app.post("/api/v1/advice-runs/{run_id}/process")
     def process_advice(run_id: str, principal=Depends(identity)):
         return advice_service.process(principal, run_id, ReadOnlyAgent.from_env)
+
+    @app.post("/api/v1/ag-ui/advice-runs/{run_id}/observe", include_in_schema=False)
+    async def agui_observe(run_id: str, payload: ObserveInput, request: Request,
+                           after: int = Query(default=0, ge=0, le=9223372036854775807),
+                           principal=Depends(identity)):
+        """One authenticated read-only AG-UI observation. Does NOT start a model.
+
+        AG-UI RUN_FINISHED ends this observation, not the stored advice run.
+        Browser polling/reconnect is an explicit read; it never resubmits
+        /process, /approve, /execute or a provider request.
+        """
+        try:
+            import ag_ui  # noqa: F401 - SDK is an optional deployment extra
+        except ImportError as error:
+            raise DomainError("AGUI_NOT_INSTALLED", "Install the optional AG-UI protocol extra", 503) from error
+        run, audit = await asyncio.to_thread(verify_watch, principal, run_id, payload,
+                                             advice_service, service, after)
+        async def generate():
+            # Complete state was authorized before sending headers; after that
+            # only already-sanitized protocol events are placed on the wire.
+            for frame in encode_frames(observation_events(run, audit, after)):
+                if await request.is_disconnected():
+                    return
+                yield frame
+        return StreamingResponse(generate(), media_type="text/event-stream",
+                                 headers={"X-Accel-Buffering": "no"})
 
     @app.get("/api/v1/requests/{request_id}/approvals")
     def approval_history(request_id: str, offset: int = Query(default=0, ge=0),
