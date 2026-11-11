@@ -1,0 +1,2 @@
+-r requirements.txt
+ag-ui-protocol==1.0.0

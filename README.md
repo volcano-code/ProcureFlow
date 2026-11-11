@@ -164,3 +164,8 @@ Worker 网络请求前先持久化 IN_FLIGHT。丢失回执后只读核对；没
 - `docs/stage*.md`：按阶段保留的实现/验收说明，阶段性否定结论以其时间范围为准
 
 版本元数据中的 `0.1.0a2` 是沿用的 Alpha 标识，不代表后续开发分支增量不存在，也不代表已发布新版本。根 [MANIFEST.json](MANIFEST.json) 仅指向固定基线和证据；旧 a2 文件清单已按原字节保存在 [历史清单](docs/history/MANIFEST-0.1.0a2.json)，其中哈希不能用于验证当前源码。未合并、未部署的修改只应称为待验收开发增量。
+
+
+### AG-UI 1.0 read-only advice observation
+
+The current development branch includes a scoped, authenticated AG-UI 1.0 **observer** for existing advice receipts and a small native workbench progress panel. It cannot start/replay a model or execute purchases. `RUN_FINISHED` ends an observation, not the provider run. See [`docs/remediation-agui-observer.md`](docs/remediation-agui-observer.md) for API, limits, reconnect and optional real-SDK tests. This is not a general AG-UI agent execution server or proof of live-model quality.
