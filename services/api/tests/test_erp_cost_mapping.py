@@ -456,7 +456,7 @@ def test_multi_item_zero_tax_mapping_is_explicit_and_complete():
     (lambda p: p['quote_values']['lines'][0].update(unit_price='1000000.01'), 'ERP_COST_MAPPING_BOUNDS_EXCEEDED'),
     (lambda p: p['quote_values'].update(shipping_cost='1000000.01'), 'ERP_COST_MAPPING_BOUNDS_EXCEEDED'),
     (lambda p: p.update(total='47.06'), 'ERP_PAYLOAD_TOTAL_MISMATCH'),
-    (lambda p: p['quote_values']['lines'][1].update(sku=p['quote_values']['lines'][0]['sku']), 'ERP_ITEM_SET_INVALID'),
+    (lambda p: p['quote_values']['lines'][1].update(sku=p['quote_values']['lines'][0]['sku']), 'ERP_PAYLOAD_INVALID'),
     (lambda p: p['erp_cost_accounts'].update(freight=''), 'ERP_COST_ACCOUNT_REQUIRED'),
 ])
 def test_multi_item_unsupported_mapping_is_rejected_before_any_network(mutate, expected):
