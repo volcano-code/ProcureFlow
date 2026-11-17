@@ -33,7 +33,7 @@
 - 只读模型故障处理：有限的发送前连接重试、逐块时限/取消检查、拒绝/空输出与协议分类、未知计量和安全诊断；Next 可停止等待并回读建议记录（见 [阶段十九](docs/stage19-model-failure-handling.md) 与 [发布续记](docs/stage19-publication.md)）。离线故障测试不代表真实模型质量
 - [10 个冻结合成开发案例](docs/stage10-evaluation.md)、确定性与协议评分、独立解释评分流程。fixture 通过不证明真实模型质量，未选择真实提供方/型号/费用预算；不是 60-task benchmark 或 Holdout
 
-本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP HTTP/OAuth、AG-UI、向量 RAG、Celery/Redis 或真实模型质量/费用结论。
+本项目仍无企业 SSO、生产运维认证、通用自主采购、MCP HTTP/OAuth、AG-UI 远程 Agent 执行/写控制、分布式向量数据库/ANN 或 Celery/Redis，也没有真实模型质量/费用结论。当前开发树已有 AG-UI 只读观察器和可选本地 BGE Hybrid 参考检索；它们不代表通用 Agent 执行接口或真实模型质量验收。
 
 ## 当前备份保护发布验收
 
@@ -138,7 +138,7 @@ PostgreSQL、Compose 与真实 ERP 各有独立严格入口及临时数据保护
 
 服务端配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 和可选 `LLM_THINKING_MODE` 后，用户仍须显式新建/执行建议。凭据不进入前端或仓库。真实调用前须单独确定提供方、型号、数据范围和费用授权；日常测试不会读取真实模型配置或调用付费服务。
 
-只读工具为 `get_comparison`、`search_policy`、`get_evidence`；默认上限 4 次模型调用和 8 次工具调用。审批、外部草稿写入、shell 和浏览器不在模型权限内。引用存在且已读取不等于推理成立，`semantic_factuality_verified=false` 保留。提供方 token 仅为报告值，不能替代账单或硬金额上限。
+只读工具共五个：`get_comparison`、`search_policy`、`get_evidence`、`search_references`、`get_reference_fragment`。最后两个参考文档工具严格绑定当前建议的租户、文档版本和语料指纹；它们只能读取咨询性参考资料，不能修改可执行政策。默认上限 4 次模型调用和 8 次工具调用。审批、外部草稿写入、shell 和浏览器不在模型权限内。引用存在且已读取不等于推理成立，`semantic_factuality_verified=false` 保留。提供方 token 仅为报告值，不能替代账单或硬金额上限。
 
 ## 数据、迁移与安全
 
