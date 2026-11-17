@@ -344,14 +344,27 @@ def test_advice_receipt_survives_logout_but_is_not_disclosed(pilot):
     run = advice.reserve(buyer, request["id"], AdviceRunCommand(expected_version=current["version"], idempotency_key="logout-in-provider"))
     class Agent:
         client = SimpleNamespace(close=lambda: None)
-        def run(self, *args, **kwargs):
+        def run(self, invoke_tool, evidence_ids, **kwargs):
+            # Simulate a valid, fully grounded result that completed immediately
+            # before the user's session was revoked.
+            assert evidence_ids
+            citation = sorted(evidence_ids)[0]
             service.identities.logout(buyer)
-            return {"summary": "Synthetic already finished response"}
+            return {
+                "summary": "Synthetic already finished response",
+                "evidence_ids": [citation],
+            }
     assert_denied(lambda: advice.process(buyer, run["id"], Agent))
     with service.db.transaction() as session:
         stored = session.get(AdviceRunRow, run["id"])
         assert stored.status == "COMPLETED"
-        assert stored.output == {"summary": "Synthetic already finished response"}
+        assert stored.output["summary"] == "Synthetic already finished response"
+        assert stored.output["evidence_ids"] == [citation]
+        assert stored.output["reference_citations"] == []
+        assert stored.output["reference_retrievals"] == []
+        assert stored.output["reference_binding"] == stored.input_snapshot["reference_library"]
+    # The completed receipt survives, but the revoked session cannot read or replay it.
+    assert_denied(lambda: advice.get(buyer, run["id"]))
     assert_denied(lambda: advice.process(buyer, run["id"], Agent))
 
 
