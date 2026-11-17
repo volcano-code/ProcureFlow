@@ -9,7 +9,7 @@ permissions:
 jobs:
   native-pilot-real-erpnext:
     # A separate fresh lab. Never mix these two drafts into the strict eight-case gate.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false

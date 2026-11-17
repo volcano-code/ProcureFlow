@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   reference-service:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -59,7 +59,7 @@ jobs:
           path: evals/reports/ci/reference
           if-no-files-found: error
   local-learned-retrieval:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       HF_HUB_DISABLE_TELEMETRY: '1'

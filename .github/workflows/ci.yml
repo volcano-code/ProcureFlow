@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   core-and-static-browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
           path: evals/reports/ci
   native-next-browser:
     # Full native production build and browser checks; no static fallback.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
             apps/web/package-lock.json
 
   postgres-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -114,7 +114,7 @@ jobs:
           name: postgres-validation-records
           path: evals/reports/ci/postgres
   compose-postgres:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

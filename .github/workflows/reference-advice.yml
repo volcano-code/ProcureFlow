@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   bound-reference-advice:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -63,7 +63,7 @@ jobs:
           path: evals/reports/ci/reference-advice
           if-no-files-found: error
   local-neural-bound-loop:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       HF_HUB_DISABLE_TELEMETRY: '1'
