@@ -160,8 +160,14 @@ def test_loopback_provider_protocol_is_not_live_vendor_acceptance(monkeypatch, m
                 assert body["thinking"] == {"type": "enabled"}
                 assert body["max_tokens"] == 1600
                 assert body["response_format"] == {"type": "json_object"}
-                assert {tool["function"]["name"] for tool in body["tools"]} == {
-                    "get_comparison", "search_policy", "get_evidence"}
+                tool_names = {tool["function"]["name"] for tool in body["tools"]}
+                assert len(body["tools"]) == 5
+                assert tool_names == {
+                    "get_comparison", "search_policy", "get_evidence",
+                    "search_references", "get_reference_fragment"}
+                assert all(tool["type"] == "function" for tool in body["tools"])
+                assert all(tool["function"]["parameters"]["additionalProperties"] is False
+                           for tool in body["tools"])
                 assert "SYNTHETIC_LOCAL_KEY" not in json.dumps(body)
                 seen.append(body)
                 if len(seen) > 1:
