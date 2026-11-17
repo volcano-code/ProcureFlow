@@ -471,8 +471,8 @@ def test_multi_item_unsupported_mapping_is_rejected_before_any_network(mutate, e
     adapter = ERPNextClient(
         'https://erp.test', 'test-key', 'test-secret', 'Demo', True,
         transport=httpx.MockTransport(handle),
-        tax_account=TAX_ACCOUNT,
-        freight_account=FREIGHT_ACCOUNT,
+        tax_account=p['erp_cost_accounts']['tax'],
+        freight_account=p['erp_cost_accounts']['freight'],
     )
     try:
         with pytest.raises(ERPRejected, match=expected):
