@@ -7,7 +7,7 @@
 | 客户端伪造身份 | 服务端 token→principal，忽略 X-Role | API 测试 |
 | 跨工作区取数 | 所有业务查询先校验 tenant/request 归属 | API 返回 404，不泄露资源存在性 |
 | 采购员自行审批 | buyer/approver 分离；创建人与审批人不同 | 自批、角色伪造测试 |
-| 文档 Prompt Injection | 解析只提字段；文档没有 authority；模型仅有 3 个只读工具 | 静态注入及 mock 模型工具越权测试；不是通用免疫证明 |
+| 文档 Prompt Injection | 解析只提字段；文档没有 authority；模型仅有 5 个只读工具（比较、政策、报价证据、版本绑定参考搜索/精确片段读取） | 静态注入及 mock 模型工具越权测试；不是通用免疫证明 |
 | 模型写订单/执行 shell | 模型工具白名单不提供任何此类工具 | 请求未知工具返回 TOOL_POLICY_DENIED |
 | 金额幻觉 | Decimal、字段 Unknown、确定性总价 | 金额边界/未知传播测试 |
 | 人工改价伪装原文 | 新版本 + manual evidence + reason | 历史版本与再次确认测试 |
