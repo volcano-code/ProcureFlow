@@ -404,3 +404,90 @@ def test_erp_header_arithmetic_reproduces_previous_truthy_zero_typeerror():
     assert header_validation(json.loads(erp_numeric_json(old)))
     nonzero={'additional_discount_percentage':'0','discount_amount':'113.00'}
     assert header_validation(json.loads(erp_numeric_json(nonzero)))
+
+
+from procureflow.erp import MULTI_COST_MAPPING_VERSION
+from cost_fixtures import MULTI_ITEM_CASE
+
+
+def multi_item_payload():
+    return {
+        'snapshot_hash': 'b' * 64,
+        'erp_company': 'Demo',
+        'transaction_date': '2026-10-01',
+        'erp_cost_accounts': {'tax': TAX_ACCOUNT, 'freight': FREIGHT_ACCOUNT},
+        'total': '47.05',
+        'quote_values': {
+            'supplier_id': 'Synthetic Supplier',
+            'currency': 'CNY',
+            'shipping_cost': '5.25',
+            'lines': [{
+                key: line[key] for key in
+                ('sku', 'quantity', 'uom', 'unit_price', 'tax_mode', 'tax_rate', 'discount', 'delivery_days')
+            } for line in MULTI_ITEM_CASE['lines']],
+        },
+    }
+
+
+def test_multi_item_zero_tax_mapping_is_explicit_and_complete():
+    p = multi_item_payload()
+    body, proof = cost_mapping(p)
+    assert proof['mapping_version'] == MULTI_COST_MAPPING_VERSION == 'multi-line-zero-tax-costs-v1'
+    assert len(proof['lines']) == 2
+    assert [line['sku'] for line in proof['lines']] == ['PF-SANDBOX-ITEM', 'PF-SANDBOX-ITEM-2']
+    assert proof['goods_total'] == '41.80' and proof['net_total'] == '41.80'
+    assert proof['total_taxes_and_charges'] == '5.25'
+    assert len(body['taxes']) == 1
+    assert body['taxes'][0]['charge_type'] == 'Actual'
+    assert body['taxes'][0]['tax_amount'] == '5.25'
+    assert body['discount_amount'] == '0'
+    assert body['apply_discount_on'] == 'Grand Total'
+
+
+@pytest.mark.parametrize('mutate,expected', [
+    (lambda p: p['quote_values']['lines'][0].update(tax_rate='0.13'), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values']['lines'][1].update(discount='0.01'), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values']['lines'][1].update(tax_mode='excluded'), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values']['lines'][0].update(uom='BOX'), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values']['lines'][0].update(tax_rate=None), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values'].update(currency='USD'), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values'].update(shipping_cost=None), 'ERP_MULTI_COST_MAPPING_UNSUPPORTED'),
+    (lambda p: p['quote_values']['lines'][0].update(quantity='2.5'), 'ERP_COST_MAPPING_BOUNDS_EXCEEDED'),
+    (lambda p: p['quote_values']['lines'][0].update(unit_price='1000000.01'), 'ERP_COST_MAPPING_BOUNDS_EXCEEDED'),
+    (lambda p: p['quote_values'].update(shipping_cost='1000000.01'), 'ERP_COST_MAPPING_BOUNDS_EXCEEDED'),
+    (lambda p: p.update(total='47.06'), 'ERP_PAYLOAD_TOTAL_MISMATCH'),
+    (lambda p: p['quote_values']['lines'][1].update(sku=p['quote_values']['lines'][0]['sku']), 'ERP_ITEM_SET_INVALID'),
+    (lambda p: p['erp_cost_accounts'].update(freight=''), 'ERP_COST_ACCOUNT_REQUIRED'),
+])
+def test_multi_item_unsupported_mapping_is_rejected_before_any_network(mutate, expected):
+    p = multi_item_payload()
+    mutate(p)
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        pytest.fail(f'Unsupported multi-item payload reached ERP before rejection: {request.method} {request.url.path}')
+
+    adapter = ERPNextClient(
+        'https://erp.test', 'test-key', 'test-secret', 'Demo', True,
+        transport=httpx.MockTransport(handle),
+        tax_account=TAX_ACCOUNT,
+        freight_account=FREIGHT_ACCOUNT,
+    )
+    try:
+        with pytest.raises(ERPRejected, match=expected):
+            adapter.create_draft('multi-cost-op', p)
+        assert calls == []
+    finally:
+        adapter.client.close()
+
+
+def test_zero_freight_multi_item_mapping_does_not_require_freight_account():
+    p = multi_item_payload()
+    p['quote_values']['shipping_cost'] = '0.00'
+    p['total'] = '41.80'
+    p['erp_cost_accounts']['freight'] = ''
+    body, proof = cost_mapping(p)
+    assert body['taxes'] == []
+    assert proof['total_taxes_and_charges'] == '0.00'
+    assert proof['goods_total'] == '41.80'
