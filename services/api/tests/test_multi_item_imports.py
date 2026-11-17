@@ -344,7 +344,7 @@ def test_twenty_item_import_to_verified_draft_end_to_end(system):
         sku = f"ITEM-{index:02d}"
         requested.append({"sku": sku, "quantity": "1", "uom": "EA"})
         rows.append({
-            "supplier_id": "SUP-20",
+            "supplier_id": "SUP-A",
             "sku": sku,
             "quantity": "1",
             "uom": "EA",
