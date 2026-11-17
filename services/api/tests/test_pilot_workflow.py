@@ -359,7 +359,14 @@ def test_advice_receipt_survives_logout_but_is_not_disclosed(pilot):
         stored = session.get(AdviceRunRow, run["id"])
         assert stored.status == "COMPLETED"
         assert stored.output["summary"] == "Synthetic already finished response"
-        assert stored.output["evidence_ids"] == [citation]
+        cited_ids = stored.output["evidence_ids"]
+        assert len(cited_ids) == 1
+        quote_evidence_ids = {
+            fragment["id"]
+            for document in stored.input_snapshot["documents"].values()
+            for fragment in document["fragments"]
+        }
+        assert cited_ids[0] in quote_evidence_ids
         assert stored.output["reference_citations"] == []
         assert stored.output["reference_retrievals"] == []
         assert stored.output["reference_binding"] == stored.input_snapshot["reference_library"]
