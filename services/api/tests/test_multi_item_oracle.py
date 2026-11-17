@@ -38,7 +38,7 @@ def test_multi_item_calculator_matches_frozen_independent_oracle(case):
     for index, line in enumerate(result["lines"]):
         assert line.get("total") == expected["line_totals"][index], f"{case['id']}: line {index} total"
         assert line.get("goods") == expected["line_goods"][index], f"{case['id']}: line {index} goods"
-        assert line["discount"] == expected["line_discounts"][index], f"{case['id']}: line {index} discount"
+        assert line.get("discount") == expected["line_discounts"][index], f"{case['id']}: line {index} discount"
         assert line.get("added_tax") == expected["line_added_tax"][index], f"{case['id']}: line {index} added tax"
 
 
