@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import BUYER, request
+from conftest import APPROVER, AUDITOR, BUYER, enqueue, request
 from procureflow.app import create_app
 from procureflow.db import Database, DocumentRow, QuoteRow, QuoteVersionRow, TableImportRow
 from procureflow.erp import MockERP
@@ -332,3 +332,75 @@ def test_multi_row_import_respects_write_and_recovery_fences(system, state):
         assert response.status_code == 503 and response.json()["error"]["code"] == "WRITES_PAUSED"
     assert client.get(f"/api/v1/table-imports/{mapped['id']}", headers=BUYER).json() == before
     assert quotes(client, req["id"]) == [] and erp.count() == 0
+
+
+
+def test_twenty_item_import_to_verified_draft_end_to_end(system):
+    """Exercise the maximum supported basket through approval and MockERP readback."""
+    client, service, erp = system
+    rows = []
+    requested = []
+    for index in range(20):
+        sku = f"ITEM-{index:02d}"
+        requested.append({"sku": sku, "quantity": "1", "uom": "EA"})
+        rows.append({
+            "supplier_id": "SUP-20",
+            "sku": sku,
+            "quantity": "1",
+            "uom": "EA",
+            "unit_price": "10.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "shipping_cost": "7.00",
+            "discount": "0.00",
+            "delivery_days": "7",
+            "currency": "CNY",
+        })
+
+    response = client.post("/api/v1/requests", headers=BUYER, json={
+        "title": "Synthetic twenty-item procurement",
+        "lines": requested,
+        "budget": "300.00",
+        "max_delivery_days": 14,
+        "currency": "CNY",
+    })
+    assert response.status_code == 201, response.text
+    req = response.json()
+
+    draft = upload_table(client, req["id"], csv_source(*rows))
+    mapped = preview(client, draft, rows=list(range(2, 22)))
+    assert len(mapped["values"]["lines"]) == 20
+    quote = confirm_quote(client, confirm_import(client, mapped))
+    assert quote["calculation"]["eligible"] is True
+    assert quote["calculation"]["total"] == "207.00"
+    assert len(quote["values"]["lines"]) == 20
+    assert all(f"lines.{index}.unit_price" in quote["evidence"] for index in range(20))
+    assert len(quote["evidence"]["shipping_cost"]["sources"]) == 20
+
+    analysis = analyze(client, req["id"])
+    proposal = analysis["proposal"]
+    assert proposal is not None and proposal["total"] == "207.00"
+    assert len(proposal["quote_values"]["lines"]) == 20
+    approval = client.post(
+        f"/api/v1/requests/{req['id']}/approval",
+        headers=APPROVER,
+        json={"snapshot_hash": proposal["snapshot_hash"]},
+    )
+    assert approval.status_code == 200, approval.text
+
+    operation = enqueue(client, req, proposal)
+    processed = client.post(
+        f"/api/v1/operations/{operation['id']}/process",
+        headers=BUYER,
+    )
+    assert processed.status_code == 200 and processed.json()["status"] == "COMPLETED", processed.text
+    remote = erp.find(operation["id"])
+    assert len(remote["lines"]) == 20
+    assert erp.count() == 1
+
+    verified = client.post(
+        f"/api/v1/operations/{operation['id']}/verify",
+        headers=AUDITOR,
+    )
+    assert verified.status_code == 200 and verified.json()["status"] == "verified", verified.text
+    assert client.get(f"/api/v1/requests/{req['id']}", headers=BUYER).status_code == 200
