@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "suite_id": "procureflow-multi-item-deterministic-oracle-v1",
+  "description": "Hand-authored expected outputs for deterministic multi-item quote calculation. Expected values are frozen independently of the production calculator.",
+  "currency": "CNY",
+  "cases": [
+    {
+      "id": "mixed-included-excluded-tax-and-freight-once",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "CNY",
+        "shipping_cost": "5.00",
+        "lines": [
+          {
+            "sku": "STAND-01",
+            "quantity": "2",
+            "uom": "EA",
+            "unit_price": "100.00",
+            "tax_mode": "excluded",
+            "tax_rate": "0.10",
+            "discount": "20.00",
+            "delivery_days": 7
+          },
+          {
+            "sku": "CABLE-02",
+            "quantity": "3",
+            "uom": "EA",
+            "unit_price": "10.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 9
+          }
+        ]
+      },
+      "expected": {
+        "comparable": true,
+        "total": "233.00",
+        "goods": "230.00",
+        "discount": "20.00",
+        "added_tax": "18.00",
+        "shipping": "5.00",
+        "missing": [],
+        "errors": [],
+        "line_totals": [
+          "198.00",
+          "30.00"
+        ],
+        "line_goods": [
+          "200.00",
+          "30.00"
+        ],
+        "line_discounts": [
+          "20.00",
+          "0.00"
+        ],
+        "line_added_tax": [
+          "18.00",
+          "0.00"
+        ]
+      }
+    },
+    {
+      "id": "half-up-rounding-on-each-line-before-aggregation",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "CNY",
+        "shipping_cost": "0.00",
+        "lines": [
+          {
+            "sku": "ROUND-A",
+            "quantity": "3",
+            "uom": "EA",
+            "unit_price": "0.05",
+            "tax_mode": "excluded",
+            "tax_rate": "0.10",
+            "discount": "0.00",
+            "delivery_days": 2
+          },
+          {
+            "sku": "ROUND-B",
+            "quantity": "3",
+            "uom": "EA",
+            "unit_price": "0.05",
+            "tax_mode": "excluded",
+            "tax_rate": "0.10",
+            "discount": "0.00",
+            "delivery_days": 2
+          }
+        ]
+      },
+      "expected": {
+        "comparable": true,
+        "total": "0.34",
+        "goods": "0.30",
+        "discount": "0.00",
+        "added_tax": "0.04",
+        "shipping": "0.00",
+        "missing": [],
+        "errors": [],
+        "line_totals": [
+          "0.17",
+          "0.17"
+        ],
+        "line_goods": [
+          "0.15",
+          "0.15"
+        ],
+        "line_discounts": [
+          "0.00",
+          "0.00"
+        ],
+        "line_added_tax": [
+          "0.02",
+          "0.02"
+        ]
+      }
+    },
+    {
+      "id": "inclusive-tax-is-not-added-again",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "CNY",
+        "shipping_cost": "8.00",
+        "lines": [
+          {
+            "sku": "INCLUSIVE",
+            "quantity": "2",
+            "uom": "EA",
+            "unit_price": "100.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 5
+          }
+        ]
+      },
+      "expected": {
+        "comparable": true,
+        "total": "208.00",
+        "goods": "200.00",
+        "discount": "0.00",
+        "added_tax": "0.00",
+        "shipping": "8.00",
+        "missing": [],
+        "errors": [],
+        "line_totals": [
+          "200.00"
+        ],
+        "line_goods": [
+          "200.00"
+        ],
+        "line_discounts": [
+          "0.00"
+        ],
+        "line_added_tax": [
+          "0.00"
+        ]
+      }
+    },
+    {
+      "id": "unknown-freight-blocks-comparison-without-erasing-known-lines",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "CNY",
+        "shipping_cost": null,
+        "lines": [
+          {
+            "sku": "FREIGHT-UNKNOWN",
+            "quantity": "1",
+            "uom": "EA",
+            "unit_price": "10.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 5
+          }
+        ]
+      },
+      "expected": {
+        "comparable": false,
+        "total": null,
+        "goods": "10.00",
+        "discount": "0.00",
+        "added_tax": "0.00",
+        "shipping": null,
+        "missing": [
+          "shipping_cost"
+        ],
+        "errors": [],
+        "line_totals": [
+          "10.00"
+        ],
+        "line_goods": [
+          "10.00"
+        ],
+        "line_discounts": [
+          "0.00"
+        ],
+        "line_added_tax": [
+          "0.00"
+        ]
+      }
+    },
+    {
+      "id": "unknown-line-price-blocks-whole-basket-total",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "CNY",
+        "shipping_cost": "5.00",
+        "lines": [
+          {
+            "sku": "PRICE-UNKNOWN",
+            "quantity": "1",
+            "uom": "EA",
+            "unit_price": null,
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 5
+          },
+          {
+            "sku": "KNOWN",
+            "quantity": "2",
+            "uom": "EA",
+            "unit_price": "4.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 5
+          }
+        ]
+      },
+      "expected": {
+        "comparable": false,
+        "total": null,
+        "goods": null,
+        "discount": null,
+        "added_tax": null,
+        "shipping": "5.00",
+        "missing": [
+          "lines.0.unit_price"
+        ],
+        "errors": [],
+        "line_totals": [
+          null,
+          "8.00"
+        ],
+        "line_goods": [
+          null,
+          "8.00"
+        ],
+        "line_discounts": [
+          null,
+          "0.00"
+        ],
+        "line_added_tax": [
+          null,
+          "0.00"
+        ]
+      }
+    },
+    {
+      "id": "unsupported-currency-is-not-comparable",
+      "quote": {
+        "supplier_id": "SUP-A",
+        "currency": "USD",
+        "shipping_cost": "5.00",
+        "lines": [
+          {
+            "sku": "USD-ITEM",
+            "quantity": "1",
+            "uom": "EA",
+            "unit_price": "10.00",
+            "tax_mode": "included",
+            "tax_rate": "0.13",
+            "discount": "0.00",
+            "delivery_days": 5
+          }
+        ]
+      },
+      "expected": {
+        "comparable": false,
+        "total": null,
+        "goods": null,
+        "discount": null,
+        "added_tax": null,
+        "shipping": "5.00",
+        "missing": [],
+        "errors": [
+          "lines.0.UNSUPPORTED_CURRENCY"
+        ],
+        "line_totals": [
+          null
+        ],
+        "line_goods": [
+          null
+        ],
+        "line_discounts": [
+          null
+        ],
+        "line_added_tax": [
+          null
+        ]
+      }
+    }
+  ]
+}

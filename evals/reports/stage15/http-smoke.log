@@ -1,0 +1,30 @@
+{
+  "status": "passed",
+  "steps": [
+    "real-http-create",
+    "three-source-import",
+    "manual-confirmations",
+    "deterministic-total-24200",
+    "buyer-cannot-approve",
+    "independent-approval",
+    "durable-outbox-reservation",
+    "separate-worker-process",
+    "second-worker-drain-no-repeat",
+    "published-policy-and-tenant-isolation-survive-restart",
+    "immutable-evaluation-approval-advice-inputs-survive-restart",
+    "server-process-restart",
+    "persistent-request-and-operation",
+    "idempotent-replay",
+    "cross-tenant-denied",
+    "exactly-one-mock-draft-in-this-scenario"
+  ],
+  "supplier": "SUP-C",
+  "total_cny": "24200.00",
+  "remote_id": "MOCK-SQ-1D55112267D5",
+  "mock_erp_draft_count": 1,
+  "live_erp": false,
+  "live_llm": false,
+  "browser_test": false,
+  "restart_test": "graceful API process restart and separate worker; not SIGKILL chaos"
+}
+

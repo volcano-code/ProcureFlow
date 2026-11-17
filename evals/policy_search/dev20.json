@@ -1,0 +1,167 @@
+{
+  "scope": "public synthetic retrieval-only development data, not unseen evaluation or legal policy",
+  "documents": [
+    {
+      "key": "budget",
+      "title": "采购预算控制",
+      "content": "采购项目必须在立项预算范围内。超过预算的方案不得送审；需要扩充预算时，先重新提交需求版本，由独立审批人核准。"
+    },
+    {
+      "key": "freight",
+      "title": "配送费用确认",
+      "content": "供应商应明确列出运费和收货地址。物流费用待定时不能按零元计算到货总价，采购员应要求补充书面说明。"
+    },
+    {
+      "key": "competition",
+      "title": "询价与比价",
+      "content": "一般采购至少收集两家不同供应商的有效报价。同一供应商的多份报价不算多家；报价应采用相同数量和规格。"
+    },
+    {
+      "key": "conflict",
+      "title": "利益冲突管理",
+      "content": "采购经办人不得审批自己经办的采购。与供应商存在亲属关系或经济利益的员工必须申报并回避评审。"
+    },
+    {
+      "key": "invoice",
+      "title": "付款凭证核对",
+      "content": "付款前应核对发票、合同与验收记录。未收到合法发票时应暂停付款核对，不得伪造票据。"
+    },
+    {
+      "key": "returns",
+      "title": "验收与退货",
+      "content": "到货物品须检查数量、外观和规格。不合格或损坏货物应登记验收异常，与供应商协商退货或换货。"
+    },
+    {
+      "key": "secrecy",
+      "title": "采购资料保密",
+      "content": "报价、供应商联系方式和内部成本属于工作区资料。未经授权不得复制给其他租户，不得在公开日志中保存账号令牌。"
+    },
+    {
+      "key": "urgent",
+      "title": "紧急采购处理",
+      "content": "紧急需求仍需独立审批。可缩短询价时间，但必须记录紧急原因和风险，不能以紧急为由跳过预算核验。"
+    },
+    {
+      "key": "currency",
+      "title": "结算币种范围",
+      "content": "当前演示业务仅接受人民币 CNY，数量单位为 EA。外币报价需人工处理，系统不得自行使用未经确认的汇率换算。"
+    },
+    {
+      "key": "supplier",
+      "title": "供应商准入",
+      "content": "首次合作应核实营业执照、经营范围和收款账户。证照失效的供应商暂停准入，待补齐有效材料再评估。"
+    },
+    {
+      "key": "changes",
+      "title": "采购需求变更",
+      "content": "规格、数量或预算变更时必须生成新需求版本。旧报价比较和旧审批不适用于已改变的内容，需要重新计算并审批。"
+    },
+    {
+      "key": "archive",
+      "title": "采购档案留存",
+      "content": "采购过程的原始报价、确认记录和审批快照应完整留存。撤回制度仅影响当前检索，不得删除历史证据。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "query": "预算超出怎么办",
+      "relevant_key": "budget"
+    },
+    {
+      "id": "q02",
+      "query": "方案超过立项预算",
+      "relevant_key": "budget"
+    },
+    {
+      "id": "q03",
+      "query": "运费待定如何比较",
+      "relevant_key": "freight"
+    },
+    {
+      "id": "q04",
+      "query": "送货的钱还没谈妥",
+      "relevant_key": "freight"
+    },
+    {
+      "id": "q05",
+      "query": "至少几家供应商报价",
+      "relevant_key": "competition"
+    },
+    {
+      "id": "q06",
+      "query": "同一家多份报价算几家",
+      "relevant_key": "competition"
+    },
+    {
+      "id": "q07",
+      "query": "自己经办能否审批",
+      "relevant_key": "conflict"
+    },
+    {
+      "id": "q08",
+      "query": "卖方是亲戚需要避嫌吗",
+      "relevant_key": "conflict"
+    },
+    {
+      "id": "q09",
+      "query": "未收到合法发票",
+      "relevant_key": "invoice"
+    },
+    {
+      "id": "q10",
+      "query": "付款前核对哪些凭证",
+      "relevant_key": "invoice"
+    },
+    {
+      "id": "q11",
+      "query": "货物损坏如何处理",
+      "relevant_key": "returns"
+    },
+    {
+      "id": "q12",
+      "query": "到货需要检查什么",
+      "relevant_key": "returns"
+    },
+    {
+      "id": "q13",
+      "query": "报价跨租户复制",
+      "relevant_key": "secrecy"
+    },
+    {
+      "id": "q14",
+      "query": "紧急需求能跳过审批吗",
+      "relevant_key": "urgent"
+    },
+    {
+      "id": "q15",
+      "query": "美元报价怎么处理",
+      "relevant_key": "currency"
+    },
+    {
+      "id": "q16",
+      "query": "外币是否自动换算",
+      "relevant_key": "currency"
+    },
+    {
+      "id": "q17",
+      "query": "新供应商需要什么证照",
+      "relevant_key": "supplier"
+    },
+    {
+      "id": "q18",
+      "query": "营业执照失效",
+      "relevant_key": "supplier"
+    },
+    {
+      "id": "q19",
+      "query": "改了数量旧审批有效吗",
+      "relevant_key": "changes"
+    },
+    {
+      "id": "q20",
+      "query": "撤回制度能删除历史吗",
+      "relevant_key": "archive"
+    }
+  ]
+}

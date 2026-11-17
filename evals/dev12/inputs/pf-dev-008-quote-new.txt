@@ -1,0 +1,14 @@
+supplier_id: Office-Aa
+sku: Clip-Aa
+quantity: 10
+uom: EA
+unit_price: 95.00
+tax_mode: included
+tax_rate: unknown
+shipping_cost: 0.00
+discount: 0.00
+delivery_days: 7
+currency: CNY
+quotation_number: REV-42
+revision: 2
+revision_note: 本版明确替代REV-42第1版；旧版价格不再有效。

@@ -1,0 +1,33 @@
+# DISPOSABLE TEST ONLY. Overlay with postgres + web + candidate-worker.
+# Never substitute a real provider address; this fixture has no upstream.
+services:
+  candidate-fixture:
+    image: python:3.13-slim
+    command: ["python", "/opt/fixture/candidate_provider.py", "--fixture"]
+    environment:
+      PF_CANDIDATE_STACK_FIXTURE: ${PF_CANDIDATE_STACK_FIXTURE:?Explicit fixture opt-in required}
+    volumes:
+      - ./scripts/fixtures/candidate_provider.py:/opt/fixture/candidate_provider.py:ro
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19090/health',timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: "no"
+    # No published port. Loopback is reachable only in this namespace.
+  candidate-worker:
+    network_mode: "service:candidate-fixture"
+    depends_on:
+      api:
+        condition: service_healthy
+      candidate-fixture:
+        condition: service_healthy
+    environment:
+      PF_CANDIDATE_STACK_FIXTURE: "1"
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

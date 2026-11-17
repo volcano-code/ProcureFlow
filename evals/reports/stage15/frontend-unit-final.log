@@ -1,0 +1,56 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> procureflow-web@0.1.0-alpha.2 test:unit
+> node --test tests/transport.test.mjs tests/policy.test.mjs tests/table-import.test.mjs tests/session.test.mjs
+
+✔ nullable policy cap preserves the request constraint (0.816513ms)
+✔ stricter cap is selected in either direction without rewriting decimals (0.356198ms)
+✔ budget display comparisons do not lose precision through Number (0.156256ms)
+✔ a changed policy binding can never be described as current (0.130267ms)
+✔ violation explanations retain missing-value and strictest-cap meaning (0.271931ms)
+✔ policy publication carries latest version and decimal strings once; conflict is surfaced (3.364411ms)
+✔ scheduled policy time is preserved explicitly rather than changed to immediate (0.356559ms)
+✔ session secrets never serialize or become component identity keys (2.129376ms)
+✔ logout immediately aborts all child requests and fences ignored abort responses (2.346814ms)
+✔ auth failure anywhere invalidates entire session even with malformed denial body (1.488828ms)
+✔ role authorization failure does not discard a valid session (0.550701ms)
+✔ JSON parsing race cannot resurrect an invalidated session (0.382007ms)
+✔ new login using same static credential is isolated from previous generation (0.67513ms)
+✔ expiry is automatic and exact-boundary requests fail closed (47.044426ms)
+✔ terminal auth_invalid SSE frame invalidates without audit identity or retry (3.17226ms)
+✔ SSE HTTP 401 invalidates globally while 403 only denies that stream (0.593256ms)
+✔ independent session context survives another context invalidation (0.452954ms)
+✔ unauthenticated invitation exchange uses POST body only and omits ambient cookies (0.405622ms)
+✔ cancelling demo import fences follow-on upload mutation and retained callback (0.829322ms)
+✔ late denial from a replaced session cannot invalidate the new identity (0.376488ms)
+✔ caller cancellation fences late data without invalidating an otherwise valid session (0.304801ms)
+✔ a scope rejects repeated clicks synchronously and unlocks only the matching operation (0.840559ms)
+✔ close, Escape, navigation and remount invalidate late async results (0.198189ms)
+✔ expiry is fail-closed, including malformed and exact-boundary dates (0.156786ms)
+✔ Chinese header suggestions preserve physical sheet, row and column coordinates (0.802221ms)
+✔ unmapped freight and tax stay absent, never default to zero or included (0.190057ms)
+✔ mapping rejects wrong sheet, absent row, duplicate and absent columns (0.191108ms)
+✔ selecting formula row never executes or replaces raw formula client-side (0.148604ms)
+✔ archived, imported and unknown preview states remain read-only (0.149956ms)
+✔ preserves decimal strings and authenticates request without mutation retries (5.361987ms)
+✔ HTML error never masquerades as successful JSON (0.618064ms)
+✔ passes FormData without overwriting multipart boundary (0.99995ms)
+✔ passes abort signals to fetch (0.791766ms)
+✔ refuses cross-origin API path injection (0.263558ms)
+✔ UTF-8 and CRLF frames may be split at every byte (1.592114ms)
+✔ multiline JSON event and several frames per packet (0.358141ms)
+✔ unfinished final event is not committed (0.197349ms)
+✔ malformed audit event is rejected (0.400926ms)
+✔ bounded SSE buffering (0.359753ms)
+✔ SSE reconnect uses cursor and de-duplicates replays (14.456612ms)
+✔ SSE denial terminates rather than retrying forever (0.484221ms)
+✔ partial demo failure reports retained request instead of silently recreating it (1.097147ms)
+✔ cancellation stops remaining events in the same SSE chunk (0.99971ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 146.442267

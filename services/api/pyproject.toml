@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["browser: Chromium browser integration tests", "live: external services explicitly configured by the developer"]
+markers = ["postgres: isolated live PostgreSQL integration gates", "browser: Chromium browser integration tests", "live: external services explicitly configured by the developer"]
 
 [tool.ruff]
 line-length = 120

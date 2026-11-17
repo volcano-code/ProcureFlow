@@ -1,0 +1,27 @@
+# Optional; combine with compose.postgres.yaml. Never put model keys in build args.
+services:
+  api:
+    environment:
+      PF_ALLOW_CANDIDATE_QUEUE: "1"
+  candidate-worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+      args:
+        WITH_POSTGRES: "true"
+    command: ["python", "-m", "procureflow.candidate_worker"]
+    env_file:
+      - ${PF_CANDIDATE_WORKER_ENV_FILE:?Set a private Worker env file; never commit it}
+    environment:
+      PF_DATABASE_URL: postgresql+psycopg://procureflow:${PF_PG_PASSWORD:?Run init_postgres_env.py}@db:5432/procureflow
+      PF_DATA_DIR: /data
+      PF_ALLOW_CANDIDATE_MODEL: "1"
+      PF_MODE: demo
+      PF_ERP_MODE: mock
+      ERP_ALLOW_DRAFT_WRITES: "false"
+    volumes:
+      - app-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"

@@ -6,20 +6,49 @@ Run continuously in your own terminal: python -m procureflow.worker
 from __future__ import annotations
 import argparse
 import time
-from sqlalchemy import select
-from .app import app
-from .contracts import Principal
-from .db import OperationRow, OutboxRow
+from sqlalchemy import and_, or_, select
+from .db import OperationRow, OutboxRow, RecoveryHoldRow, now
+from .errors import DomainError
 
 
-def drain_once():
-    service = app.state.service
+def pending_work_query(limit=50):
+    """Do not let 50 actively leased operations starve later ready work.
+
+    This is selection, not a claim. process_operation claims under the existing
+    request-row lock and persists the lease before network I/O.
+    """
+    return (select(OperationRow.id, OperationRow.tenant_id)
+        .join(OutboxRow, OutboxRow.operation_id == OperationRow.id)
+        .where(~select(RecoveryHoldRow.operation_id).where(
+            RecoveryHoldRow.operation_id == OperationRow.id).exists())
+        .where(OutboxRow.status == "PENDING", or_(
+            OperationRow.status.in_(["PENDING", "RECONCILING"]),
+            and_(OperationRow.status == "IN_FLIGHT", or_(
+                OperationRow.lease_until.is_(None), OperationRow.lease_until <= now()))))
+        .order_by(OutboxRow.created_at, OutboxRow.id).limit(limit))
+
+
+def drain_once(service=None):
+    if service is None:
+        from .app import app
+        service = app.state.service
+    try:
+        service.db.assert_writable()
+    except DomainError as error:
+        if error.code == "WRITES_PAUSED":
+            return 0
+        raise
     with service.db.transaction() as session:
-        work = list(session.execute(select(OperationRow.id, OperationRow.tenant_id)
-            .join(OutboxRow, OutboxRow.operation_id == OperationRow.id)
-            .where(OutboxRow.status == "PENDING").limit(50)))
+        work = list(session.execute(pending_work_query()))
     for operation_id, tenant_id in work:
-        result = service.process_operation(Principal(user_id="outbox-worker", tenant_id=tenant_id, role="buyer"), operation_id)
+        try:
+            result = service.process_pending_operation(tenant_id, operation_id)
+        except DomainError as error:
+            if error.code == "WRITES_PAUSED":
+                return 0
+            if error.code == "RECOVERY_OPERATION_HELD":
+                continue
+            raise
         print(f"{operation_id[:12]} {result['status']}", flush=True)
     return len(work)
 

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "kind": "source-baseline-verification",
+  "commit": "a35f78713777016e8d76338391b18e0d558aa850",
+  "tree": "ef4d442c06ba0a8dc14e37fc29ab02f6fcdc8e5f",
+  "verification": "Clean existing local checkout matched both independently supplied commit and tree before cloning an isolated branch. No network fetch or remote mutation performed in this increment.",
+  "upstream": "https://github.com/volcano-code/ProcureFlow/pull/1",
+  "scope": "Source baseline identity only; previous CI evidence does not validate current changes.",
+  "publication_documentation": "docs/stage17-publication.md"
+}

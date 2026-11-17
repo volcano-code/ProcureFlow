@@ -2,7 +2,8 @@
 import os
 from pathlib import Path
 import time
-from procureflow.worker import app, drain_once
+from procureflow.app import app
+from procureflow.worker import drain_once
 from procureflow.erp import MockERP
 s=app.state.settings
 if s.mode!='demo' or s.erp_mode!='mock':

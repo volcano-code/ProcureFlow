@@ -1,0 +1,81 @@
+name: agui-readonly-observation
+on:
+  pull_request:
+    paths:
+      - 'services/api/**'
+      - 'apps/web/**'
+      - 'integrations/agui/**'
+      - 'tests/test_agui_observer.py'
+      - '.github/workflows/agui-observer.yml'
+  push:
+    branches: ['develop/remediation-agui-observer']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  protocol-and-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: agui-ci-disposable
+          POSTGRES_DB: procureflow_agui_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procureflow_agui_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      PF_TEST_DATABASE_URL: postgresql+psycopg://postgres:agui-ci-disposable@127.0.0.1:5432/procureflow_agui_test
+      PF_ALLOW_DATABASE_TESTS: '1'
+      PF_REQUIRE_POSTGRES: '1'
+      PF_MODE: demo
+      PF_ERP_MODE: mock
+      ERP_ALLOW_DRAFT_WRITES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Install pinned SDK and app (no model API key)
+        run: |
+          python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-postgres.txt -r services/api/requirements-agui.txt
+          python -m pip check
+      - name: Pure events and official AG-UI SDK over actual FastAPI
+        env: {PYTHONPATH: services/api}
+        run: |
+          mkdir -p evals/reports/ci/agui
+          python -m pytest -q tests/test_agui_observer.py integrations/agui/tests/test_http_protocol.py --junitxml=evals/reports/ci/agui/http.xml
+      - name: Isolated migrated PostgreSQL test; never SQLite fallback
+        env:
+          PF_TEST_BACKEND: postgresql
+        run: python scripts/test.py -q tests/test_agui_postgres.py --junitxml=../../evals/reports/ci/agui/postgres.xml
+      - name: Exact source identity and dependency versions
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/agui
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/agui/source-identity.txt
+          python -c "import importlib.metadata as m,json;print(json.dumps({p:m.version(p) for p in ['ag-ui-protocol','pydantic','fastapi','langgraph','psycopg']}))" > evals/reports/ci/agui/dependencies.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agui-protocol-evidence
+          path: evals/reports/ci/agui
+          if-no-files-found: error
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Immutable install + AG-UI protocol decoder and existing frontend suite
+        run: |
+          npm ci --prefix apps/web
+          npm run test:unit --prefix apps/web
+          npm run typecheck --prefix apps/web
+          npm run build --prefix apps/web
+          git diff --exit-code -- apps/web/package-lock.json apps/web/package.json apps/web/tsconfig.json

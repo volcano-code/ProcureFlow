@@ -1,0 +1,9 @@
+{
+  "scope": "PostgreSQL migrations, concurrency and workflow; mock ERP only",
+  "status": "blocked",
+  "live_erp": false,
+  "live_model": false,
+  "sqlite_fallback": false,
+  "reason": "POSTGRES_TEST_CONFIGURATION_REQUIRED",
+  "exit_code": 2
+}

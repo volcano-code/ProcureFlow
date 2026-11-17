@@ -21,7 +21,7 @@ ALIASES = {
     "单价": "unit_price", "税价模式": "tax_mode", "税率": "tax_rate", "运费": "shipping_cost",
     "折扣": "discount", "交期天数": "delivery_days", "币种": "currency",
 }
-KNOWN = set(QuoteValues.model_fields)
+KNOWN = set(QuoteValues.model_fields) - {"lines"}
 N = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 

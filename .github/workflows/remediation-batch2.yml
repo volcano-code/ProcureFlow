@@ -1,0 +1,47 @@
+name: remediation-batch2
+on:
+  push:
+    branches: ['develop/remediation-r1-batch2']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tracked-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive Git tracked source only
+        run: |
+          mkdir -p "$RUNNER_TEMP/pf-source"
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/pf-source/source.zip"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/pf-source/source-identity.txt"
+          sha256sum "$RUNNER_TEMP/pf-source/source.zip" > "$RUNNER_TEMP/pf-source/source-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remediation-batch2-source
+          path: ${{ runner.temp }}/pf-source
+          if-no-files-found: error
+          retention-days: 30
+
+  dev12-measurement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - run: python scripts/evaluate_dev.py validate --output evals/reports/ci/dev12/dataset.json
+      - run: python scripts/evaluate_dev.py predict-baseline --output evals/reports/ci/dev12/observations.json
+      - name: Measure task outcomes without pretending all tasks pass
+        run: python scripts/evaluate_dev.py grade --observations evals/reports/ci/dev12/observations.json --output evals/reports/ci/dev12/scores.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remediation-dev12-measurement
+          path: evals/reports/ci/dev12
+          if-no-files-found: error

@@ -1,0 +1,38 @@
+{
+  "advisory_only": true,
+  "budgets": {
+    "max_model_calls": 4,
+    "max_reported_tokens": 8000,
+    "max_tool_calls": 8,
+    "max_wall_seconds": 35
+  },
+  "business_state_unchanged": true,
+  "cost": null,
+  "durable_receipt_verified": true,
+  "evaluation_kind": "offline_protocol_fixture",
+  "evidence_read_verified": true,
+  "external_business_writes": 0,
+  "graph_execution_verified": true,
+  "graph_node_count": 6,
+  "live_provider_protocol_verified": false,
+  "model_calls": 3,
+  "network_attempted": false,
+  "provider_http_requests": 3,
+  "quality_acceptance_verified": false,
+  "reason": null,
+  "replay_prevented": true,
+  "schema_version": 1,
+  "semantic_factuality_verified": false,
+  "status": "passed",
+  "synthetic_input_only": true,
+  "task_success_rate": null,
+  "tool_calls": 3,
+  "unknown_shipping_preserved": true,
+  "usage": {
+    "completion_tokens": 60,
+    "prompt_tokens": 180,
+    "total_tokens": 240
+  },
+  "usage_source": "provider_reported",
+  "worker_wall_limit_seconds": 55
+}

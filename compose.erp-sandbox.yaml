@@ -1,0 +1,81 @@
+# Disposable ERPNext integration lab, NOT a production deployment.
+# Adapted from frappe/frappe_docker pwd.yml (MIT). No user ERP account required.
+x-erp: &erp
+  image: frappe/erpnext:v16.36.0
+  volumes:
+    - erp-sites:/home/frappe/frappe-bench/sites
+    - erp-logs:/home/frappe/frappe-bench/logs
+  environment: &erp-env
+    PF_EPHEMERAL_ERP: '1'
+    PF_EPHEMERAL_NONCE: ${PF_EPHEMERAL_NONCE:?Generate isolated sandbox credentials first}
+services:
+  erp-db:
+    image: mariadb:11.8
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ERP_LAB_DB_PASSWORD:?Generate isolated credentials first}
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --skip-character-set-client-handshake]
+    volumes: [erp-db:/var/lib/mysql]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 5s
+      retries: 30
+  erp-redis:
+    image: redis:7.2-alpine
+  erp-config:
+    <<: *erp
+    depends_on:
+      erp-db: {condition: service_healthy}
+    entrypoint: [bash, -ec]
+    command:
+      - >
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host erp-db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache redis://erp-redis:6379;
+        bench set-config -g redis_queue redis://erp-redis:6379;
+        bench set-config -g redis_socketio redis://erp-redis:6379;
+        bench set-config -gp socketio_port 9000;
+  erp-create:
+    <<: *erp
+    environment:
+      <<: *erp-env
+      ERP_LAB_DB_PASSWORD: ${ERP_LAB_DB_PASSWORD:?}
+      ERP_LAB_ADMIN_PASSWORD: ${ERP_LAB_ADMIN_PASSWORD:?}
+    depends_on:
+      erp-config: {condition: service_completed_successfully}
+      erp-redis: {condition: service_started}
+    entrypoint: [bash, -ec]
+    command:
+      - >
+        test ! -d sites/pf-erp-test.local;
+        bench new-site --mariadb-user-host-login-scope='%' --admin-password="$$ERP_LAB_ADMIN_PASSWORD"
+        --db-root-username=root --db-root-password="$$ERP_LAB_DB_PASSWORD"
+        --install-app erpnext --set-default pf-erp-test.local;
+        bench --site pf-erp-test.local set-config procureflow_test_nonce "$$PF_EPHEMERAL_NONCE";
+        bench --site pf-erp-test.local disable-scheduler;
+  erp-backend:
+    <<: *erp
+    volumes:
+      - erp-sites:/home/frappe/frappe-bench/sites
+      - erp-logs:/home/frappe/frappe-bench/logs
+      - ./integrations/erpnext/sandbox:/opt/pf-sandbox:ro
+    depends_on:
+      erp-create: {condition: service_completed_successfully}
+  erp-frontend:
+    <<: *erp
+    command: [nginx-entrypoint.sh]
+    environment:
+      BACKEND: erp-backend:8000
+      FRAPPE_SITE_NAME_HEADER: pf-erp-test.local
+      SOCKETIO: erp-backend:9000
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: 'off'
+      CLIENT_MAX_BODY_SIZE: 3m
+    ports: ['127.0.0.1:18080:8080']
+    depends_on:
+      erp-backend: {condition: service_started}
+volumes:
+  erp-db:
+  erp-sites:
+  erp-logs:

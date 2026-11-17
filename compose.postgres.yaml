@@ -1,0 +1,62 @@
+# Standalone local PostgreSQL + mock ERP stack. No real ERP/model/Redis dependency.
+# python scripts/init_postgres_env.py
+# docker compose --env-file .env.postgres -f compose.postgres.yaml up --build -d
+x-backend: &backend
+  image: procureflow-api:local-pg
+  build:
+    context: .
+    dockerfile: infra/Dockerfile.api
+    args:
+      WITH_POSTGRES: 'true'
+  environment: &app-environment
+    PF_DATABASE_URL: postgresql+psycopg://procureflow:${PF_PG_PASSWORD:?Generate .env.postgres first}@db:5432/procureflow
+    PF_DATA_DIR: /data
+    PF_MODE: demo
+    PF_ERP_MODE: mock
+    ERP_ALLOW_DRAFT_WRITES: 'false'
+  volumes:
+    - app-data:/data
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: procureflow
+      POSTGRES_PASSWORD: ${PF_PG_PASSWORD:?Generate .env.postgres first}
+      POSTGRES_DB: procureflow
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    # No host port: only the application network can reach this DB.
+  migrate:
+    <<: *backend
+    working_dir: /app/services/api
+    command: ['python', '-m', 'alembic', 'upgrade', 'head']
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+  api:
+    <<: *backend
+    ports:
+      - '127.0.0.1:${PF_API_PORT:-8000}:8000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+  worker:
+    <<: *backend
+    command: ['python', '-m', 'procureflow.worker']
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  app-data:
+  pg-data:

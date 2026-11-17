@@ -1,0 +1,43 @@
+name: candidate-worker-validation
+on:
+  push:
+    branches: ['develop/remediation-candidate-worker']
+  pull_request:
+    paths: ['services/api/**', 'scripts/**', '.github/workflows/candidate-worker.yml']
+permissions:
+  contents: read
+jobs:
+  candidate-process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install -r services/api/requirements-dev.txt
+      - run: mkdir -p evals/reports/ci/candidate-worker
+      - name: Candidate queue identity and migration regressions
+        run: python scripts/test.py -q tests/test_candidate_queue.py tests/test_quote_candidates.py tests/test_candidate_dispatch_migration.py --junitxml=../../evals/reports/ci/candidate-worker/tests.xml
+      - name: Real separate processes and synthetic provider protocol
+        run: python scripts/verify_candidate_worker.py --fixture --output evals/reports/ci/candidate-worker/process.json
+      - name: Require current contracts
+        run: python scripts/export_contracts.py --check
+      - name: Tracked source only, never runtime credentials
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/candidate-source"
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/candidate-source/source.zip"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/candidate-source/identity.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-worker-evidence
+          path: evals/reports/ci/candidate-worker
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-worker-source
+          path: ${{ runner.temp }}/candidate-source
+          if-no-files-found: error

@@ -1,0 +1,28 @@
+{
+  "scope": "Next.js production build + native React browser E2E",
+  "status": "blocked",
+  "steps": [
+    {
+      "name": "pilot-migrate",
+      "exit_code": 0
+    },
+    {
+      "name": "next-typecheck",
+      "exit_code": 0
+    },
+    {
+      "name": "next-build",
+      "exit_code": 0
+    },
+    {
+      "name": "next-browser",
+      "exit_code": 1
+    }
+  ],
+  "fallback_to_static_demo": false,
+  "browser_verified": false,
+  "live_erp": false,
+  "live_model": false,
+  "auth_mode": "pilot",
+  "reason": "CHROMIUM_UNIX_SOCKET_DENIED"
+}

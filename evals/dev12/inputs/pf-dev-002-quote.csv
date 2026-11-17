@@ -1,0 +1,11 @@
+supplier_id,文具-Aa
+sku,Binder-aB
+quantity,3
+uom,EA
+unit_price,19.99
+tax_mode,included
+tax_rate,unknown
+shipping_cost,0.00
+discount,0.00
+delivery_days,7
+currency,CNY

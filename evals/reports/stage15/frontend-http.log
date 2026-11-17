@@ -1,0 +1,13 @@
+✔ native frontend transport: evidence -> independent approval -> idempotent mock draft (709.54754ms)
+✔ native frontend transport: request modification invalidates approved snapshot (632.099091ms)
+✔ native frontend transport: authenticated real SSE can be read and cancelled (588.000359ms)
+✔ native frontend transport: ordinary CSV preview -> explicit map -> unconfirmed quote -> approved draft (150.135064ms)
+✔ native frontend transport: tenant policy publication invalidates bound approval and preserves history (639.583344ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2820.330104

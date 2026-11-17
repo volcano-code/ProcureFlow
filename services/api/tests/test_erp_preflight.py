@@ -15,10 +15,10 @@ def endpoint(*, company='Demo', snapshot_field=True, change_readback=None):
             fields=[{'fieldname':field,'fieldtype':'Data','unique':1}]
             if field==ERPNextClient.hash_field and not snapshot_field: fields=[]
             return httpx.Response(200,json={'data':fields})
-        if '/Company/' in path: return httpx.Response(200,json={'data':{'name':company}})
+        if '/Company/' in path: return httpx.Response(200,json={'data':{'name':company,'default_currency':'CNY'}})
         if path.endswith('/Supplier'):return httpx.Response(200,json={'data':[{'name':'SUP-A','supplier_name':'Synthetic'}]})
         if request.method=='POST':
-            record=json.loads(request.content);record.update(name='SQ-READBACK',grand_total='200.00');stored.update(record)
+            record=json.loads(request.content);record.update(name='SQ-READBACK',grand_total='200.00', total='200.00', net_total='200.00', total_taxes_and_charges='0');record['items'][0].update(amount='200.00', net_amount='200.00', net_rate='100.00');stored.update(record)
             return httpx.Response(200,json={'data':record})
         if path.endswith('/SQ-READBACK'):
             record=dict(stored)
@@ -79,6 +79,7 @@ def test_malformed_readback_is_uncertain_not_ordinary_python_exception(data):
 
 def test_filter_results_do_not_authorize_wrong_operation_key():
     def handle(request):
+        if '/Company/' in request.url.path: return httpx.Response(200,json={'data':{'name':'Demo','default_currency':'CNY'}})
         if request.url.path.endswith('/Supplier Quotation'):return httpx.Response(200,json={'data':[{'name':'SQ'}]})
         p=payload();return httpx.Response(200,json={'data':{'name':'SQ','docstatus':0,'items':[{'qty':'2','rate':'100.00'}],
             'grand_total':'200.00','custom_procureflow_operation_key':'wrong','custom_procureflow_snapshot_hash':p['snapshot_hash']}})

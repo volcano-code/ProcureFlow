@@ -1,0 +1,2 @@
+supplier_id,sku,quantity,uom,unit_price,tax_mode,tax_rate,shipping_cost,discount,delivery_days,currency
+SUP-A,STAND-01,20,EA,1200.00,included,0.13,800.00,0.00,7,CNY

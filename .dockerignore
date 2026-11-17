@@ -7,3 +7,9 @@
 **/.next
 .env
 *.zip
+.env.*
+!.env.example
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

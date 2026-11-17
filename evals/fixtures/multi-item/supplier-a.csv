@@ -1,0 +1,3 @@
+supplier_id,sku,quantity,uom,unit_price,tax_mode,tax_rate,shipping_cost,discount,delivery_days,currency
+SUP-A,STAND-01,2,EA,100.00,excluded,0.10,5.00,20.00,7,CNY
+SUP-A,CABLE-02,3,EA,10.00,included,0.13,5.00,0.00,9,CNY

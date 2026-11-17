@@ -1,0 +1,53 @@
+name: readonly-mcp-validation
+on:
+  pull_request:
+    paths: ['services/api/**', 'integrations/mcp/**', 'tests/test_mcp_bridge.py', 'scripts/start_mcp.py', '.github/workflows/mcp-readonly.yml']
+  push:
+    branches: ['develop/remediation-readonly-mcp']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stdio-protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PF_MODE: demo
+      PF_ERP_MODE: mock
+      ERP_ALLOW_DRAFT_WRITES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Install optional official SDK with existing API dependencies
+        run: |
+          python -m pip install -r services/api/requirements-dev.txt -r services/api/requirements-mcp.txt
+          python -m pip check
+      - name: Official client and real subprocess against pilot HTTP API
+        run: |
+          python -m pytest -q tests/test_mcp_bridge.py integrations/mcp/tests --junitxml=evals/reports/ci/mcp/protocol.xml
+      - name: Existing function-call and durable advice regressions
+        run: |
+          python scripts/test.py -q tests/test_adapters.py tests/test_advice_runs.py tests/test_graph_runtime.py --junitxml=../../evals/reports/ci/mcp/advice.xml
+      - name: Existing API schema has not changed
+        run: python scripts/export_contracts.py --check
+      - name: Exact identity and tracked-only source
+        if: always()
+        run: |
+          mkdir -p evals/reports/ci/mcp
+          git rev-parse HEAD HEAD^{tree} > evals/reports/ci/mcp/source-identity.txt
+          python -c "import importlib.metadata as m,json;print(json.dumps({p:m.version(p) for p in ['mcp','pydantic','httpx','langgraph']}))" > evals/reports/ci/mcp/dependencies.json
+          git archive --format=zip --prefix=procureflow/ HEAD -o "$RUNNER_TEMP/procureflow-mcp-source.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readonly-mcp-evidence
+          path: evals/reports/ci/mcp
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readonly-mcp-source
+          path: ${{ runner.temp }}/procureflow-mcp-source.zip
+          if-no-files-found: error

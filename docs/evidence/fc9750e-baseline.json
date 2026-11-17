@@ -1,0 +1,14 @@
+{
+  "kind": "read-only-baseline-verification",
+  "checked_at": "2026-10-08T16:17:28Z",
+  "repository": "volcano-code/ProcureFlow",
+  "pull_request": "https://github.com/volcano-code/ProcureFlow/pull/1",
+  "head_commit": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
+  "tree": "4a0a151a09afef085df55d2c284d5f291462370f",
+  "branch": "develop/a3-p0-gates",
+  "state": "open",
+  "merged": false,
+  "local_head_before_work": "fc9750eeb5e0bf7417f16ba981a8c3bee891ebdf",
+  "verification": "Read-only GitHub PR fetch and local Git commit/tree match. No remote changes made.",
+  "prior_ci": "Historical only; no current-increment CI result claimed."
+}

@@ -17,8 +17,9 @@ def test_model_null_message_is_controlled_error():
     agent = ReadOnlyAgent('https://model.test','synthetic-secret','test',transport=httpx.MockTransport(
         lambda _: httpx.Response(200,json={'choices':[{'message':None}]})))
     try:
-        with pytest.raises(DomainError, match='malformed'):
+        with pytest.raises(DomainError) as error:
             agent.run(lambda *_:{},set())
+        assert error.value.code == "MODEL_PROTOCOL_INVALID"
     finally:
         agent.client.close()
 
@@ -82,7 +83,9 @@ def test_model_tool_events_are_observable_without_source_text():
     observed=[]
     try: result=agent.run(lambda *_:{'source':'sensitive source not for audit trace'},set(),observer=observed.append)
     finally: agent.client.close()
-    assert [x['type'] for x in observed] == ['model_completed','tool_started','tool_completed','model_completed']
+    assert [x['type'] for x in observed] == ['graph_node', 'model_completed', 'graph_node',
+        'tool_started', 'tool_completed', 'graph_node', 'model_completed', 'graph_node']
+    assert [x['node'] for x in observed if x['type'] == 'graph_node'] == ['model', 'tools', 'model', 'validate']
     assert observed==result['trace']
     assert 'sensitive source' not in json.dumps(observed) and 'synthetic-secret' not in json.dumps(observed)
 

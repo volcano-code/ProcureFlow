@@ -1,4 +1,45 @@
 {
+  "$defs": {
+    "RequestLine": {
+      "additionalProperties": false,
+      "properties": {
+        "sku": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Sku",
+          "type": "string"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "decimal_places": 3,
+          "gt": 0,
+          "le": "1000000",
+          "max_digits": 10,
+          "title": "Quantity"
+        },
+        "uom": {
+          "const": "EA",
+          "default": "EA",
+          "title": "Uom",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sku",
+        "quantity"
+      ],
+      "title": "RequestLine",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "title": {
@@ -8,25 +49,41 @@
       "type": "string"
     },
     "sku": {
-      "maxLength": 80,
-      "minLength": 1,
-      "title": "Sku",
-      "type": "string"
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sku"
     },
     "quantity": {
       "anyOf": [
         {
-          "type": "number"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "decimal_places": 3,
+          "gt": 0,
+          "le": "1000000",
+          "max_digits": 10
         },
         {
-          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-          "type": "string"
+          "type": "null"
         }
       ],
-      "decimal_places": 3,
-      "gt": 0,
-      "le": "1000000",
-      "max_digits": 10,
+      "default": null,
       "title": "Quantity"
     },
     "uom": {
@@ -34,6 +91,23 @@
       "default": "EA",
       "title": "Uom",
       "type": "string"
+    },
+    "lines": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/RequestLine"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lines"
     },
     "budget": {
       "anyOf": [
@@ -67,8 +141,6 @@
   },
   "required": [
     "title",
-    "sku",
-    "quantity",
     "budget"
   ],
   "title": "RequestCreate",

@@ -1,0 +1,13 @@
+import type {RequestLine,ProcurementRequest,QuoteLineValues,QuoteValues,QuoteScalarField,EvidenceRef} from './api';
+export const MAX_LINES:number;
+export const LINE_FIELDS:(keyof QuoteLineValues)[];
+export const HEADER_FIELDS:('supplier_id'|'currency'|'shipping_cost')[];
+export const FIELD_LABELS:Record<QuoteScalarField,string>;
+export function blankQuoteLine():QuoteLineValues;
+export function requestLines(request?:ProcurementRequest|null):RequestLine[];
+export function quoteLines(values:QuoteValues):QuoteLineValues[];
+export function lineEvidence(evidence:Record<string,EvidenceRef>|undefined,index:number,field:keyof QuoteLineValues):EvidenceRef;
+export function requestLineProblems(lines:RequestLine[]):string[];
+export function coverageProblems(required:RequestLine[],offered:QuoteLineValues[]):string[];
+export function requestPayload(form:FormData,lines:RequestLine[],multiItem:boolean):Record<string,unknown>;
+export function quotePayload(form:FormData,multiItem:boolean,lineCount:number):Record<string,unknown>;
